@@ -276,6 +276,36 @@ test('DELETE refuses the original conversation', async () => {
   assert.match(result.json.error, /版本卡片/);
 });
 
+test('POST focus leaves exactly one family member visible', async () => {
+  const { ctx, services } = makeContext();
+  apply(ctx);
+  const registry = ctx.workspaceRegistry;
+  registry.archivedSessionIds.push('B');
+
+  const result = await call(services.handler, 'POST', { action: 'focus', sessionId: 'B' });
+  assert.equal(result.status, 200);
+  assert.equal(result.json.active, 'B');
+  assert.equal(result.json.unarchived, true);
+  assert.deepEqual(result.json.archived, ['A']);
+  assert.deepEqual(registry.archivedSessionIds, ['A']);
+});
+
+test('POST focus keeps a member whose turn is still running', async () => {
+  const { ctx, services } = makeContext();
+  const registry = ctx.workspaceRegistry;
+  registry.archiveSession = async (id) => {
+    const error = new Error('active');
+    error.name = 'WorkspaceActiveSessionError';
+    throw error;
+  };
+  apply(ctx);
+
+  const result = await call(services.handler, 'POST', { action: 'focus', sessionId: 'B' });
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.json.archived, []);
+  assert.deepEqual(result.json.skipped, ['A']);
+});
+
 test('GET ?models=1 lists providers with their models', async () => {
   const { ctx, services } = makeContext();
   apply(ctx);

@@ -356,6 +356,34 @@ function openWhenListed(nav, sessionId) {
   });
 }
 
+/* ------------------------------------------------------- one visible branch -- */
+
+// A model answer can only live in its own session: the log refuses a second
+// answer for a turn that is already closed. To keep the conversation list free
+// of near-identical siblings, every switch hides the other members — but only
+// once navigation has committed, because archiving the session that is still
+// open closes the main view. The first toolbar that mounts inside the target
+// session is that signal.
+let pendingFocus = null;
+
+function switchToVersion(nav, v, currentSessionId) {
+  if (!v || v.deleted || !nav) return;
+  if (v.sessionId === currentSessionId) return;
+  pendingFocus = { target: v.sessionId };
+  openVersionTarget(nav, v);
+}
+
+function useFocusPending(sessionId) {
+  React.useEffect(function () {
+    const job = pendingFocus;
+    if (job === null || job.target !== sessionId) return;
+    pendingFocus = null;
+    mutate({ action: 'focus', sessionId: job.target })
+      .then(function () { store.invalidate(); })
+      .catch(function () {});
+  }, [sessionId]);
+}
+
 /* ------------------------------------------------------------ version math -- */
 
 function ringFor(versions, sessionId, turn) {
@@ -656,11 +684,11 @@ function ErrorChip(props) {
 function VersionRing(props) {
   const ring = props.ring;
   if (!ring) return null;
+  const current = ring.alternatives[ring.index];
   const go = function (delta) {
     const next = ring.alternatives[ring.index + delta];
-    if (next) openVersionTarget(navigation, next);
+    if (next) switchToVersion(navigation, next, current && current.sessionId);
   };
-  const current = ring.alternatives[ring.index];
   return h('span', { className: 'mtt-ring' },
     h('button', {
       type: 'button', className: 'mtt-ring-btn', disabled: ring.index <= 0,
@@ -755,6 +783,7 @@ function UserMessageView(props) {
 
   const prefs = usePrefs();
   const list = useSessionList();
+  useFocusPending(sessionId);
   const summary = sessionId !== undefined ? list.byId[sessionId] : undefined;
   const running = !!(summary && summary.running);
   const toolbar = useToolbar(sessionId);
@@ -802,7 +831,7 @@ function UserMessageView(props) {
       });
       store.invalidate();
       setEditing(false);
-      openWhenListed(navigation, result.sessionId);
+      switchToVersion(navigation, { sessionId: result.sessionId }, sessionId);
     } catch (e) {
       setError(String((e && e.message) || e));
     }
@@ -818,7 +847,7 @@ function UserMessageView(props) {
         action: 'retry', sessionId: sessionId, turn: turn, stopPrevious: prefs.stopPrevious,
       });
       store.invalidate();
-      openWhenListed(navigation, result.sessionId);
+      switchToVersion(navigation, { sessionId: result.sessionId }, sessionId);
     } catch (e) {
       setError(String((e && e.message) || e));
     }
@@ -947,6 +976,7 @@ function AssistantToolbar(props) {
   const messageId = props.messageId;
   const prefs = usePrefs();
   const toolbar = useToolbar(sessionId);
+  useFocusPending(sessionId);
   const state = toolbar && toolbar.state ? toolbar.state : null;
   const messages = state ? state.messages : null;
   const versions = state ? state.versions : null;
@@ -997,7 +1027,7 @@ function AssistantToolbar(props) {
         action: 'retry', sessionId: sessionId, turn: turn, stopPrevious: prefs.stopPrevious,
       });
       store.invalidate();
-      openWhenListed(navigation, result.sessionId);
+      switchToVersion(navigation, { sessionId: result.sessionId }, sessionId);
     } catch (e) {
       setError(String((e && e.message) || e));
     }
@@ -1017,7 +1047,7 @@ function AssistantToolbar(props) {
       });
       store.invalidate();
       setNotice(t('switched', { name: modelLabel(model) }));
-      openWhenListed(navigation, result.sessionId);
+      switchToVersion(navigation, { sessionId: result.sessionId }, sessionId);
     } catch (e) {
       setError(String((e && e.message) || e));
     }
@@ -1162,6 +1192,7 @@ function TranslationTail(props) {
 function VersionsView(props) {
   const sessionId = props.sessionId;
   const toolbar = useToolbar(sessionId);
+  useFocusPending(sessionId);
   const state = toolbar && toolbar.state ? toolbar.state : null;
   const versions = state ? state.versions : null;
   const [busy, setBusy] = React.useState(null);
@@ -1204,7 +1235,9 @@ function VersionsView(props) {
         type: 'button', className: 'mtt-node-card',
         disabled: node.deleted || busy === node.sessionId,
         title: node.text ? clip(node.text, 200) : title,
-        onClick: function () { openVersionTarget(navigation, node); },
+        onClick: function () {
+          switchToVersion(navigation, { sessionId: node.id, deleted: node.deleted, archived: node.archived }, sessionId);
+        },
       },
         h('div', { className: 'mtt-node-head' },
           h('span', { className: 'mtt-node-title' }, title),

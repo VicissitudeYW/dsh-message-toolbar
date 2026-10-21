@@ -19,7 +19,7 @@ Cherry Studio.
 | **Copy** | user & assistant messages | Copies the message text to the clipboard. |
 | **Edit** | user messages | Rewrites the turn in place: the conversation is rewound to just before that turn, a new child session is seeded with the edit, and the answer is regenerated. The original branch is preserved as a version card. |
 | **Regenerate** | user & assistant messages | Re-asks the same question in a new child session (no text change). |
-| **Switch model** | assistant messages | Re-asks the same turn with another provider/model. Every model answer becomes its own sibling session, i.e. a card you can flip through. |
+| **Switch model** | assistant messages | Re-asks the same turn with another provider/model. Every model answer becomes a card you can flip through, and the sidebar keeps showing only the one you are reading. |
 | **Translate** | assistant answers | Translates the message with an auxiliary model call and renders it *bilingual*: the original text stays, the translation sits underneath in a collapsible panel. Cached per session + turn + sequence, so it survives reloads without re-billing. |
 | **Delete** | version cards | Soft-deletes a version: the card is hidden from the ring and the version tree but the session log is untouched and it can be restored. The root conversation can never be deleted. |
 | **Version ring** | `‹ 2/3 ›` chip | Walks the sibling versions of a turn without leaving the conversation. |
@@ -79,8 +79,12 @@ then carries an `ignorable` marker event of type `message-toolbar/version` descr
 and its inverse. That marker is what the version ring, the tree view and delete/restore are built
 from. Consequently:
 
-- branches are real sessions — they appear in the sidebar, can be continued independently, and are
+- branches are real sessions — they can be continued independently and are
   never `origin: 'subagent'` (that would fence them from model selection);
+- only one member of a family is visible at a time: switching archives the others, because
+  DSH's session log cannot hold two answers for one closed turn (see
+  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)). The hidden ones stay one click away in the
+  version ring, and the workspace's archived filter always lists them;
 - deleting a card only flips a flag in the plugin's state file, it never destroys a session;
 - switching between versions is navigation, not mutation, so it is always reversible.
 
@@ -115,7 +119,7 @@ MIT
 | **复制** | 用户 / 助手消息 | 把消息正文复制到剪贴板。 |
 | **编辑** | 用户消息 | 就地改写这一轮：对话回退到该轮之前，用编辑后的文本开启一个新的子会话并重新回答，原分支保留为版本卡片。 |
 | **重新生成** | 用户 / 助手消息 | 不改文本，在新的子会话里重问同一个问题。 |
-| **切换模型** | 助手消息 | 用另一个 provider/模型重问这一轮。每个模型的回答都是独立的兄弟会话，也就是可以来回翻的卡片。 |
+| **切换模型** | 助手消息 | 用另一个 provider/模型重问这一轮。每个模型的回答都是一张可以来回翻的卡片，而侧边栏始终只显示你正在读的那一张。 |
 | **翻译** | 助手回答 | 用一次辅助模型调用翻译该消息，并做**双语排版**：原文保留，译文以可折叠面板放在下面。按 会话+轮次+序号 缓存，刷新页面不会重复计费。 |
 | **删除** | 版本卡片 | 软删除：从版本徽标和版本树里隐藏，但会话日志不动，可随时恢复。根对话永远不可删除。 |
 | **版本左右翻** | `‹ 2/3 ›` 徽标 | 不离开当前对话就能在同轮的不同版本之间切换。 |
@@ -172,8 +176,11 @@ dsh plugin --profile web add file:./dsh-message-toolbar-0.1.0.tgz
 子会话继承父会话到边界为止的事件，再写入一条 `ignorable` 的 `message-toolbar/version` 标记事件，
 记录操作类型及其逆向操作。版本徽标、版本树、删除/恢复都建立在这条标记之上。因此：
 
-- 分支就是真实会话——会出现在侧边栏、可以独立继续，且绝不会被标成 `origin: 'subagent'`
+- 分支就是真实会话——可以独立继续，且绝不会被标成 `origin: 'subagent'`
   （那会让它被模型选择限制在 "agent-busy" 之外）；
+- 同一家族里同一时刻只显示一个会话：切换时把其余成员归档，因为 DSH 的会话日志不允许
+  一个已结束的轮次存在两份回答（见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)）。
+  被收起的版本在版本徽标里一点即到，侧边栏的「已归档」筛选里也始终找得到；
 - 删除卡片只是在插件状态文件里翻一个标志位，从不销毁会话；
 - 在版本之间切换属于导航而不是修改，随时可逆。
 

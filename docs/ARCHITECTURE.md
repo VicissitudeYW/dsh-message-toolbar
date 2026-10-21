@@ -87,6 +87,7 @@ from `llm.listProviders()` + `llm.listModels(provider)`.
 | `delete-version` | `sessionId` | flags the card deleted (root refused, 400) |
 | `restore-version` | `sessionId` | clears the flag |
 | `activate` | `sessionId` | un-archives (if needed) and attaches to the parent workspace |
+| `focus` | `sessionId` | un-archives the target, archives every other family member (one visible conversation) |
 | `models` | — | same catalog as `?models=1` |
 
 Errors: `TypeError` → `400 {error}`, anything else → `409 {error}`.
@@ -124,6 +125,22 @@ Registrations (`slots.inject(name, () => slots.register(descriptor, Component))`
 Data comes from a small SWR store (`bySession`, 8 s TTL, invalidated on `sessions.list`
 changes). Navigating to a version activates it first (un-archive → attach → `openSession`)
 and waits for the session list to contain it (`openWhenListed`).
+
+### Why answers are separate sessions, and how the list stays clean
+
+The session log cannot hold two answers for one turn. `dsh-session`'s invariant admits
+`assistant/message` only while its own `turn`/`step` is open, and `step/start` numbers must
+increase, so a settled turn can never receive a second answer in place. Surface replacements
+(`surfaceOp: { op: 'replace' }`) are model-only by design — they never rewrite the human
+transcript (`dsh-session/lib/types/surface.js`: "the wrong source for a human transcript").
+Branching is therefore the only way to keep an alternative answer with tools attached.
+
+To keep the sidebar from filling with near-identical conversations, every switch calls
+`focus`: the target is un-archived and every other family member is archived, so one
+conversation stays visible while the rest remain one click away in the version ring.
+`focus` runs from the *target's* first mounted toolbar, because archiving the session that
+is still current makes the workspace UI clear the main view. A member with a running turn
+(`WorkspaceActiveSessionError`) is left visible rather than force-stopped.
 
 Translation is bilingual by design: the original message is untouched, the translation is
 appended in the turn tail as a collapsible panel per language, so both texts stay readable
