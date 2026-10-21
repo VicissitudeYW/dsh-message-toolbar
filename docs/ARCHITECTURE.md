@@ -139,7 +139,25 @@ both turn-tail components therefore run it through `turnNumberOf()` before index
 
 Icons inline the official primitives artwork (`@deepseek-ai/dsh-client-ui-primitives`, 16 px grid,
 `strokeWidth: 1` / `ICON_MEDIUM_STROKE`), so the toolbar matches DSH's own action row in size,
-weight and hover behaviour without depending on a client-side module resolution at runtime.
+weight and hover behaviour.
+
+### The model picker is the composer's picker
+
+`ModelMenuHost` does not paint a look-alike: it renders `Menu` from
+`@deepseek-ai/dsh-client-ui-primitives`, the component the composer's model seat builds its
+dropdown from. Rows are one `{ type: 'label' }` heading per provider plus one row per model,
+`selection: 'check'` marks the model this turn currently answers with
+(`answers[sessionId][turn].active`'s provider/model, else the session's configured model from the
+payload's `model` field), `portal: true` lets it escape the action row's clipping, `align: 'end'`
+hangs it off the button, `side` flips on the same space measurement our own popovers use, and the
+branch action stays one click away as a pinned `footer` row. `closeOnPointerLeave` gives the
+"menu disappears when the pointer leaves" behaviour without a listener of our own.
+
+`dsh-client-ui-primitives` is one of the shell's static seed modules (the boot call passes
+`react`, `react-dom`, `@deepseek-ai/dsh-client-store`, `-ui-slots`, `-ui-primitives`,
+`-ui-dockkit`), so it resolves through `require()` without being listed in `dsh.client.inject`.
+The lookup is defensive: if a host ever ships without `Menu`, `ModelMenuHost` falls back to the
+plugin's own `.mtt-pop` markup rather than failing to compose.
 
 Data comes from a small SWR store (`bySession`, 8 s TTL, invalidated on `sessions.list`
 changes). Navigating to a version activates it first (un-archive → attach → `openSession`)

@@ -870,6 +870,105 @@ function LanguageMenu(props) {
     }));
 }
 
+// The composer's model picker is a `Menu` from this package, so reusing it gives
+// the toolbar exactly the dropdown DSH itself shows under the composer instead
+// of a look-alike. `dsh-client-ui-primitives` is a shell seed module, so it
+// resolves through the module loader without being declared in
+// `dsh.client.inject`; if a host ever ships without it we fall back to our own
+// markup rather than failing to compose.
+let primitivesCache;
+function clientPrimitives() {
+  if (primitivesCache !== undefined) return primitivesCache;
+  try {
+    const api = require('@deepseek-ai/dsh-client-ui-primitives');
+    primitivesCache = api && typeof api.Menu === 'function' ? api : null;
+  } catch (e) {
+    primitivesCache = null;
+  }
+  return primitivesCache;
+}
+
+/** Data rows for the native menu: one heading per provider, one row per model. */
+function modelMenuEntries(catalog) {
+  const items = [];
+  const lookup = Object.create(null);
+  const providers = catalog && Array.isArray(catalog.providers) ? catalog.providers : [];
+  for (let i = 0; i < providers.length; i++) {
+    const provider = providers[i];
+    const models = Array.isArray(provider.models) ? provider.models : [];
+    if (models.length === 0) continue;
+    items.push({ type: 'label', id: 'p-' + provider.id, text: provider.name || provider.id });
+    for (let j = 0; j < models.length; j++) {
+      const model = models[j];
+      const id = provider.id + '/' + model.id;
+      lookup[id] = { provider: provider.id, model: model.id, name: model.name || model.id };
+      const label = model.name && model.name !== model.id ? model.name + ' · ' + model.id : (model.name || model.id);
+      items.push({ id: id, label: label });
+    }
+  }
+  return { items: items, lookup: lookup };
+}
+
+const BRANCH_ROW = 'message-toolbar/branch';
+
+/**
+ * The "switch model" action: the native dropdown when the primitives package is
+ * around, our own popover otherwise. Both only collect a choice — the caller
+ * answers the turn in place with it.
+ */
+function ModelMenuHost(props) {
+  const primitives = clientPrimitives();
+  const trigger = h(ActionButton, {
+    title: props.title,
+    active: props.open,
+    disabled: props.disabled,
+    onClick: props.onToggle,
+  }, h(CpuIcon));
+
+  if (!primitives) {
+    return h('span', { className: 'mtt-menu-wrap' + (props.up ? ' mtt-up' : '') },
+      trigger,
+      props.open
+        ? h(ModelMenu, {
+          title: t('switchModelPick'),
+          loading: props.loading,
+          catalog: props.catalog,
+          onPick: props.onPick,
+          branchLabel: props.branchLabel,
+          onBranch: props.onBranch,
+        })
+        : null);
+  }
+
+  const entries = modelMenuEntries(props.catalog);
+  const items = entries.items.length > 0
+    ? entries.items
+    : [{ id: 'message-toolbar/empty', label: props.loading ? t('loading') : t('noModels'), disabled: true }];
+  const footer = props.branchLabel ? [{ id: BRANCH_ROW, label: props.branchLabel }] : undefined;
+  const selectedId = props.selected && props.selected.provider && props.selected.model
+    ? props.selected.provider + '/' + props.selected.model
+    : undefined;
+
+  return h(primitives.Menu, {
+    open: props.open,
+    anchor: trigger,
+    items: items,
+    selectedId: selectedId,
+    selection: 'check',
+    align: 'end',
+    side: props.up ? 'top' : 'bottom',
+    portal: true,
+    closeOnPointerLeave: true,
+    footer: footer,
+    onSelect: function (id) {
+      if (id === BRANCH_ROW) { props.onBranch(); return; }
+      const picked = entries.lookup[id];
+      if (picked) props.onPick(picked);
+    },
+    onClose: props.onClose,
+  });
+}
+
 function ModelMenu(props) {
   const catalog = props.catalog;
   if (props.loading) {
@@ -1372,6 +1471,20 @@ function AssistantToolbar(props) {
   const isVersion = !!(self && self.parentSessionId);
   const turn = message ? message.turn : undefined;
 
+  // The row the picker marks as current: the model the visible answer came
+  // from, or the session's configured model when the logged answer is showing.
+  function currentModel() {
+    const answers = state ? state.answers : null;
+    const slot = answers && typeof turn === 'number' ? answers[turn] : null;
+    const items = slot && Array.isArray(slot.items) ? slot.items : [];
+    const active = slot && slot.active && slot.active !== 'native'
+      ? items.find(function (item) { return item.id === slot.active; })
+      : null;
+    if (active && active.provider && active.model) return { provider: active.provider, model: active.model };
+    const base = state ? state.model : null;
+    return base && base.provider && base.model ? { provider: base.provider, model: base.model } : null;
+  }
+
   const [menu, setMenu] = React.useState(null);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState(null);
@@ -1383,11 +1496,17 @@ function AssistantToolbar(props) {
   const [confirmDelete, setConfirmDelete] = React.useState(false);
   const [popUp, setPopUp] = React.useState(false);
 
-  useDismiss(menu !== null || confirmDelete || answerEdit !== null, function () {
-    setMenu(null);
-    setConfirmDelete(false);
-    setAnswerEdit(null);
-  });
+  // The native dropdown dismisses itself (outside click, Escape, pointer leave),
+  // so this listener must not fight it: it only closes our own popovers.
+  const modelMenuIsNative = clientPrimitives() !== null;
+  useDismiss(
+    (menu !== null && !(modelMenuIsNative && menu === 'model')) || confirmDelete || answerEdit !== null,
+    function () {
+      setMenu(null);
+      setConfirmDelete(false);
+      setAnswerEdit(null);
+    },
+  );
 
   // Every menu in this row records whether it must open upwards, so the last
   // message of a conversation is not covered by the composer.
@@ -1553,18 +1672,20 @@ function AssistantToolbar(props) {
             onSave: saveAnswerEdit,
           }))
         : null),
-    h('span', { className: 'mtt-menu-wrap' + (popUp ? ' mtt-up' : '') },
-      h(ActionButton, { title: t('switchModel'), active: menu === 'model', onClick: openModelMenu }, h(CpuIcon)),
-      menu === 'model'
-        ? h(ModelMenu, {
-          title: t('switchModelPick'),
-          loading: busy,
-          catalog: catalog,
-          onPick: switchModel,
-          branchLabel: t('branchInstead'),
-          onBranch: branchVersion,
-        })
-        : null),
+    h(ModelMenuHost, {
+      title: t('switchModel'),
+      open: menu === 'model',
+      up: popUp,
+      disabled: busy,
+      loading: busy,
+      catalog: catalog,
+      selected: currentModel(),
+      branchLabel: t('branchInstead'),
+      onBranch: branchVersion,
+      onPick: switchModel,
+      onToggle: openModelMenu,
+      onClose: function () { setMenu(null); },
+    }),
     h('span', { className: 'mtt-menu-wrap' + (popUp ? ' mtt-up' : '') },
       h(ActionButton, {
         title: t('translate'), active: menu === 'translate',

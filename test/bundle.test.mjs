@@ -30,8 +30,9 @@ globalThis.document = {
   head: { appendChild(tag) { tag.appended = true; } },
 };
 
-function loadBundle() {
+function loadBundle(options = {}) {
   let entry;
+  const withPrimitives = options.primitives !== false;
   const window = { __ModuleLoader__: { load(value) { entry = value; } } };
   const React = {
     createElement(type, props, ...kids) {
@@ -44,17 +45,31 @@ function loadBundle() {
     useReducer(reducer, init) { return [init, function () {}]; },
     useEffect() {},
   };
+  // A stand-in for the shell seed package: only `Menu` is used, and the fake
+  // records the data rows it was handed so tests can read them.
+  const primitives = {
+    Menu(props) {
+      return React.createElement('div', {
+        'data-native-menu': props.open ? 'open' : 'closed',
+        'data-menu-items': (props.items || []).map((item) => item.id).join(','),
+        'data-menu-selected': props.selectedId,
+        'data-menu-side': props.side,
+        'data-menu-footer': (props.footer || []).map((item) => item.id).join(','),
+      }, null);
+    },
+  };
   new Function('window', SOURCE)(window);
   assert.ok(entry, 'the bundle must call window.__ModuleLoader__.load');
   const mod = entry.factory(function (name) {
     if (name === 'react') return React;
+    if (withPrimitives && name === '@deepseek-ai/dsh-client-ui-primitives') return primitives;
     throw new Error('unexpected require(' + name + ')');
   });
   return { entry, mod };
 }
 
-function applyToSlots() {
-  const { mod } = loadBundle();
+function applyToSlots(options = {}) {
+  const { mod } = loadBundle(options);
   const registrations = [];
   const services = {
     slots: {
@@ -238,4 +253,32 @@ test('every inline icon actually paints', () => {
       assert.ok(painted, '<' + shape.type + '> in an inline icon paints nothing: ' + JSON.stringify(shape.props));
     }
   }
+});
+
+function assistantToolbarNodes(options = {}) {
+  const { registrations } = applyToSlots(options);
+  const registration = registrations.find((r) => r.descriptor.name === 'conversation.chat.assistant-actions');
+  assert.ok(registration, 'the assistant action row must be registered');
+  const injected = typeof registration.descriptor.inject === 'function' ? registration.descriptor.inject('sess-1') : {};
+  return expand(registration.component(Object.assign({ sessionId: 'sess-1', messageId: 'msg-1' }, injected)));
+}
+
+// The composer's model picker is the primitives `Menu`; ours must be the same
+// component, not a look-alike, or the two dropdowns drift apart.
+test('the model picker is the host dropdown when the primitives package is present', () => {
+  const menu = assistantToolbarNodes().find((node) => node.props && node.props['data-native-menu'] !== undefined);
+  assert.ok(menu, 'the model picker must render through the primitives Menu');
+  assert.equal(menu.props['data-native-menu'], 'closed');
+  assert.equal(menu.props['data-menu-side'], 'bottom');
+  assert.ok(menu.props['data-menu-items'].length > 0, 'the menu must always offer at least a placeholder row');
+  assert.ok(
+    menu.props['data-menu-footer'].includes('message-toolbar/branch'),
+    'the branch row must stay one click away',
+  );
+});
+
+test('without the primitives package the picker falls back to the built-in popover', () => {
+  const nodes = assistantToolbarNodes({ primitives: false });
+  assert.equal(nodes.some((node) => node.props && node.props['data-native-menu'] !== undefined), false);
+  assert.ok(nodes.some((node) => String(node.props && node.props.className || '').includes('mtt-menu-wrap')));
 });

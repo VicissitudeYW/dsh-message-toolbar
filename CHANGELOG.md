@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.0
+
+- **The model picker is DSH's own dropdown.** "Switch model" now renders `Menu` from
+  `@deepseek-ai/dsh-client-ui-primitives` — the component the composer's model seat uses — instead
+  of a hand-built popover: provider headings, a check on the model this turn answers with, portal
+  placement, keyboard walk, and the menu closing when the pointer leaves. The old markup remains as
+  a fallback when that package is missing.
+- The host payload gained `model` (per version and at the top level), read from the last
+  `request/header`, so the picker can mark the session's configured model.
+
 ## 0.2.2
 
 - **The user bubble is DSH's bubble again.** It had been painted with the same neutral tint the rest
