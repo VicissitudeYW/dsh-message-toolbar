@@ -366,18 +366,41 @@ test('the editor opens in the answer area, not in a popover', () => {
 
 // Saving an edit is an overwrite, not a new answer: the render path must be the
 // same Markdown body a generated answer uses (so an edited answer keeps its
-// styling), and the only extra affordance is the one-line way back.
+// styling), and no extra line is added under it.
 test('an edited answer renders through the normal markdown body', () => {
   const { css } = applyToSlots();
   const sheet = css.join('\n');
-  assert.match(sheet, /\.mtt-answer-note/);
+  assert.doesNotMatch(sheet, /\.mtt-answer-note/, 'no restore line lives under the answer');
 
   const source = fs.readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8');
   assert.match(source, /function answerOverride\(/, 'the override is read from the turn record');
   assert.match(source, /const shownText = live !== null/, 'one text feeds the body for every case');
   assert.match(source, /h\(AnswerBody, \{ text: shownText, streaming: live !== null \}\)/);
-  assert.match(source, /action: 'answer-restore'/, 'an overwritten answer can be given back');
+  assert.doesNotMatch(source, /OverrideNote/, 'nothing is drawn next to an overwritten answer');
   assert.doesNotMatch(source, /kind: 'edit'/, 'saving no longer creates an alternative');
+});
+
+// `MarkdownText` is a `memo()` object, not a function: a typeof-based guard sent
+// every answer down the plain-text fallback, which is what "saved but not
+// rendered" looked like.
+test('the markdown renderer accepts a memo component', () => {
+  const source = fs.readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8');
+  assert.match(source, /typeof candidate === 'function' \|\| \(candidate !== null && typeof candidate === 'object'\)/);
+  assert.doesNotMatch(source, /typeof primitives\.MarkdownText === 'function'/);
+});
+
+// The editor must not re-measure itself on every keystroke: collapsing the field
+// to `height:auto` and growing it again scrolled the page to the caret on each
+// character, which is the jitter the reader reported.
+test('the edit field scrolls internally instead of growing per keystroke', () => {
+  const { css } = applyToSlots();
+  const sheet = css.join('\n');
+  assert.match(sheet, /\.mtt-answer-edit-input\{[^}]*overflow:auto/);
+  assert.match(sheet, /\.mtt-answer-edit-input\{[^}]*height:clamp\(/);
+
+  const source = fs.readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(source, /scrollHeight/, 'the field is not measured while typing');
+  assert.doesNotMatch(source, /style\.height = 'auto'/);
 });
 
 // A variant being written must look like the app generating, not like a plugin

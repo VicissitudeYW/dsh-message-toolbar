@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.4
+
+- **A saved edit is now rendered, not shown as source.** The renderer lookup tested
+  `typeof primitives.MarkdownText === 'function'`, but `MarkdownText` is a `memo()` object, so the
+  check failed and every answer fell back to pre-wrapped plain text — editing looked like it had done
+  nothing. The guard now accepts a component of either shape (and the same fix applies to the
+  `TextShimmer` "generating" line).
+- **No line under an edited answer.** The `Edited by you · Restore the original` row is gone, as
+  requested; `answer-restore` stays available as the API-level way to drop an override.
+- **The edit field no longer fights the reader.** It used to collapse to `height:auto` and re-grow on
+  every keystroke, which scrolled the page to the caret each time — typing at the end of a long answer
+  jumped back to the top. The field now has a fixed height (`clamp(140px, 34vh, 360px)`), scrolls
+  inside itself, keeps its position, and is still manually resizable.
+
 ## 0.4.3
 
 - **Saving an edit overwrites the answer you were looking at** instead of adding a second one, so the

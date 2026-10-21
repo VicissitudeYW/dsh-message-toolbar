@@ -201,9 +201,9 @@ state instead:
    it through the very same `AnswerBody` → `MarkdownText` path as a generated answer, so nothing
    about its styling changes. When the visible answer *is* the logged one there is no variant to
    rewrite, so the turn record takes `override: { text, at }` instead: `active` stays `'native'`,
-   `items` stays empty, and the ring never appears. The card then renders `override.text` and one
-   muted line (`Edited by you · Restore the original`) whose button posts `answer-restore`, dropping
-   the override so the model's own text is back.
+   `items` stays empty, and the ring never appears. The card then renders `override.text` through
+   the same body and draws nothing else under it; `answer-restore` still drops the override, kept as
+   the API-level way back instead of a button.
 
 Consequences worth knowing: the log is untouched, so **later turns still see the original answer**
 in their model context; and if a future DSH renames those attributes the rule simply stops

@@ -1370,7 +1370,13 @@ function markdownRenderer() {
   markdownBridge = null;
   try {
     const primitives = typeof require === 'function' ? require('@deepseek-ai/dsh-client-ui-primitives') : null;
-    if (primitives && typeof primitives.MarkdownText === 'function') markdownBridge = primitives.MarkdownText;
+    // `MarkdownText` (like most of the shell's components) is a `memo()` object,
+    // not a bare function — a `typeof === 'function'` test would silently send
+    // every answer down the plain-text fallback.
+    const candidate = primitives ? primitives.MarkdownText : null;
+    if (typeof candidate === 'function' || (candidate !== null && typeof candidate === 'object')) {
+      markdownBridge = candidate;
+    }
   } catch (e) {
     markdownBridge = null;
   }
@@ -1416,10 +1422,13 @@ function AnswerBody(props) {
  * being generated looks like the app is generating, not like a plugin widget.
  * Falls back to a plain muted line when the primitives package is missing.
  */
+function isComponent(value) {
+  return typeof value === 'function' || (value !== null && typeof value === 'object');
+}
+
 function WaitLine(props) {
-  const Shimmer = clientPrimitives() && typeof clientPrimitives().TextShimmer === 'function'
-    ? clientPrimitives().TextShimmer
-    : null;
+  const api = clientPrimitives();
+  const Shimmer = api !== null && isComponent(api.TextShimmer) ? api.TextShimmer : null;
   if (Shimmer !== null) return h(Shimmer, { active: true }, props.label);
   return h('span', { className: 'mtt-wait-text' }, props.label);
 }
@@ -1484,16 +1493,6 @@ function AnswerEditBox(props) {
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState(null);
   const [toastNode, showToast] = useToast();
-  const area = React.useRef(null);
-
-  // Long answers must not scroll inside a four-line box: the field grows with
-  // its content, and keeps the manual resize handle for the reader who wants it.
-  React.useEffect(function () {
-    const node = area.current;
-    if (!node) return;
-    node.style.height = 'auto';
-    node.style.height = String(node.scrollHeight) + 'px';
-  }, [text]);
 
   function close() {
     store.setEdit(props.sessionId, props.turn, null);
@@ -1529,7 +1528,6 @@ function AnswerEditBox(props) {
           onClick: save,
         }, t('save')))),
     h('textarea', {
-      ref: area,
       className: 'mtt-answer-edit-input',
       placeholder: t('answerEditHint'),
       value: text,
@@ -1648,37 +1646,9 @@ function AnswerCard(props) {
       : live !== null && streamingText.length === 0
         ? h('div', { className: 'mtt-answer-wait' }, h(WaitLine, { label: t('generating') }))
         : h('div', { className: 'mtt-answer-body' },
-          h(AnswerBody, { text: shownText, streaming: live !== null }),
-          override !== null && active === null && live === null
-            ? h(OverrideNote, { sessionId: sessionId, turn: turn })
-            : null));
+          h(AnswerBody, { text: shownText, streaming: live !== null })));
 }
 
-/**
- * "This answer is your text now, not the model's." One muted line with the way
- * back, so overwriting the logged answer stays reversible without putting a
- * second entry in the ring — the whole point of overwriting instead of adding.
- */
-function OverrideNote(props) {
-  const [busy, setBusy] = React.useState(false);
-  const [toastNode, showToast] = useToast();
-  async function restore() {
-    setBusy(true);
-    try {
-      await answerMutate({ action: 'answer-restore', sessionId: props.sessionId, turn: props.turn });
-      showToast(t('overrideRestored'));
-    } catch (e) {
-      showToast(failureText(e), 'error');
-    }
-    setBusy(false);
-  }
-  return h('div', { className: 'mtt-answer-note' },
-    h('span', {}, t('answerOverridden')),
-    h('button', {
-      type: 'button', className: 'mtt-link', disabled: busy, onClick: restore,
-    }, t('restoreOriginal')),
-    toastNode);
-}
 /* --------------------------------------------------------------- components -- */
 
 /**
@@ -2458,12 +2428,8 @@ const CSS = [
   '.mtt-answer-edit-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}',
   '.mtt-answer-edit-label{font-size:12px;color:var(--mtt-fg-3)}',
   '.mtt-answer-edit-tools{display:flex;align-items:center;gap:4px}',
-  '.mtt-answer-edit-input{display:block;width:100%;min-height:96px;resize:vertical;border:0;background:transparent;color:var(--mtt-fg);font-family:inherit;font-size:var(--dsh-content-font-size,14px);line-height:1.6;padding:0;outline:none;overflow:hidden}',
+  '.mtt-answer-edit-input{display:block;width:100%;height:clamp(140px,34vh,360px);resize:vertical;border:0;background:transparent;color:var(--mtt-fg);font-family:inherit;font-size:var(--dsh-content-font-size,14px);line-height:1.6;padding:0;outline:none;overflow:auto;overscroll-behavior:contain}',
   '.mtt-answer-edit-input::placeholder{color:var(--mtt-fg-3)}',
-  '.mtt-answer-note{display:flex;align-items:center;gap:8px;margin-top:6px;font-size:12px;color:var(--mtt-fg-3)}',
-  '.mtt-link{border:0;background:none;padding:0;font:inherit;color:var(--mtt-fg-2);cursor:pointer;text-decoration:underline;text-underline-offset:2px}',
-  '.mtt-link:hover{color:var(--mtt-fg)}',
-  '.mtt-link:disabled{opacity:.5;cursor:default}',
   '.mtt-answer-wait{font-size:var(--dsh-content-font-size-secondary,13px);color:var(--mtt-fg-3);padding:2px 0}',
   '.mtt-wait-text{opacity:.75}',
   '.mtt-alt{margin:8px 0 2px;border:1px solid var(--mtt-line);background:var(--mtt-surface-2);border-radius:var(--mtt-radius-lg);padding:8px 10px;display:flex;flex-direction:column;gap:6px;width:100%;min-width:0;color:var(--mtt-fg)}',
@@ -2592,9 +2558,6 @@ const I18N = {
     editAnswer: 'Edit this answer',
     editing: 'Editing',
     exitEdit: 'Close the editor',
-    answerOverridden: 'Edited by you',
-    restoreOriginal: 'Restore the original',
-    overrideRestored: 'Original answer restored',
     answerEditHint: 'Your edit is kept as another variant of this answer; the model’s original stays available under ‹ ›.',
     save: 'Save',
     prevAnswer: 'Previous answer',
@@ -2671,9 +2634,6 @@ const I18N = {
     editAnswer: '编辑这条回答',
     editing: '编辑中',
     exitEdit: '退出编辑',
-    answerOverridden: '已由你修改',
-    restoreOriginal: '还原原文',
-    overrideRestored: '已还原原始回答',
     answerEditHint: '你的修改会作为这条回答的另一个备选保存，模型原文仍可在 ‹ › 里找回。',
     save: '保存',
     prevAnswer: '上一个回答',
