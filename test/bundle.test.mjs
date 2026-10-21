@@ -34,7 +34,12 @@ function loadBundle() {
   let entry;
   const window = { __ModuleLoader__: { load(value) { entry = value; } } };
   const React = {
-    createElement(type, props) { return { type, props }; },
+    createElement(type, props, ...kids) {
+      const merged = Object.assign({}, props);
+      if (kids.length === 1) merged.children = kids[0];
+      else if (kids.length > 1) merged.children = kids;
+      return { type, props: merged };
+    },
     useState(init) { return [typeof init === 'function' ? init() : init, function () {}]; },
     useReducer(reducer, init) { return [init, function () {}]; },
     useEffect() {},
@@ -167,5 +172,70 @@ test('every registered component mounts without throwing', () => {
       () => component(Object.assign({}, base, injected)),
       descriptor.name + ' (' + (descriptor.id ?? descriptor.key ?? 'default') + ') must mount',
     );
+  }
+});
+
+// An icon that paints nothing is worse than no icon. DSH's artwork relies on
+// `stroke="currentColor"` being inherited from the <svg> (the two-slider glyph
+// sets it there) or repeated on every child (all the other glyphs do). A shape
+// with neither `stroke` nor `fill` inside a `fill="none"` svg is invisible —
+// exactly how the model-switch button once lost its icon.
+const SHAPES = new Set(['path', 'circle', 'rect', 'line', 'polyline', 'polygon']);
+
+function flatten(node, out = []) {
+  if (node === null || node === undefined || typeof node !== 'object') return out;
+  if (Array.isArray(node)) {
+    for (const child of node) flatten(child, out);
+    return out;
+  }
+  out.push(node);
+  if (node.props) flatten(node.props.children, out);
+  return out;
+}
+
+// The React stub returns element descriptions, so local function components
+// have to be invoked by hand before their markup is visible.
+function expand(node, depth = 0) {
+  if (node === null || node === undefined || typeof node !== 'object') return [];
+  if (Array.isArray(node)) return node.flatMap((child) => expand(child, depth));
+  if (typeof node.type === 'function') {
+    if (depth > 16) return [];
+    return expand(node.type(Object.assign({}, node.props)), depth + 1);
+  }
+  return [node, ...expand(node.props && node.props.children, depth + 1)];
+}
+
+test('every inline icon actually paints', () => {
+  const { registrations } = applyToSlots();
+  const props = {
+    'conversation.chat.node': {
+      node: {
+        data: { content: [{ type: 'text', text: 'hello' }], seq: 1 },
+        location: { kind: 'turn', turn: 1 },
+      },
+    },
+    'conversation.chat.assistant-actions': { sessionId: 'sess-1', messageId: 'msg-1' },
+    'conversation.chat.turnTail': { sessionId: 'sess-1', turn: 1, seq: 3 },
+    'conversation.view': { sessionId: 'sess-1' },
+    'settings.section': {},
+  };
+  const svgs = [];
+  for (const { descriptor, component } of registrations) {
+    const injected = typeof descriptor.inject === 'function' ? descriptor.inject('sess-1') : {};
+    const tree = component(Object.assign({}, props[descriptor.name] ?? {}, injected));
+    for (const node of expand(tree)) {
+      if (node.type === 'svg') svgs.push(node);
+    }
+  }
+  assert.ok(svgs.length > 0, 'the toolbar must render its icons');
+  for (const svg of svgs) {
+    const inherited = typeof svg.props.stroke === 'string' && svg.props.stroke !== 'none';
+    for (const shape of expand(svg.props.children)) {
+      if (!SHAPES.has(shape.type)) continue;
+      const painted = inherited
+        || typeof shape.props.stroke === 'string'
+        || (typeof shape.props.fill === 'string' && shape.props.fill !== 'none');
+      assert.ok(painted, '<' + shape.type + '> in an inline icon paints nothing: ' + JSON.stringify(shape.props));
+    }
   }
 });
