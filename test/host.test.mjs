@@ -131,7 +131,8 @@ function makeContext(options = {}) {
       stream: async function* (options) {
         services.lastStream = options;
         yield { type: 'block-start', index: 0, blockType: 'text' };
-        yield { type: 'text-delta', index: 0, text: 'TRANSLATED' };
+        yield { type: 'text-delta', index: 0, text: 'TRANS' };
+        yield { type: 'text-delta', index: 0, text: 'LATED' };
         yield { type: 'finish', reason: 'stop' };
       },
     },
@@ -143,13 +144,17 @@ function makeContext(options = {}) {
   return { ctx, services, created, followups };
 }
 
-async function call(handler, method, body, search) {
+async function callRaw(handler, method, body, search) {
   const chunks = [];
+  let ended = false;
   const res = {
     statusCode: 0,
     headers: {},
     writeHead(status, headers) { this.statusCode = status; this.headers = headers; },
-    end(text) { chunks.push(text); },
+    flushHeaders() {},
+    write(text) { chunks.push(text); },
+    end(text) { if (text !== undefined) chunks.push(text); ended = true; },
+    get writableEnded() { return ended; },
   };
   const req = {
     method,
@@ -160,7 +165,12 @@ async function call(handler, method, body, search) {
     },
   };
   await handler(req, res);
-  return { status: res.statusCode, json: JSON.parse(chunks.join('') || 'null') };
+  return { status: res.statusCode, text: chunks.join('') };
+}
+
+async function call(handler, method, body, search) {
+  const result = await callRaw(handler, method, body, search);
+  return { status: result.status, json: JSON.parse(result.text || 'null') };
 }
 
 /* ---------------------------------------------------------------- tests -- */
@@ -288,6 +298,31 @@ test('POST answer-generate keeps the answer in-session and builds a plain transc
   assert.equal(tree.json.answers['2'].items[0].text, 'TRANSLATED');
 });
 
+test('POST answer-generate stream=true writes start, delta and done frames', async () => {
+  const { ctx, services } = makeContext();
+  apply(ctx);
+  resetPluginState();
+
+  const { status, text } = await callRaw(services.handler, 'POST', {
+    action: 'answer-generate', sessionId: 'A', turn: 2, stream: true,
+    model: { provider: 'q', model: 'm2', name: 'Model M2' },
+  });
+  assert.equal(status, 200);
+  const frames = text.split('\n').filter((line) => line.trim().length > 0).map((line) => JSON.parse(line));
+  assert.deepEqual(frames.map((f) => f.type), ['start', 'delta', 'delta', 'done']);
+  assert.equal(frames[0].turn, 2);
+  assert.equal(frames[0].provider, 'q');
+  assert.equal(frames[0].model, 'm2');
+  // One frame per token batch, so the client can paint as it arrives.
+  assert.equal(frames[1].text, 'TRANS');
+  assert.equal(frames[2].text, 'LATED');
+  assert.equal(frames[1].text + frames[2].text, 'TRANSLATED');
+  const done = frames[3].payload;
+  assert.equal(done.items.length, 1);
+  assert.equal(done.items[0].text, 'TRANSLATED');
+  assert.equal(done.active, done.items[0].id);
+});
+
 test('POST answer-save stores an edit and answer-select returns to native', async () => {
   const { ctx, services } = makeContext();
   apply(ctx);
@@ -323,8 +358,16 @@ test('POST answer-save stores an edit and answer-select returns to native', asyn
   const removed = await call(services.handler, 'POST', {
     action: 'answer-delete', sessionId: 'A', turn: 1, id: saved.json.active,
   });
-  assert.equal(removed.json.active, 'native');
+  // The answer before it in the ring takes over, not the logged one: after
+  // <2/3> is deleted the reader keeps the answer they were looking at (<1/2>).
+  assert.equal(removed.json.active, saved.json.items[0].id);
   assert.equal(removed.json.items.length, 1);
+
+  const last = await call(services.handler, 'POST', {
+    action: 'answer-delete', sessionId: 'A', turn: 1, id: saved.json.items[0].id,
+  });
+  assert.equal(last.json.active, 'native');
+  assert.equal(last.json.items.length, 0);
 });
 
 test('POST answer-source hands the editor the visible text and the logged text', async () => {

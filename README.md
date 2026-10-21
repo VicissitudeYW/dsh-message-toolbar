@@ -18,7 +18,7 @@ Cherry Studio.
 | --- | --- | --- |
 | **Copy** | user & assistant messages | Copies the message text to the clipboard. |
 | **Edit** | user messages | Rewrites the turn in place: the conversation is rewound to just before that turn, a new child session is seeded with the edit, and the answer is regenerated. The original branch is preserved as a version card. |
-| **Regenerate** | assistant messages | **In place, no new conversation.** A fresh answer to the same question is stored as a variant of that turn and swapped in for the logged one; flip back with `‹ 1/2 ›`. |
+| **Regenerate** | assistant messages | **In place, no new conversation.** A fresh answer to the same question is stored as a variant of that turn and swapped in for the logged one. The `‹ 1/2 ›` control lives in the answer's action row, next to delete, and walks the variants in place. |
 | **Switch model** | assistant messages | Same mechanism with another provider/model: every model's answer becomes a variant of the *same* turn, and `‹ 2/3 ›` walks them without leaving the conversation. The picker is DSH's own dropdown (the one under the composer), so it looks and keys exactly like the rest of the app; its last row instead opens a real branch when you want a full agent run with tools. |
 | **Edit answer** | assistant messages & answer card | Your own rewrite of a model answer becomes another variant; the model's original text stays one `‹` away, and switching back is always possible. |
 | **Translate** | assistant answers | Pressing translate opens a dropdown of target languages (the same native menu as the model picker) — pick one and the answer is translated; nothing has to be configured beforehand. The result is *bilingual*: the original stays, the translation sits underneath in a collapsible panel. Cached per session + turn + sequence, so it survives reloads without re-billing. |
@@ -45,7 +45,7 @@ Or from a packed tarball:
 
 ```bash
 npm pack
-dsh plugin --profile web add file:./dsh-message-toolbar-0.3.4.tgz
+dsh plugin --profile web add file:./dsh-message-toolbar-0.4.0.tgz
 ```
 
 Then add `dsh-message-toolbar` to `dsh.profile.bundles` in the profile `package.json`
@@ -84,7 +84,15 @@ in the plugin's own state file (`~/.dsh/message-toolbar/state.json`), keyed by s
 its provider, model and text. The client renders it in the conversation flow exactly where the answer
 belongs and hides the logged answer of that turn with a generated stylesheet
 (`[data-chat-flow-kind="assistant-step"][data-chat-turn="N"]{display:none}`). Slot `1` of the
-`‹ 1/2 ›` ring is always the model's original answer, so nothing is lost. Consequences, stated plainly:
+`‹ 1/2 ›` ring is always the model's original answer, so nothing is lost.
+
+Switching is instant and it *looks* like answering: `answer-generate` is streamed as NDJSON frames
+(`start` → `delta`… → `done`), so the old answer is hidden the moment you pick a model and the new one
+is written into its place word by word, rendered as a normal answer (Markdown, same typography).
+Deleting the answer you are looking at moves you to the one before it in the ring — `<2/3>` becomes
+`<1/2>` — and the ring disappears when a turn has only one answer left.
+
+Consequences, stated plainly:
 
 - a variant is a **pure text generation**: no tools, no file reads. It answers the same question from
   the same plain-chat transcript, which is what a model comparison should be;
@@ -159,7 +167,7 @@ MIT
 | --- | --- | --- |
 | **复制** | 用户 / 助手消息 | 把消息正文复制到剪贴板。 |
 | **编辑** | 用户消息 | 就地改写这一轮：对话回退到该轮之前，用编辑后的文本开启一个新的子会话并重新回答，原分支保留为版本卡片。 |
-| **重新生成** | 助手消息 | **就地重答，不新开对话。** 同一个问题的新回答存成这一轮的一个「备选」，直接替换显示；用 `‹ 1/2 ›` 翻回去。 |
+| **重新生成** | 助手消息 | **就地重答，不新开对话。** 同一个问题的新回答存成这一轮的一个「备选」，直接替换显示。`‹ 1/2 ›` 切换按钮就在这一轮的动作行里、删除按钮右边，可以就地来回翻。 |
 | **切换模型** | 助手消息 | 同一机制换 provider/模型：每个模型的回答都是**同一轮**的备选，`‹ 2/3 ›` 就地来回切换，不离开当前对话。模型选择器直接复用输入框右下角那个原生下拉（外观与键盘操作完全一致），它的最后一行则走真正的分支，用于需要调用工具的完整重跑。 |
 | **编辑回答** | 助手消息 / 回答卡片 | 你改写的回答作为另一个备选保存，模型原文始终在 `‹` 里可找回，随时能切回去。 |
 | **翻译** | 助手回答 | 点翻译直接弹出语言下拉（就是切换模型那个原生菜单），选一种语言就翻，不需要事先在设置里配任何东西。结果是**双语排版**：原文保留，译文以可折叠面板放在下面。按 会话+轮次+序号 缓存，刷新页面不会重复计费。 |
@@ -186,7 +194,7 @@ dsh plugin --profile web add file:$(pwd)
 
 ```bash
 npm pack
-dsh plugin --profile web add file:./dsh-message-toolbar-0.3.4.tgz
+dsh plugin --profile web add file:./dsh-message-toolbar-0.4.0.tgz
 ```
 
 如果插件管理器没有自动登记，请手动把 `dsh-message-toolbar` 加进 profile 的 `package.json`
@@ -223,7 +231,14 @@ dsh plugin --profile web add file:./dsh-message-toolbar-0.3.4.tgz
 （`~/.dsh/message-toolbar/state.json`）里，按 会话 + 轮次 归档，带 provider、模型和正文。客户端把
 它渲染在会话流里该回答本该在的位置，并用一张动态生成的样式表把日志里的那份回答隐藏起来
 （`[data-chat-flow-kind="assistant-step"][data-chat-turn="N"]{display:none}`）。`‹ 1/2 ›` 的第 1 位
-永远是模型原始回答，所以什么都不丢。需要说清的三点后果：
+永远是模型原始回答，所以什么都不丢。
+
+切换是即时的，而且看起来就像「在回答」：`answer-generate` 以 NDJSON 帧流式返回（`start` →
+若干 `delta` → `done`），所以你一选模型旧回答立刻消失，新回答逐字写进同一个位置，并按普通回答
+渲染（Markdown、同样的排版）。删除你正在看的那一份，会落到切换环里的前一份——`<2/3>` 变成
+`<1/2>`；一轮只剩一份回答时，切换按钮就不显示了。
+
+需要说清的三点后果：
 
 - 备选只是一次**纯文本生成**：不调工具、不读文件。它回答的是同一个问题、吃的是同一份纯对话转录
   ——这正是「对比模型」该有的样子；

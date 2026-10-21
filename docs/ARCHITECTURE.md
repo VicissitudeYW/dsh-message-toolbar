@@ -90,11 +90,11 @@ from `llm.listProviders()` + `llm.listModels(provider)`.
 | `restore-version` | `sessionId` | clears the flag |
 | `activate` | `sessionId` | un-archives (if needed) and attaches to the parent workspace |
 | `focus` | `sessionId` | un-archives the target, archives every other family member (one visible conversation) |
-| `answer-generate` | `sessionId, turn, model?` | `llm.stream` over a plain-chat transcript, stored as an answer variant |
+| `answer-generate` | `sessionId, turn, model?, stream?` | `llm.stream` over a plain-chat transcript, stored as an answer variant; with `stream: true` the reply is an NDJSON frame stream (`start` / `delta` / `done` / `error`) |
 | `answer-save` | `sessionId, turn, text, baseId?` | stores a hand-edited answer as a variant |
 | `answer-source` | `sessionId, turn, answerId?` | `{ turn, active, items, native, text }` — baseline for the editor |
 | `answer-select` | `sessionId, turn, answerId` | flips the visible variant (`'native'` is legal) |
-| `answer-delete` | `sessionId, turn, answerId` | drops a variant, falling back to `native` when active |
+| `answer-delete` | `sessionId, turn, answerId` | drops a variant; if it was visible, the one before it in the ring (`native` first) takes over |
 | `hide` | `sessionId, turn, scope: "turn"\|"answer", hidden: bool` | hides/restores one turn or one answer in the transcript view; returns the new lists |
 | `models` | — | same catalog as `?models=1` |
 
@@ -179,15 +179,22 @@ state instead:
    user texts of every turn up to the target, plus the last appended assistant text of each
    preceding turn. Tool calls, file reads and process cards are deliberately excluded — a variant
    is a model comparison, not an agent run.
-2. The streamed text is stored as an item of `answers[sessionId][turn]` and becomes `active`.
+2. With `stream: true` the handler answers with NDJSON frames — `start` (turn, provider, model),
+   one `delta` per token batch, then `done` (the stored payload) or `error`. The client writes
+   those deltas into a per-turn "live" slot in the bundle store, so picking a model hides the old
+   answer at once and fills the same place with the new one as it arrives. The finished text is
+   stored as an item of `answers[sessionId][turn]` and becomes `active`.
 3. `AnswerCard` (turn tail) renders the active variant **in place** and registers an `answer` mark
    through `useHideRule`, which rewrites a generated
    `<style data-plugin="dsh-message-toolbar-dyn">` containing
    `[data-chat-flow-kind="assistant-step"][data-chat-turn="N"]{display:none}` — the same node
    attributes the chat view itself emits (`data-chat-flow-kind` from `routedNode.kind`,
    `data-chat-turn` from `turnOf(node)`, which returns `location.turn.turn`).
-4. `‹ 1/2 ›` writes `answer-select`; slot `1` is always `native`, i.e. the logged answer, so the
-   original is never lost and `active: 'native'` renders with no stylesheet rule at all.
+4. `‹ i/n ›` is drawn by the assistant action row (not by the card), next to the delete button, and
+   writes `answer-select`; slot `1` is always `native`, i.e. the logged answer, so the original is
+   never lost and `active: 'native'` renders with no stylesheet rule at all. The row only draws the
+   control when the turn has more than one answer; deleting the visible variant goes through
+   `answer-delete`, and the answer before it in the ring (native when it was first) takes over.
 
 Consequences worth knowing: the log is untouched, so **later turns still see the original answer**
 in their model context; and if a future DSH renames those attributes the rule simply stops

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.4.0
+
+- **Switching a model now looks like answering.** `answer-generate` streams NDJSON frames (`start`,
+  `delta`…, `done`), the client paints them into a per-turn "live" slot: the previous answer is hidden
+  the moment a model is picked, the new one is written into its place word by word, and it renders as
+  a normal answer (Markdown, the same typography) instead of a boxed card. "Regenerate" from the
+  assistant row or from a user bubble streams the same way.
+- **The `‹ i/n ›` control moved into the action row**, right of the delete button, so it always sits at
+  the bottom of the turn instead of inside the answer. It only appears when a turn has more than one
+  answer; the answer body is now plain text in the flow, with no card chrome.
+- **Deleting the answer on screen falls back to the previous one**: `<2/3>` becomes `<1/2>`, the answer
+  seen one click ago takes over (the logged answer when it was first). The row's trash deletes the
+  visible variant when the answer is a variant, and hides the logged answer (view-level, restorable)
+  when it is the original.
+- One generation per turn at a time: the row disables its generate buttons while an answer of that
+  turn is still streaming.
+
 ## 0.3.4
 
 - **The settings panel is gone; translate asks for the language itself.** Pressing translate now opens
