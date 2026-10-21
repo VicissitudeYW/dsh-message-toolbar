@@ -88,7 +88,7 @@ belongs and hides the logged answer of that turn with a generated stylesheet
 
 Switching is instant and it *looks* like answering: `answer-generate` is streamed as NDJSON frames
 (`start` → `delta`… → `done`), so the old answer is hidden the moment you pick a model and the new one
-is written into its place word by word, rendered as a normal answer (Markdown, same typography).
+is written into its place word by word by the app's own renderer (MarkdownText with streaming, and DSH's shimmer line until the first token), so a variant and a logged answer look the same.
 Deleting the answer you are looking at moves you to the one before it in the ring — `<2/3>` becomes
 `<1/2>` — and the ring disappears when a turn has only one answer left.
 
@@ -234,8 +234,10 @@ dsh plugin --profile web add file:./dsh-message-toolbar-0.4.0.tgz
 永远是模型原始回答，所以什么都不丢。
 
 切换是即时的，而且看起来就像「在回答」：`answer-generate` 以 NDJSON 帧流式返回（`start` →
-若干 `delta` → `done`），所以你一选模型旧回答立刻消失，新回答逐字写进同一个位置，并按普通回答
-渲染（Markdown、同样的排版）。删除你正在看的那一份，会落到切换环里的前一份——`<2/3>` 变成
+若干 `delta` → `done`），所以你一选模型旧回答立刻消失，新回答逐字写进同一个位置，用的还是应用
+自带的那套渲染（`MarkdownText` + `streaming`，第一个字到达前显示 DSH 自己的 shimmer 行），所以
+备选和原生日志回答看起来一模一样，插件不额外加任何装饰。切换按钮本身会自动算上「正在生成的那一份」，
+所以点第二个模型时当场就是 `<2/2>`。删除你正在看的那一份，会落到切换环里的前一份——`<2/3>` 变成
 `<1/2>`；一轮只剩一份回答时，切换按钮就不显示了。
 
 需要说清的三点后果：

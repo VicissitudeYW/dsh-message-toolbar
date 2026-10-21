@@ -1300,13 +1300,37 @@ function markdownLabels() {
   return labels;
 }
 
-/** A variant answer body: official Markdown when available, text otherwise. */
+/**
+ * A variant answer body: the official Markdown renderer when the primitives
+ * package is available (the same component the chat view uses, so a variant and
+ * a logged answer are typographically identical), plain text otherwise.
+ * `streaming` is forwarded so a growing answer reuses the native streaming arms
+ * (incremental code highlighting, unfinished fences).
+ */
 function AnswerBody(props) {
   const Markdown = markdownRenderer();
   if (Markdown !== null) {
-    return h(Markdown, { text: props.text, labels: markdownLabels(), variant: 'body' });
+    return h(Markdown, {
+      text: props.text,
+      labels: markdownLabels(),
+      variant: 'body',
+      ...props.streaming === true ? { streaming: true } : {},
+    });
   }
   return h('div', { className: 'mtt-alt-text' }, props.text);
+}
+
+/**
+ * The "an answer is being written" line: DSH's own shimmer text, so a variant
+ * being generated looks like the app is generating, not like a plugin widget.
+ * Falls back to a plain muted line when the primitives package is missing.
+ */
+function WaitLine(props) {
+  const Shimmer = clientPrimitives() && typeof clientPrimitives().TextShimmer === 'function'
+    ? clientPrimitives().TextShimmer
+    : null;
+  if (Shimmer !== null) return h(Shimmer, { active: true }, props.label);
+  return h('span', { className: 'mtt-wait-text' }, props.label);
 }
 
 /**
@@ -1420,17 +1444,19 @@ function AnswerCard(props) {
   if (!showingVariant) return null;
 
   const active = isNative ? null : ring.active;
+  const streamingText = live === null ? '' : live.text;
 
+  // Nothing of our own on screen: while the answer is still empty the native
+  // shimmer line stands in for it, and from the first token on this is the
+  // ordinary Markdown body — the same renderer the chat view uses.
   return h('div', { className: 'mtt-answer' },
-    live !== null
-      ? h('div', { className: 'mtt-live-note' },
-        h('span', { className: 'mtt-live-dots' }),
-        h('span', null, t('generating')),
-        live.name || live.model ? h('span', { className: 'mtt-live-model' }, modelLabel(live)) : null)
-      : null,
-    h('div', { className: 'mtt-answer-body' },
-      h(AnswerBody, { text: live !== null ? live.text : active.text }),
-      live !== null ? h('span', { className: 'mtt-live-caret' }) : null));
+    live !== null && streamingText.length === 0
+      ? h('div', { className: 'mtt-answer-wait' }, h(WaitLine, { label: t('generating') }))
+      : h('div', { className: 'mtt-answer-body' },
+        h(AnswerBody, {
+          text: live !== null ? streamingText : active.text,
+          streaming: live !== null,
+        })));
 }
 /* --------------------------------------------------------------- components -- */
 
@@ -1714,6 +1740,15 @@ function AssistantToolbar(props) {
   // turn is still being written by anyone (this row, the card, or a bubble).
   const working = busy || live !== null;
 
+  // An answer being written already owns the last ring slot, so the control
+  // reads 2/2 from the first click instead of popping in when the stream ends.
+  const ringView = live !== null
+    ? {
+      count: (ring === null ? 1 : ring.alternatives.length) + 1,
+      index: ring === null ? 0 : ring.alternatives.length,
+    }
+    : ring === null ? null : { count: ring.alternatives.length, index: ring.index };
+
   // The native dropdowns (model picker, language picker) dismiss themselves
   // (outside click, Escape, pointer leave), so this listener must not fight
   // them: it only closes our own popovers.
@@ -1989,16 +2024,16 @@ function AssistantToolbar(props) {
         : null),
     // The answer ring sits in this row — always at the bottom of the turn, next
     // to the other controls — and only when there is something to switch to.
-    ring !== null && ring.alternatives.length > 1
+    ringView !== null && ringView.count > 1
       ? h('span', { className: 'mtt-ring', title: t('variants') },
         h('button', {
-          type: 'button', className: 'mtt-ring-btn', disabled: working || ring.index <= 0,
+          type: 'button', className: 'mtt-ring-btn', disabled: working || ringView.index <= 0,
           title: t('prevAnswer'), onClick: function () { stepAnswer(-1); },
         }, h(ChevronLeftIcon)),
-        h('span', { className: 'mtt-ring-count' }, (ring.index + 1) + '/' + ring.alternatives.length),
+        h('span', { className: 'mtt-ring-count' }, (ringView.index + 1) + '/' + ringView.count),
         h('button', {
           type: 'button', className: 'mtt-ring-btn',
-          disabled: working || ring.index >= ring.alternatives.length - 1,
+          disabled: working || ringView.index >= ringView.count - 1,
           title: t('nextAnswer'), onClick: function () { stepAnswer(1); },
         }, h(ChevronRightIcon)))
       : null,
@@ -2202,14 +2237,12 @@ const CSS = [
   '.mtt-ring-btn{background:none;border:0;cursor:pointer;padding:0 3px;font-size:13px;color:inherit;display:inline-flex;align-items:center}',
   '.mtt-ring-btn svg{width:12px;height:12px;display:block}',
   '.mtt-ring-btn:disabled{opacity:.3}',
-  // The visible answer sits in the flow like a normal message: no card chrome.
-  '.mtt-answer{margin:10px 0 2px;width:100%;min-width:0;color:var(--mtt-fg)}',
-  '.mtt-answer-body{font-size:var(--dsh-content-font-size,14px);line-height:calc(22px + var(--dsh-content-font-delta,0px));overflow-wrap:anywhere;min-width:0}',
-  '.mtt-live-note{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--mtt-fg-3);margin-bottom:4px}',
-  '.mtt-live-model{color:var(--mtt-fg-3)}',
-  '.mtt-live-dots{width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.6;animation:mtt-pulse 1.1s ease-in-out infinite}',
-  '.mtt-live-caret{display:inline-block;width:2px;height:1em;margin-left:2px;vertical-align:-2px;background:currentColor;opacity:.5;animation:mtt-pulse 1s steps(2) infinite}',
-  '@keyframes mtt-pulse{0%,100%{opacity:.25}50%{opacity:.85}}',
+  // The visible answer sits in the flow like a normal message: no card chrome,
+  // no colour of our own — it inherits the answer typography of the app.
+  '.mtt-answer{margin:6px 0 2px;width:100%;min-width:0}',
+  '.mtt-answer-body{overflow-wrap:anywhere;min-width:0}',
+  '.mtt-answer-wait{font-size:var(--dsh-content-font-size-secondary,13px);color:var(--mtt-fg-3);padding:2px 0}',
+  '.mtt-wait-text{opacity:.75}',
   '.mtt-alt{margin:8px 0 2px;border:1px solid var(--mtt-line);background:var(--mtt-surface-2);border-radius:var(--mtt-radius-lg);padding:8px 10px;display:flex;flex-direction:column;gap:6px;width:100%;min-width:0;color:var(--mtt-fg)}',
   '.mtt-alt-native{border-color:var(--mtt-line-strong);background:transparent}',
   '.mtt-alt-head{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:11px;color:var(--mtt-fg-3)}',

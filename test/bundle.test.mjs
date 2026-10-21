@@ -327,3 +327,17 @@ test('both rows offer a delete action and the sheet knows how to hide a turn', (
   assert.match(sheet, /\.mtt-hidden/);
   assert.match(sheet, /\.mtt-pop-note/);
 });
+
+// A variant being written must look like the app generating, not like a plugin
+// widget: the request asks for NDJSON frames, the empty state is the native
+// shimmer line, and the body is plain flow text with no card chrome of ours.
+test('the answer stream is NDJSON and the empty state uses the native shimmer', () => {
+  const source = fs.readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8');
+  assert.match(source, /accept: 'application\/x-ndjson'/);
+  assert.match(source, /stream: true/);
+  assert.match(source, /function WaitLine/);
+  const { css } = applyToSlots();
+  const sheet = css.join('\n');
+  assert.match(sheet, /\.mtt-answer-wait/);
+  assert.doesNotMatch(sheet, /\.mtt-live-caret/);
+});
