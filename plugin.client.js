@@ -1324,16 +1324,18 @@ function UserMessageView(props) {
     setBusy(false);
   }
 
+  // "Regenerate" from a user bubble answers the same turn again **in place**,
+  // exactly like the assistant toolbar's button: the new answer becomes a
+  // variant of this turn, so no second conversation appears. Editing the prompt
+  // is the branch path — the logged prompt itself cannot be rewritten.
   async function retry() {
     if (typeof turn !== 'number') return;
     setBusy(true);
     setError(null);
     try {
-      const result = await mutate({
-        action: 'retry', sessionId: sessionId, turn: turn, stopPrevious: prefs.stopPrevious,
-      });
-      store.invalidate();
-      switchToVersion(navigation, { sessionId: result.sessionId }, sessionId);
+      await answerMutate({ action: 'answer-generate', sessionId: sessionId, turn: turn });
+      setNotice(t('answerGenerated'));
+      setTimeout(function () { setNotice(null); }, 2000);
     } catch (e) {
       setError(String((e && e.message) || e));
     }

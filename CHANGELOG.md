@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.1
+
+- **Regenerate on a user bubble answers in place too.** It still went through the branch path
+  (a second conversation), because only the assistant row had been switched over. Both the user
+  bubble and the assistant row now store the new answer as a variant of the same turn; editing the
+  prompt remains the one action that branches, since the logged prompt cannot be rewritten.
+
 ## 0.3.0
 
 - **The model picker is DSH's own dropdown.** "Switch model" now renders `Menu` from
