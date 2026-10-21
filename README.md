@@ -44,7 +44,7 @@ Or from a packed tarball:
 
 ```bash
 npm pack
-dsh plugin --profile web add file:./dsh-message-toolbar-0.3.1.tgz
+dsh plugin --profile web add file:./dsh-message-toolbar-0.3.2.tgz
 ```
 
 Then add `dsh-message-toolbar` to `dsh.profile.bundles` in the profile `package.json`
@@ -167,7 +167,7 @@ dsh plugin --profile web add file:$(pwd)
 
 ```bash
 npm pack
-dsh plugin --profile web add file:./dsh-message-toolbar-0.3.1.tgz
+dsh plugin --profile web add file:./dsh-message-toolbar-0.3.2.tgz
 ```
 
 如果插件管理器没有自动登记，请手动把 `dsh-message-toolbar` 加进 profile 的 `package.json`
