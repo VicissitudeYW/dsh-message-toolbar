@@ -107,6 +107,24 @@ test('the user bubble is shadowed at the lowest priority', () => {
   assert.equal(node.descriptor.priority, -1);
 });
 
+// DSH's client-modules registry refuses to start when a package declares
+// `dsh.client` but its `exports` has no `./client` entry:
+//   client-modules: <pkg> declares dsh.client but exports no "./client" bundle
+// That took a full restart to discover once, so pin the contract here.
+test('package.json exposes the built client bundle through exports["./client"]', () => {
+  const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  const client = pkg.exports?.['./client'];
+  const clientRel = typeof client === 'string' ? client : client?.default;
+  assert.equal(typeof clientRel, 'string', 'exports["./client"] must be a string or { default: string }');
+  assert.equal(clientRel, './lib/client.js');
+  assert.ok(fs.existsSync(new URL('../lib/client.js', import.meta.url)), 'the exported client bundle must exist');
+  assert.equal(pkg.exports?.['.']?.default ?? pkg.exports?.['.'], './lib/index.js');
+  assert.equal(pkg.dsh?.client?.platform, 'web');
+  assert.ok(pkg.dsh.client.inject.length > 0);
+  for (const specifier of pkg.dsh.client.inject) assert.equal(typeof specifier, 'string');
+  assert.equal(pkg.dsh?.bundle?.patch, './cordis.patch.yml');
+});
+
 test('the assistant action row receives a session-scoped inject', () => {
   const { registrations } = applyToSlots();
   const actions = registrations.find((r) => r.descriptor.name === 'conversation.chat.assistant-actions');

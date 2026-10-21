@@ -56,6 +56,21 @@ host and client both load at startup.
 > Existing branches keep working: this plugin also *reads* the older `message-tree/version`
 > markers, so previously created version cards still show up in the ring and the tree.
 
+> **Packaging requirement:** `package.json` must export the built client bundle, otherwise
+> DSH refuses to start with `client-modules: dsh-message-toolbar declares dsh.client but
+> exports no "./client" bundle`:
+>
+> ```json
+> "exports": {
+>   ".": { "default": "./lib/index.js" },
+>   "./client": { "default": "./lib/client.js" },
+>   "./cordis.patch.yml": "./cordis.patch.yml",
+>   "./package.json": "./package.json"
+> }
+> ```
+>
+> `test/bundle.test.mjs` pins this contract, so `npm test` catches a regression before install.
+
 ### Notes on how editing works
 
 Every edit / regenerate / model switch seeds a **new child session** instead of mutating the log
@@ -136,6 +151,20 @@ dsh plugin --profile web add file:./dsh-message-toolbar-0.1.0.tgz
 > `dsh-plugin-message-edit` 从 `dsh.profile.bundles` 中移除。
 > 已有的分支不会失效：本插件同时**读取**旧的 `message-tree/version` 标记，
 > 之前创建的版本卡片依然会出现在版本徽标和版本树里。
+
+> **打包硬性要求：** `package.json` 必须用 `exports` 暴露构建好的客户端 bundle，否则 DSH 启动直接失败并报
+> `client-modules: dsh-message-toolbar declares dsh.client but exports no "./client" bundle`：
+>
+> ```json
+> "exports": {
+>   ".": { "default": "./lib/index.js" },
+>   "./client": { "default": "./lib/client.js" },
+>   "./cordis.patch.yml": "./cordis.patch.yml",
+>   "./package.json": "./package.json"
+> }
+> ```
+>
+> `test/bundle.test.mjs` 已经把这个契约钉死，`npm test` 会在安装前拦住回归。
 
 ### 编辑机制说明
 
