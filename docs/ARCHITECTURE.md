@@ -95,6 +95,7 @@ from `llm.listProviders()` + `llm.listModels(provider)`.
 | `answer-source` | `sessionId, turn, answerId?` | `{ turn, active, items, native, text }` — baseline for the editor |
 | `answer-select` | `sessionId, turn, answerId` | flips the visible variant (`'native'` is legal) |
 | `answer-delete` | `sessionId, turn, answerId` | drops a variant, falling back to `native` when active |
+| `hide` | `sessionId, turn, scope: "turn"\|"answer", hidden: bool` | hides/restores one turn or one answer in the transcript view; returns the new lists |
 | `models` | — | same catalog as `?models=1` |
 
 Errors: `TypeError` → `400 {error}`, anything else → `409 {error}`.
@@ -107,6 +108,7 @@ Errors: `TypeError` → `400 {error}`, anything else → `409 {error}`.
 { "schema": 1,
   "deleted": { "<sessionId>": { "at": 0, "operation": "...", "targetTurn": 0 } },
   "answers": { "<sessionId>": { "<turn>": { "active": "native", "items": [] } } },
+  "hidden": { "<sessionId>": { "turns": [1, 4], "answers": [2] } },
   "translations": { "<sessionId>": { "<eventSeq>": { "<lang>": { "text": "...", "at": 0 } } } } }
 ```
 
@@ -174,8 +176,9 @@ state instead:
    preceding turn. Tool calls, file reads and process cards are deliberately excluded — a variant
    is a model comparison, not an agent run.
 2. The streamed text is stored as an item of `answers[sessionId][turn]` and becomes `active`.
-3. `AnswerCard` (turn tail) renders the active variant **in place** and calls `setTurnHidden(turn, true)`,
-   which rewrites a generated `<style data-plugin="dsh-message-toolbar-dyn">` containing
+3. `AnswerCard` (turn tail) renders the active variant **in place** and registers an `answer` mark
+   through `useHideRule`, which rewrites a generated
+   `<style data-plugin="dsh-message-toolbar-dyn">` containing
    `[data-chat-flow-kind="assistant-step"][data-chat-turn="N"]{display:none}` — the same node
    attributes the chat view itself emits (`data-chat-flow-kind` from `routedNode.kind`,
    `data-chat-turn` from `turnOf(node)`, which returns `location.turn.turn`).
@@ -185,6 +188,28 @@ state instead:
 Consequences worth knowing: the log is untouched, so **later turns still see the original answer**
 in their model context; and if a future DSH renames those attributes the rule simply stops
 matching, leaving both answers visible instead of breaking the view.
+
+### Deleting rows without rewriting the log
+
+The transcript is append-only (see below), so a delete can only be a view decision. `hidden`
+records it and the same generated stylesheet applies it:
+
+| scope | rule | note |
+| --- | --- | --- |
+| `turn` | `[data-chat-turn="N"]{display:none}` + `[data-chat-turn="N"][data-chat-flow-kind="turn-tail"]{display:revert}` | the tail row is re-shown so the `deleted · restore` row stays clickable |
+| `answer` | `[data-chat-flow-kind="assistant-step"][data-chat-turn="N"]{display:none}` | the user message and tool cards stay |
+
+Several components want the same turn hidden (the answer card for an active variant, the assistant
+toolbar for a deleted answer, the tail row for a deleted turn), so `nativeHideStyle` keeps a
+`marks` map keyed by owner (`tail:<turn>`, `bar:<turn>`, …) and rebuilds the sheet from all marks,
+with a whole-turn mark winning over an answer-only mark. `useHideRule(owner, turn, mode)` is the
+hook that registers and clears one mark, which makes unmounting self-cleaning.
+
+The model keeps reading the full log: a deleted answer is still in the context of later turns.
+Erasing it for the model would require a rewritten session (a child seeded without that turn),
+which is a separate, much larger operation.
+
+### Why a turn cannot gain a second answer
 
 
 The session log cannot hold two answers for one turn. `dsh-session`'s invariant admits

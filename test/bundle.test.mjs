@@ -282,3 +282,28 @@ test('without the primitives package the picker falls back to the built-in popov
   assert.equal(nodes.some((node) => node.props && node.props['data-native-menu'] !== undefined), false);
   assert.ok(nodes.some((node) => String(node.props && node.props.className || '').includes('mtt-menu-wrap')));
 });
+
+/** Every tooltip/aria title rendered by a subtree, in document order. */
+function titlesOf(nodes) {
+  return nodes.map((node) => node.props && node.props.title).filter((title) => typeof title === 'string');
+}
+
+// Deleting a message is the whole point of a toolbar for a stalled turn, so
+// both rows must expose it — and the stylesheet must carry the hidden-row rule
+// that a deleted turn needs to keep its restore affordance clickable.
+test('both rows offer a delete action and the sheet knows how to hide a turn', () => {
+  const { registrations, css } = applyToSlots();
+  const node = registrations.find((r) => r.descriptor.name === 'conversation.chat.node');
+  const userTitles = titlesOf(expand(node.component({
+    sessionId: 'sess-1',
+    node: { data: { content: [{ type: 'text', text: 'hi' }], seq: 1 }, location: { kind: 'turn', turn: 1 } },
+  })));
+  assert.ok(userTitles.includes('deleteMessage'), 'the user row must offer "delete this message"');
+
+  const assistantTitles = titlesOf(assistantToolbarNodes());
+  assert.ok(assistantTitles.includes('deleteAnswer'), 'the assistant row must offer "delete this answer"');
+
+  const sheet = css.join('\n');
+  assert.match(sheet, /\.mtt-hidden/);
+  assert.match(sheet, /\.mtt-pop-note/);
+});

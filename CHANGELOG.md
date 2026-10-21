@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.3.3
+
+- **Delete a message, or just an answer.** The user bubble gained "delete this message" and the
+  assistant row "delete this answer"; the deleted spot keeps a `deleted · restore` row so it is one
+  click back. Useful right after a stalled turn leaves a pile of "continue" prompts behind.
+- The session log is append-only, so this is a view operation: `hidden.turns` / `hidden.answers` in
+  the plugin state, applied by the same generated stylesheet that hides replaced answers. **The
+  model still reads the deleted text in later turns** — the confirmation says so.
+- `nativeHideStyle` now merges marks from several owners (`tail:<turn>`, `bar:<turn>`) instead of
+  keeping one global set, so a hidden turn and a hidden answer cannot clear each other.
+- New host route `hide` (`sessionId, turn, scope: "turn"|"answer", hidden`) plus `hidden` in the GET
+  payload; tests cover the round trip, a bad scope and a missing turn (400).
+
+## 0.3.2
+
+- **A stale host half now says so.** The client bundle is read from disk per request, but the host
+  half is loaded once at `dsh web` start — so after an update the new UI can talk to old host code,
+  which surfaced as `action 必须是 edit 或 retry`. The unknown-action error now lists the full
+  vocabulary and points at the restart.
+
 ## 0.3.1
 
 - **Regenerate on a user bubble answers in place too.** It still went through the branch path

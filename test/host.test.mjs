@@ -360,6 +360,43 @@ test('answer-generate rejects a turn that does not exist', async () => {
   assert.match(json.error, /9/);
 });
 
+test('POST hide removes a turn or an answer from the view and restores it', async () => {
+  const { ctx, services } = makeContext();
+  apply(ctx);
+  resetPluginState();
+
+  const hiddenTurn = await call(services.handler, 'POST', {
+    action: 'hide', sessionId: 'A', turn: 1, scope: 'turn', hidden: true,
+  });
+  assert.equal(hiddenTurn.status, 200);
+  assert.deepEqual(hiddenTurn.json.hidden, { turns: [1], answers: [] });
+
+  const payload = await call(services.handler, 'GET', undefined, '?sessionId=A');
+  assert.deepEqual(payload.json.hidden, { turns: [1], answers: [] });
+
+  const hiddenAnswer = await call(services.handler, 'POST', {
+    action: 'hide', sessionId: 'A', turn: 2, scope: 'answer', hidden: true,
+  });
+  assert.deepEqual(hiddenAnswer.json.hidden, { turns: [1], answers: [2] });
+
+  const restored = await call(services.handler, 'POST', {
+    action: 'hide', sessionId: 'A', turn: 2, scope: 'answer', hidden: false,
+  });
+  assert.deepEqual(restored.json.hidden, { turns: [1], answers: [] });
+
+  const badScope = await call(services.handler, 'POST', {
+    action: 'hide', sessionId: 'A', turn: 1, scope: 'everything', hidden: true,
+  });
+  assert.equal(badScope.status, 400);
+  assert.match(badScope.json.error, /scope/);
+
+  const missingTurn = await call(services.handler, 'POST', {
+    action: 'hide', sessionId: 'A', turn: 9, scope: 'turn', hidden: true,
+  });
+  assert.equal(missingTurn.status, 400);
+  assert.match(missingTurn.json.error, /9/);
+});
+
 test('DELETE/RESTORE a version card flips its deleted flag', async () => {
   const { ctx, services } = makeContext();
   apply(ctx);

@@ -23,6 +23,7 @@ Cherry Studio.
 | **Edit answer** | assistant messages & answer card | Your own rewrite of a model answer becomes another variant; the model's original text stays one `‹` away, and switching back is always possible. |
 | **Translate** | assistant answers | Translates the answer with an auxiliary model call and renders it *bilingual*: the original text stays, the translation sits underneath in a collapsible panel. Cached per session + turn + sequence, so it survives reloads without re-billing. |
 | **Delete** | version cards | Soft-deletes a version: the card is hidden from the ring and the version tree but the session log is untouched and it can be restored. The root conversation can never be deleted. |
+| **Delete message / answer** | user bubbles & assistant answers | Removes one turn (message, answer, tool cards) or just one answer from the transcript, e.g. to clear a pile of "continue" prompts left by a stalled turn. A `deleted · restore` row takes its place, so it is always one click back. |
 | **Version ring** | `‹ 2/3 ›` chip | Walks the answer variants of a turn (`1` is always the model's logged answer) and the sibling versions of a turn, without leaving the conversation. |
 | **Version tree** | conversation view | A turn-level branching tree of the whole conversation family, with the active path highlighted, model labels, timestamps, and restore/delete controls. |
 
@@ -44,7 +45,7 @@ Or from a packed tarball:
 
 ```bash
 npm pack
-dsh plugin --profile web add file:./dsh-message-toolbar-0.3.2.tgz
+dsh plugin --profile web add file:./dsh-message-toolbar-0.3.3.tgz
 ```
 
 Then add `dsh-message-toolbar` to `dsh.profile.bundles` in the profile `package.json`
@@ -104,6 +105,23 @@ That marker is what the version ring, the tree view and delete/restore are built
 - deleting a card only flips a flag in the plugin's state file, it never destroys a session;
 - switching between versions is navigation, not mutation, so it is always reversible.
 
+### Deleting a message
+
+DSH's transcript is append-only: an `assistant/message` may only be appended while its turn's step is
+open, and surface replacements change the model's view, never the human transcript. So **deleting a
+message cannot rewrite the conversation** — no DSH API removes events from a live session. What this
+plugin does instead:
+
+- `hidden.turns` and `hidden.answers` in `~/.dsh/message-toolbar/state.json` record what you deleted;
+- a generated stylesheet hides exactly those rows (`[data-chat-turn="N"]{display:none}`, with the
+  turn-tail row re-shown so the undo stays reachable, or only the `assistant-step` row for an answer);
+- the deleted spot keeps a `deleted · restore` row, so the action is always reversible;
+- the log is untouched, so **later turns still carry the deleted text in the model's context**.
+
+Clearing a message out of the model's memory for good would need a rewritten session (a new child
+session seeded without that turn). That is a separate, much larger operation, and it is not part of
+this feature.
+
 ### Development
 
 ```bash
@@ -146,6 +164,7 @@ MIT
 | **编辑回答** | 助手消息 / 回答卡片 | 你改写的回答作为另一个备选保存，模型原文始终在 `‹` 里可找回，随时能切回去。 |
 | **翻译** | 助手回答 | 用一次辅助模型调用翻译该消息，并做**双语排版**：原文保留，译文以可折叠面板放在下面。按 会话+轮次+序号 缓存，刷新页面不会重复计费。 |
 | **删除** | 版本卡片 | 软删除：从版本徽标和版本树里隐藏，但会话日志不动，可随时恢复。根对话永远不可删除。 |
+| **删除消息 / 回答** | 用户气泡 / 助手回答 | 把某一轮（消息、回答、工具卡片）或单独一条回答从对话里删掉，比如清掉某一轮卡住后连发的一串「继续」。原位留下「已删除 · 恢复」一行，随时能一键找回。 |
 | **版本左右翻** | `‹ 2/3 ›` 徽标 | 在不离开当前对话的情况下翻看这一轮的回答备选（第 1 位永远是模型原始回答）以及同轮的不同版本。 |
 | **版本树** | 会话视图 | 整个会话家族的逐轮分支树，高亮当前路径，带模型标签、时间以及恢复/删除按钮。 |
 
@@ -167,7 +186,7 @@ dsh plugin --profile web add file:$(pwd)
 
 ```bash
 npm pack
-dsh plugin --profile web add file:./dsh-message-toolbar-0.3.2.tgz
+dsh plugin --profile web add file:./dsh-message-toolbar-0.3.3.tgz
 ```
 
 如果插件管理器没有自动登记，请手动把 `dsh-message-toolbar` 加进 profile 的 `package.json`
@@ -224,6 +243,21 @@ dsh plugin --profile web add file:./dsh-message-toolbar-0.3.2.tgz
   被收起的版本在版本徽标里一点即到，侧边栏的「已归档」筛选里也始终找得到；
 - 删除卡片只是在插件状态文件里翻一个标志位，从不销毁会话；
 - 在版本之间切换属于导航而不是修改，随时可逆。
+
+### 删除消息是怎么实现的
+
+DSH 的会话日志是 append-only 的：`assistant/message` 只能追加到还没关闭的 `turn`/`step` 里，
+而 surface 替换只改模型视图、不改人类看到的转录。所以**删除消息没法真的重写对话**——DSH 也没有
+任何 API 能从活着的会话里抹掉事件。本插件实际做的是：
+
+- 在 `~/.dsh/message-toolbar/state.json` 里记下 `hidden.turns` 与 `hidden.answers`；
+- 用动态样式表只隐藏那几行（整轮用 `[data-chat-turn="N"]{display:none}`，同时把 turn-tail 行
+  重新显示，保证「恢复」按钮还能点到；只删回答时只隐藏 `assistant-step` 那行）；
+- 删除的位置留下「已删除 · 恢复」一行，所以这个操作永远可逆；
+- 日志没有变，所以**后续轮次的模型上下文里仍然带着这段被删掉的内容**。
+
+要让某条消息真正从模型记忆里消失，需要重写会话（用一个不带该轮的种子开子会话）。那是另一个大得
+多的操作，不在这个功能的范围内。
 
 ### 开发
 

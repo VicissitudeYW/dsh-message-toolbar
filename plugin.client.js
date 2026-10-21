@@ -157,6 +157,18 @@ const store = {
     this.notify();
   },
 
+  /** Merge the hidden turn/answer lists into the cached payload. */
+  patchHidden(sessionId, hidden) {
+    const entry = this.bySession.get(sessionId);
+    if (!entry || !entry.state || !hidden) return;
+    entry.state.hidden = {
+      turns: Array.isArray(hidden.turns) ? hidden.turns : [],
+      answers: Array.isArray(hidden.answers) ? hidden.answers : [],
+    };
+    entry.updatedAt = Date.now();
+    this.notify();
+  },
+
   async load(sessionId) {
     if (!sessionId) return;
     const g = realGlobal();
@@ -348,6 +360,20 @@ function answerRing(answers, turn) {
   return { turn: turn, alternatives: alternatives, index: index, active: alternatives[index], items: entry.items };
 }
 
+/**
+ * Which rows of one turn the user deleted: the whole turn, or just the answer.
+ * Both are view-only flags, so the reminder row can always put them back.
+ */
+function hiddenOf(state, turn) {
+  const hidden = state ? state.hidden : null;
+  const turns = hidden && Array.isArray(hidden.turns) ? hidden.turns : [];
+  const answers = hidden && Array.isArray(hidden.answers) ? hidden.answers : [];
+  return {
+    turn: typeof turn === 'number' && turns.indexOf(turn) !== -1,
+    answer: typeof turn === 'number' && answers.indexOf(turn) !== -1,
+  };
+}
+
 /** POST an answer-variant operation and fold the reply into the cache. */
 async function answerMutate(operation) {
   const result = await mutate(operation);
@@ -357,15 +383,29 @@ async function answerMutate(operation) {
   return result;
 }
 
+/** POST a hide/restore operation and fold the new lists into the cache. */
+async function hideMutate(operation) {
+  const result = await mutate(operation);
+  if (result && result.hidden) store.patchHidden(operation.sessionId, result.hidden);
+  return result;
+}
+
 /**
- * Hide the logged answer of turns whose visible answer is a variant. The chat
- * frame labels every flow row with `data-chat-flow-kind` and `data-chat-turn`,
- * so one generated stylesheet is enough; if that contract ever changes the
- * rule simply stops matching and both answers render — no error, no breakage.
+ * Hide rows of the transcript that the user deleted, and logged answers whose
+ * visible replacement is a variant. The chat frame labels every flow row with
+ * `data-chat-flow-kind` and `data-chat-turn`, so one generated stylesheet is
+ * enough; if that contract ever changes the rules simply stop matching and the
+ * original rows render again — no error, no breakage.
+ *
+ * Several components want to hide the same turn (the answer card for a
+ * variant, the toolbar for a deleted answer, the tail row for a deleted turn),
+ * so every caller registers under its own owner name and the sheet is rebuilt
+ * from all marks: a whole-turn mark wins over an answer-only mark.
  */
 const nativeHideStyle = {
   node: null,
   key: '',
+  marks: new Map(),
 
   ensure() {
     if (this.node) return this.node;
@@ -377,15 +417,38 @@ const nativeHideStyle = {
     return node;
   },
 
-  apply(turns) {
+  render() {
     const node = this.ensure();
     if (!node) return;
-    const key = turns.slice().sort(function (a, b) { return a - b; }).join(',');
+    const turns = new Map();
+    this.marks.forEach(function (mark) {
+      if (turns.get(mark.turn) === 'turn') return;
+      turns.set(mark.turn, mark.mode);
+    });
+    const numbers = Array.from(turns.keys()).sort(function (a, b) { return a - b; });
+    const key = numbers.map(function (turn) { return turn + ':' + turns.get(turn); }).join(',');
     if (key === this.key) return;
     this.key = key;
-    node.textContent = turns.map(function (turn) {
-      return '[data-chat-flow-kind="assistant-step"][data-chat-turn="' + turn + '"]{display:none}';
-    }).join('\n');
+    const css = [];
+    for (let i = 0; i < numbers.length; i++) {
+      const turn = numbers[i];
+      if (turns.get(turn) === 'turn') {
+        // Hide the whole turn, then bring the tail row back so our own
+        // "deleted · restore" affordance stays clickable.
+        css.push('[data-chat-turn="' + turn + '"]{display:none}');
+        css.push('[data-chat-turn="' + turn + '"][data-chat-flow-kind="turn-tail"]{display:revert}');
+      } else {
+        css.push('[data-chat-flow-kind="assistant-step"][data-chat-turn="' + turn + '"]{display:none}');
+      }
+    }
+    node.textContent = css.join('\n');
+  },
+
+  /** Register (mode) or clear (null) one owner's mark. */
+  set(owner, turn, mode) {
+    if (typeof turn !== 'number' || mode === null || mode === undefined) this.marks.delete(owner);
+    else this.marks.set(owner, { turn: turn, mode: mode === 'turn' ? 'turn' : 'answer' });
+    this.render();
   },
 };
 
@@ -1068,16 +1131,15 @@ function AnswerBody(props) {
   return h('div', { className: 'mtt-alt-text' }, props.text);
 }
 
-/** The turns whose logged answer is currently replaced by a variant. */
-const hiddenTurns = new Set();
-
-function setTurnHidden(turn, hidden) {
-  if (typeof turn !== 'number') return;
-  const changed = hidden ? !hiddenTurns.has(turn) : hiddenTurns.has(turn);
-  if (!changed) return;
-  if (hidden) hiddenTurns.add(turn);
-  else hiddenTurns.delete(turn);
-  nativeHideStyle.apply(Array.from(hiddenTurns));
+/**
+ * Keep one owner's mark on the generated stylesheet while mounted, so several
+ * components can ask for the same turn to be hidden without fighting.
+ */
+function useHideRule(owner, turn, mode) {
+  React.useEffect(function () {
+    nativeHideStyle.set(owner, turn, mode);
+    return function () { nativeHideStyle.set(owner, turn, null); };
+  }, [owner, turn, mode]);
 }
 
 /** Editor for one answer: the model's own text, or a variant being rewritten. */
@@ -1105,6 +1167,40 @@ function AnswerEditor(props) {
 }
 
 /**
+ * The placeholder a deleted row leaves behind: what was removed, and the one
+ * click that puts it back. Deleting is a view flag, so nothing is lost.
+ */
+function HiddenRow(props) {
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState(null);
+
+  async function restore() {
+    setBusy(true);
+    setError(null);
+    try {
+      await hideMutate({
+        action: 'hide',
+        sessionId: props.sessionId,
+        turn: props.turn,
+        scope: props.scope,
+        hidden: false,
+      });
+    } catch (e) {
+      setError(String((e && e.message) || e));
+    }
+    setBusy(false);
+  }
+
+  return h('div', { className: 'mtt-hidden' },
+    h('span', { className: 'mtt-hidden-icon' }, h(TrashIcon)),
+    h('span', { className: 'mtt-hidden-note' }, props.note),
+    h('button', {
+      type: 'button', className: 'mtt-btn mtt-btn-small', disabled: busy, onClick: restore,
+    }, t('restore')),
+    error ? h(ErrorChip, { error: error }) : null);
+}
+
+/**
  * The answer card for one turn: the visible variant plus a ‹ 1/3 › ring whose
  * slot 0 is the model's own answer. Rendered through turnTail, so it sits in
  * the conversation flow exactly where the native answer would be — while the
@@ -1117,17 +1213,28 @@ function AnswerCard(props) {
   const state = toolbar && toolbar.state ? toolbar.state : null;
   const ring = answerRing(state ? state.answers : null, turn);
   const visibleVariant = ring !== null && ring.active.id !== 'native';
+  const hidden = hiddenOf(state, turn);
 
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState(null);
   const [editing, setEditing] = React.useState(null);
 
-  React.useEffect(function () {
-    setTurnHidden(turn, visibleVariant);
-    return function () { setTurnHidden(turn, false); };
-  }, [turn, visibleVariant]);
+  // Registered under this card's own name: the toolbar may hide the same turn
+  // for another reason, and neither should clear the other's mark.
+  useHideRule(
+    'tail:' + turn,
+    turn,
+    hidden.turn ? 'turn' : (hidden.answer || visibleVariant ? 'answer' : null),
+  );
 
-  if (ring === null) return null;
+  if (hidden.turn) {
+    return h(HiddenRow, { sessionId: sessionId, turn: turn, scope: 'turn', note: t('turnDeleted') });
+  }
+  if (ring === null) {
+    return hidden.answer
+      ? h(HiddenRow, { sessionId: sessionId, turn: turn, scope: 'answer', note: t('answerDeleted') })
+      : null;
+  }
 
   const active = ring.active;
   const isNative = active.id === 'native';
@@ -1287,10 +1394,14 @@ function UserMessageView(props) {
   const [menu, setMenu] = React.useState(null);
   const [panel, setPanel] = React.useState(null);
   const [confirmDelete, setConfirmDelete] = React.useState(false);
+  const [confirmHide, setConfirmHide] = React.useState(false);
   const [popUp, setPopUp] = React.useState(false);
   const [notice, setNotice] = React.useState(null);
 
-  useDismiss(confirmDelete, function () { setConfirmDelete(false); });
+  useDismiss(confirmDelete || confirmHide, function () {
+    setConfirmDelete(false);
+    setConfirmHide(false);
+  });
 
   const canEdit = !running && sessionId !== undefined && typeof turn === 'number' && text !== '' && !editing;
 
@@ -1388,6 +1499,25 @@ function UserMessageView(props) {
     setBusy(false);
   }
 
+  // "Delete this message" removes the turn from the transcript view only: the
+  // log is append-only, so the row is hidden here and the tail row offers the
+  // undo. Handy right after a stalled turn left "continue" prompts behind.
+  async function hideTurn() {
+    setConfirmHide(false);
+    if (typeof turn !== 'number') return;
+    setBusy(true);
+    setError(null);
+    try {
+      await hideMutate({
+        action: 'hide', sessionId: sessionId, turn: turn, scope: 'turn', hidden: true,
+      });
+      setNotice(t('turnHidden'));
+    } catch (e) {
+      setError(String((e && e.message) || e));
+    }
+    setBusy(false);
+  }
+
   if (editing) {
     return h('div', { className: 'mtt-row mtt-editing' },
       h('div', { className: 'mtt-editor' },
@@ -1430,6 +1560,25 @@ function UserMessageView(props) {
       }, copied ? h(CheckIcon) : h(CopyIcon)),
       h(ActionButton, { title: t('edit'), disabled: !canEdit, onClick: beginEdit }, h(PencilIcon)),
       h(ActionButton, { title: t('regenerate'), disabled: !canEdit || busy, onClick: retry }, h(RetryIcon)),
+      // Delete this turn from the transcript view (the log keeps every event).
+      h('span', { className: 'mtt-menu-wrap' + (popUp ? ' mtt-up' : '') },
+        h(ActionButton, {
+          title: t('deleteMessage'),
+          disabled: busy || typeof turn !== 'number',
+          active: confirmHide,
+          onClick: function (event) {
+            setPopUp(popupOpensUp(event));
+            setConfirmHide(!confirmHide);
+          },
+        }, h(TrashIcon)),
+        confirmHide
+          ? h('div', { className: 'mtt-pop mtt-pop-confirm' },
+            h('div', { className: 'mtt-pop-title' }, t('deleteMessageConfirm')),
+            h('div', { className: 'mtt-pop-note' }, t('hideNote')),
+            h('div', { className: 'mtt-pop-actions' },
+              h('button', { type: 'button', className: 'mtt-btn', onClick: function () { setConfirmHide(false); } }, t('cancel')),
+              h('button', { type: 'button', className: 'mtt-btn mtt-btn-danger', onClick: hideTurn }, t('delete'))))
+          : null),
       // No translate action on user bubbles: the bubbled prompt is already the
       // language the user wrote in, and the useful direction to read is the
       // answer's. Translation lives on assistant cards only.
@@ -1472,6 +1621,16 @@ function AssistantToolbar(props) {
   const self = versions && versions.find(function (v) { return v.sessionId === sessionId; });
   const isVersion = !!(self && self.parentSessionId);
   const turn = message ? message.turn : undefined;
+  const hiddenRows = hiddenOf(state, turn);
+
+  // Keep a deleted answer (or a deleted turn) out of the flow even while the
+  // turn has no tail row yet; the tail row registers the same mark under its
+  // own name and the stylesheet merges them.
+  useHideRule(
+    'bar:' + String(turn),
+    turn,
+    hiddenRows.turn ? 'turn' : (hiddenRows.answer ? 'answer' : null),
+  );
 
   // The row the picker marks as current: the model the visible answer came
   // from, or the session's configured model when the logged answer is showing.
@@ -1496,16 +1655,19 @@ function AssistantToolbar(props) {
   const [panel, setPanel] = React.useState(null);
   const [answerEdit, setAnswerEdit] = React.useState(null);
   const [confirmDelete, setConfirmDelete] = React.useState(false);
+  const [confirmAnswer, setConfirmAnswer] = React.useState(false);
   const [popUp, setPopUp] = React.useState(false);
 
   // The native dropdown dismisses itself (outside click, Escape, pointer leave),
   // so this listener must not fight it: it only closes our own popovers.
   const modelMenuIsNative = clientPrimitives() !== null;
   useDismiss(
-    (menu !== null && !(modelMenuIsNative && menu === 'model')) || confirmDelete || answerEdit !== null,
+    (menu !== null && !(modelMenuIsNative && menu === 'model'))
+      || confirmDelete || confirmAnswer || answerEdit !== null,
     function () {
       setMenu(null);
       setConfirmDelete(false);
+      setConfirmAnswer(false);
       setAnswerEdit(null);
     },
   );
@@ -1650,6 +1812,24 @@ function AssistantToolbar(props) {
     setBusy(false);
   }
 
+  // Delete this answer from the transcript view. The logged row is hidden and
+  // the turn's tail row carries the undo; the model still reads the original.
+  async function hideAnswer() {
+    setConfirmAnswer(false);
+    if (typeof turn !== 'number') return;
+    setBusy(true);
+    setError(null);
+    try {
+      await hideMutate({
+        action: 'hide', sessionId: sessionId, turn: turn, scope: 'answer', hidden: true,
+      });
+      setNotice(t('answerHidden'));
+    } catch (e) {
+      setError(String((e && e.message) || e));
+    }
+    setBusy(false);
+  }
+
   return h('span', { className: 'mtt-toolbar' },
     h(ActionButton, {
       title: t('regenerate'), disabled: busy || typeof turn !== 'number', onClick: regenerate,
@@ -1697,6 +1877,23 @@ function AssistantToolbar(props) {
       menu === 'translate'
         ? h(LanguageMenu, { title: t('translateTo'), onPick: translate })
         : null),
+    h('span', { className: 'mtt-menu-wrap' + (popUp ? ' mtt-up' : '') },
+      h(ActionButton, {
+        title: t('deleteAnswer'), active: confirmAnswer,
+        disabled: busy || typeof turn !== 'number',
+        onClick: function (event) {
+          setPopUp(popupOpensUp(event));
+          setConfirmAnswer(!confirmAnswer);
+        },
+      }, h(TrashIcon)),
+      confirmAnswer
+        ? h('div', { className: 'mtt-pop mtt-pop-confirm' },
+          h('div', { className: 'mtt-pop-title' }, t('deleteAnswerConfirm')),
+          h('div', { className: 'mtt-pop-note' }, t('hideNote')),
+          h('div', { className: 'mtt-pop-actions' },
+            h('button', { type: 'button', className: 'mtt-btn', onClick: function () { setConfirmAnswer(false); } }, t('cancel')),
+            h('button', { type: 'button', className: 'mtt-btn mtt-btn-danger', onClick: hideAnswer }, t('delete'))))
+        : null),
     isVersion
       ? h('span', { className: 'mtt-menu-wrap' + (popUp ? ' mtt-up' : '') },
         h(ActionButton, {
@@ -1732,7 +1929,9 @@ function TranslationTail(props) {
   const translations = state ? state.translations : null;
   const [collapsed, setCollapsed] = React.useState({});
   const entries = translationsForTurn(translations, turn);
-  if (entries.length === 0) return null;
+  // A deleted turn takes its translation cards with it: the tail row survives
+  // the hide rule, so this has to be an explicit check.
+  if (entries.length === 0 || hiddenOf(state, turn).turn) return null;
 
   const cards = [];
   for (let i = 0; i < entries.length; i++) {
@@ -2011,6 +2210,10 @@ const CSS = [
   '.mtt-hint{font-size:11px;color:var(--mtt-fg-3)}',
   '.mtt-error{font-size:11px;color:var(--mtt-danger);margin-top:2px;max-width:76%;text-align:right;white-space:pre-wrap;align-self:flex-end}',
   '.mtt-notice{font-size:11px;color:var(--mtt-ok);margin-top:2px;align-self:flex-end}',
+  '.mtt-hidden{display:flex;align-items:center;gap:8px;margin:6px 0 2px;padding:6px 10px;border:.5px dashed var(--mtt-line-strong);border-radius:var(--mtt-radius-lg);background:var(--mtt-surface-2);color:var(--mtt-fg-3);font-size:12px}',
+  '.mtt-hidden-icon{display:inline-flex;align-items:center;color:var(--mtt-fg-3)}',
+  '.mtt-hidden-note{flex:1;min-width:0}',
+  '.mtt-hidden .mtt-btn{margin-left:auto}',
   '.mtt-trans-wrap{margin:6px 0 2px;display:flex;flex-direction:column;gap:6px;width:100%}',
   '.mtt-trans-card{border:1px solid var(--mtt-line);background:var(--mtt-surface-2);color:var(--mtt-fg);border-radius:var(--mtt-radius-lg);padding:8px 10px}',
   '.mtt-trans-head{display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:11px;color:var(--mtt-fg-2);margin-bottom:4px}',
@@ -2108,6 +2311,16 @@ const I18N = {
     switched: 'Answering with {name}…',
     deleteCard: 'Delete this answer card',
     deleteCardConfirm: 'Delete this answer card? You can restore it from the Versions view.',
+    deleteMessage: 'Delete this message',
+    deleteMessageConfirm: 'Delete this message and its answer from the transcript?',
+    deleteAnswer: 'Delete this answer',
+    deleteAnswerConfirm: 'Delete this answer from the transcript?',
+    hideNote: 'It is hidden in this conversation only — the model still reads the original in later turns.',
+    turnDeleted: 'This message was deleted',
+    answerDeleted: 'This answer was deleted',
+    restore: 'Restore',
+    turnHidden: 'Message deleted from view',
+    answerHidden: 'Answer deleted from view',
     delete: 'Delete',
     deletedCard: 'Card deleted',
     fromUser: 'your message',
@@ -2177,6 +2390,16 @@ const I18N = {
     switched: '正在用 {name} 回答…',
     deleteCard: '删除这张回答卡片',
     deleteCardConfirm: '删除这张回答卡片？可以在“版本”视图里恢复。',
+    deleteMessage: '删除这条消息',
+    deleteMessageConfirm: '把这条消息和它的回答从对话里删掉？',
+    deleteAnswer: '删除这条回答',
+    deleteAnswerConfirm: '把这条回答从对话里删掉？',
+    hideNote: '只在这个会话里隐藏，模型后续轮次读到的仍是原始内容。',
+    turnDeleted: '这条消息已删除',
+    answerDeleted: '这条回答已删除',
+    restore: '恢复',
+    turnHidden: '消息已从视图删除',
+    answerHidden: '回答已从视图删除',
     delete: '删除',
     deletedCard: '卡片已删除',
     fromUser: '你的消息',
