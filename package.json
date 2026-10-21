@@ -1,0 +1,48 @@
+{
+  "name": "dsh-message-toolbar",
+  "version": "0.1.0",
+  "description": "DSH message toolbar: edit, regenerate, per-model branches, bilingual translation, copy, delete and a version tree",
+  "license": "MIT",
+  "type": "module",
+  "main": "lib/index.js",
+  "files": [
+    "lib/",
+    "plugin.client.js",
+    "cordis.patch.yml",
+    "docs/",
+    "scripts/",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "plugin",
+    "message-edit",
+    "version-tree"
+  ],
+  "peerDependencies": {
+    "@deepseek-ai/dsh": ">=0.2.0-rc.2 <0.3.0-0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-api-session-controller",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-workspace",
+        "@deepseek-ai/dsh-client-modules"
+      ]
+    }
+  },
+  "scripts": {
+    "build": "node scripts/build-client.mjs",
+    "sync": "node scripts/build-client.mjs && node scripts/sync-profile.mjs",
+    "test": "node --test test/host.test.mjs test/logic.test.mjs test/bundle.test.mjs"
+  }
+}

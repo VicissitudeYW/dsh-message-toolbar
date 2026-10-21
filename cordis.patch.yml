@@ -1,0 +1,4 @@
+
+- insert:
+    - id: message-toolbar
+      name: dsh-message-toolbar
