@@ -510,10 +510,11 @@ function buildTurnTree(versions, currentSessionId) {
 
 /* --------------------------------------------------------------- icons -- */
 
-// Edge length of every icon in the toolbar row. DSH's own message actions draw
-// at 16px; these sit in a tight 2px-gap row and read a little small there, so
-// they get 18 and the check mark 16.
-const ICON = 18;
+// Edge length of every icon in the toolbar row. The row's own CSS (see the
+// .mtt-act svg rule) sets the rendered size to DSH's native 17px; the attribute
+// only has to be a sane fallback. All glyphs share the native 16-unit grid so
+// stroke weight and optical size match the built-in actions next to them.
+const ICON = 16;
 
 function CopyIcon() {
   return React.createElement('svg', { width: ICON, height: ICON, viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': true },
@@ -543,16 +544,17 @@ function RetryIcon() {
 }
 
 // A "languages" mark (a 文-style stroke group plus an A) instead of a globe:
-// in this row a globe reads as "web / browse", not "translate".
+// in this row a globe reads as "web / browse", not "translate". Drawn on the
+// same 16-unit grid and 1.3 stroke as the built-in action icons.
 function TranslateIcon() {
-  return React.createElement('svg', { width: ICON, height: ICON, viewBox: '0 0 24 24', fill: 'none', 'aria-hidden': true },
+  return React.createElement('svg', { width: ICON, height: ICON, viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': true },
     React.createElement('path', {
-      d: 'M2.6 7.2h7.8M6.5 4.4v2.8M3.2 10.1c1.4 3.6 3.5 6.1 6.3 7.9M9.8 10.1c-1.4 3.4-3.7 6.3-6.5 8.1',
-      stroke: 'currentColor', strokeWidth: 1.9, strokeLinecap: 'round', strokeLinejoin: 'round',
+      d: 'M2 4.6h7M5.6 2.3v2.3M2.9 6.9c.9 2.4 2.4 4.4 4.4 6.1M8.2 6.9c-1 2.6-2.8 4.9-5.6 6.7',
+      stroke: 'currentColor', strokeWidth: 1.3, strokeLinecap: 'round', strokeLinejoin: 'round',
     }),
     React.createElement('path', {
-      d: 'M17.4 4.6L12.9 19.4h9L17.4 4.6M14.5 14.6h5.8',
-      stroke: 'currentColor', strokeWidth: 1.9, strokeLinecap: 'round', strokeLinejoin: 'round',
+      d: 'M12.6 2.8L10.4 14h4.6L12.6 2.8M11 10.7h3.2',
+      stroke: 'currentColor', strokeWidth: 1.3, strokeLinecap: 'round', strokeLinejoin: 'round',
     }));
 }
 
@@ -1259,14 +1261,20 @@ const CSS = [
   '.mtt-line{display:flex;justify-content:flex-end;width:100%;min-width:0}',
   '.mtt-bubble{max-width:76%;background:var(--dsw-alias-interactive-bg,rgba(0,0,0,.05));border-radius:16px 16px 4px 16px;padding:10px 14px;color:inherit;font:inherit;min-width:0}',
   '.mtt-text{white-space:pre-wrap;word-break:break-word}',
-  '.mtt-actions{display:flex;gap:2px;align-items:center;justify-content:flex-end;flex-wrap:wrap;opacity:0;transition:opacity .12s}',
-  '.mtt-row:hover .mtt-actions{opacity:1}',
-  '.mtt-act{background:none;border:0;padding:3px;border-radius:6px;color:var(--dsw-alias-label-secondary,#6b7280);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font:inherit}',
-  '.mtt-act:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.06));color:inherit}',
-  '.mtt-act:disabled{opacity:.35;cursor:default}',
-  '.mtt-act-on{color:#2563eb;background:rgba(37,99,235,.08)}',
-  '.mtt-dots{font-size:12px;letter-spacing:1px}',
-  '.mtt-ring{display:inline-flex;align-items:center;gap:1px;font-size:11px;color:var(--dsw-alias-label-tertiary,#9ca3af);margin-right:2px}',
+  // Action rows mirror DSH's own MessageIconActions.module.css exactly:
+  // 28px hit box (plus the user's content-font delta), 6px padding, 8px gap,
+  // 17px glyphs in a clock="end" row, tertiary label colour.
+  '.mtt-actions{display:flex;gap:8px;align-items:center;justify-content:flex-end;height:calc(28px + var(--dsh-content-font-delta,0px));opacity:0;transition:opacity 80ms}',
+  '.mtt-row:hover .mtt-actions,.mtt-row:focus-within .mtt-actions{opacity:1}',
+  '.mtt-toolbar{display:inline-flex;align-items:center;gap:8px;position:relative}',
+  '.mtt-act{background:0 0;border:0;padding:6px;width:calc(28px + var(--dsh-content-font-delta,0px));height:calc(28px + var(--dsh-content-font-delta,0px));border-radius:var(--dsw-radius-sm,6px);color:var(--dsw-alias-label-tertiary,#9ca3af);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font:inherit}',
+  '.mtt-act svg{width:calc(17px + var(--dsh-content-font-delta,0px));height:calc(17px + var(--dsh-content-font-delta,0px))}',
+  '.mtt-act:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.06));color:var(--dsw-alias-label-secondary,#6b7280)}',
+  '.mtt-act:disabled{opacity:.4;cursor:default}',
+  '.mtt-act:disabled:hover{background:0 0;color:var(--dsw-alias-label-tertiary,#9ca3af)}',
+  '.mtt-act-on{color:var(--dsw-alias-label-secondary,#6b7280);background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.06))}',
+  '.mtt-dots{font-size:13px;letter-spacing:1px}',
+  '.mtt-ring{display:inline-flex;align-items:center;gap:1px;font-size:11px;color:var(--dsw-alias-label-tertiary,#9ca3af);margin-right:0}',
   '.mtt-ring-btn{background:none;border:0;cursor:pointer;padding:0 3px;font-size:13px;color:inherit}',
   '.mtt-ring-btn:disabled{opacity:.3}',
   '.mtt-chip{font-size:11px;padding:1px 6px;border-radius:8px;background:rgba(37,99,235,.1);color:#2563eb;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
@@ -1292,7 +1300,7 @@ const CSS = [
   '.mtt-hint{font-size:11px;color:#9ca3af}',
   '.mtt-error{font-size:11px;color:#dc2626;margin-top:2px;max-width:76%;text-align:right;white-space:pre-wrap;align-self:flex-end}',
   '.mtt-notice{font-size:11px;color:#059669;margin-top:2px;align-self:flex-end}',
-  '.mtt-toolbar{display:inline-flex;align-items:center;gap:2px;position:relative}',
+  '.mtt-toolbar{display:inline-flex;align-items:center;gap:8px;position:relative}',
   '.mtt-trans-wrap{margin:6px 0 2px;display:flex;flex-direction:column;gap:6px;width:100%}',
   '.mtt-trans-card{border:1px solid rgba(16,185,129,.35);background:rgba(16,185,129,.06);border-radius:10px;padding:8px 10px}',
   '.mtt-trans-head{display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:11px;color:#059669;margin-bottom:4px}',
