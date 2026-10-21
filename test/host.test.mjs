@@ -84,7 +84,7 @@ function makeContext(options = {}) {
   const created = [];
   const followups = [];
   const sessions = new Map([
-    ['A', liveSession('A', undefined, rootEvents(), 0)],
+    ['A', liveSession('A', undefined, options.rootEvents ?? rootEvents(), 0)],
     ['B', liveSession('B', 'A', versionedEvents(options.markerType), 5)],
   ]);
   const registry = {
@@ -193,6 +193,30 @@ test('GET projects the version family and the message index', async () => {
   assert.equal(json.messages[1].turn, 1);
   assert.equal(json.messages[3].turn, 2);
   assert.deepEqual(json.translations, {});
+});
+
+// A turn that ended without a durable answer has no native action row, so the
+// client needs to know which turns those are: `answered: false` is what draws
+// the fallback toolbar (retry / model switch / delete) for a failed answer.
+test('GET reports per-turn answered and end reason', async () => {
+  const events = rootEvents();
+  events.push({ type: 'turn/start', seq: 10, time: 1010, data: { turn: 3 } });
+  events.push({ type: 'user/message', seq: 11, time: 1011, data: textMessage('u3', 'user', 'third question') });
+  events.push({ type: 'turn/end', seq: 12, time: 1012, data: { turn: 3, reason: { kind: 'error' } } });
+  events.push({ type: 'turn/start', seq: 13, time: 1013, data: { turn: 4 } });
+  events.push({ type: 'user/message', seq: 14, time: 1014, data: textMessage('u4', 'user', 'fourth question') });
+
+  const { ctx, services } = makeContext({ rootEvents: events });
+  apply(ctx);
+
+  const { status, json } = await call(services.handler, 'GET', undefined, '?sessionId=A');
+  assert.equal(status, 200);
+  const byTurn = new Map(json.turns.map((t) => [t.turn, t]));
+  assert.equal(byTurn.get(1).answered, true, 'a turn with a durable answer says so');
+  assert.equal(byTurn.get(3).answered, false, 'a failed turn has no answer');
+  assert.equal(byTurn.get(3).reason, 'error', 'the end reason reaches the client');
+  assert.equal(byTurn.get(4).open, true, 'a turn that never ended is open');
+  assert.equal(byTurn.get(4).answered, false);
 });
 
 test('POST edit creates a rewound child with a durable marker', async () => {

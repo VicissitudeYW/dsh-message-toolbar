@@ -330,7 +330,8 @@ test('both rows offer a delete action and the sheet knows how to hide a turn', (
   assert.ok(assistantTitles.includes('Delete this answer'), 'the assistant row must offer "delete this answer"');
 
   const sheet = css.join('\n');
-  assert.match(sheet, /\.mtt-hidden/);
+  // Deleting leaves nothing behind: no placeholder row, no restore affordance.
+  assert.doesNotMatch(sheet, /\.mtt-hidden/);
   assert.match(sheet, /\.mtt-pop-note/);
 });
 
@@ -440,6 +441,33 @@ test('a delete is confirmed with one question and reported through a toast', () 
   assert.match(source, /showToast\(failureText\(e\), 'error'\)/, 'delete failures land in the same banner');
   assert.doesNotMatch(source, /hideNote/, 'the confirm popover asks the question only');
   assert.doesNotMatch(source, /deleteVariantNote/, 'the confirm popover asks the question only');
+});
+
+// A turn that ended without an answer has no native action row (DSH renders that
+// row only for a turn with a closing message), so the failed answer would have no
+// toolbar at all. The turn tail draws one instead, with retry / model switch /
+// delete and none of the actions that need text.
+test('a turn without an answer still gets a toolbar', () => {
+  const { css } = applyToSlots();
+  const sheet = css.join('\n');
+  assert.match(sheet, /\.mtt-tail-actions/);
+
+  const source = fs.readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8');
+  assert.match(source, /function turnInfo\(state, turn\)/, 'the host reports per-turn answered/open');
+  assert.match(source, /info\.answered === false && info\.open !== true/, 'only a closed, unanswered turn gets one');
+  assert.match(source, /h\(AssistantToolbar, \{ sessionId: sessionId, turn: turn, failed: true \}\)/);
+  assert.match(source, /const failed = props\.failed === true;/);
+  assert.match(source, /typeof props\.turn === 'number' \? props\.turn/, 'the row takes a turn, not only a messageId');
+  assert.match(source, /else if \(failed\) \{/, 'deleting a failed turn hides the whole turn');
+  assert.match(source, /showToast\(t\('turnHidden'\)\)/);
+});
+
+// Deleting is a removal, not a tombstone: nothing of ours may be left in the flow.
+test('a deleted row leaves no placeholder behind', () => {
+  const source = fs.readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(source, /HiddenRow/, 'no restore row is drawn anywhere');
+  assert.doesNotMatch(source, /mtt-hidden/);
+  assert.doesNotMatch(source, /display:revert/, 'a deleted turn hides its own tail row too');
 });
 
 // Text must never be painted with a literal colour: every value has to come

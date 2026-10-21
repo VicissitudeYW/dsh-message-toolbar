@@ -117,8 +117,17 @@ Errors: `TypeError` → `400 {error}`, anything else → `409 {error}`.
 session log (see below). `active: "native"` means the logged answer is the visible one.
 
 Writes are debounced (200 ms) and atomic (temp file + rename). The store is a convenience
-layer: a failure to persist never fails the operation. Delete is deliberately soft — the
-session log and the branch itself stay valid, so restore is exact.
+layer: a failure to persist never fails the operation.
+
+### Turns without an answer
+
+`GET ?sessionId=` also carries the per-turn facts the transcript itself does not expose: `turns` is
+`[{ turn, text, time, answered, reason, open? }]`, derived from the log by `extractTurns` — `answered`
+once a durable `assistant/message` with `surfaceOp: 'append'` (or none) lands in that turn, `reason`
+from the `turn/end` payload (`error`, `aborted`, `completed`, …), `open: true` for a turn that never
+ended. The chat view draws its action row only for a turn with a *closing message*, so a turn that
+failed has no toolbar at all; the answer card uses `answered: false && !open` to draw one itself
+(`.mtt-tail-actions`, `AssistantToolbar` with `failed: true` → retry / model switch / delete only).
 
 ## Client side
 
@@ -216,8 +225,8 @@ records it and the same generated stylesheet applies it:
 
 | scope | rule | note |
 | --- | --- | --- |
-| `turn` | `[data-chat-turn="N"]{display:none}` + `[data-chat-turn="N"][data-chat-flow-kind="turn-tail"]{display:revert}` | the tail row is re-shown so the `deleted · restore` row stays clickable |
-| `answer` | `[data-chat-flow-kind="assistant-step"][data-chat-turn="N"]{display:none}` | the user message and tool cards stay |
+| `turn` | `[data-chat-turn="N"]{display:none}` | the turn's own tail row goes too: a deleted turn leaves no placeholder behind |
+| `answer` | `[data-chat-flow-kind="assistant-step"][data-chat-turn="N"]{display:none}` | the user message and tool cards stay, and so does the action row |
 
 Several components want the same turn hidden (the answer card for an active variant, the assistant
 toolbar for a deleted answer, the tail row for a deleted turn), so `nativeHideStyle` keeps a

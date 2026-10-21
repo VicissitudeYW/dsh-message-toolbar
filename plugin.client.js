@@ -611,10 +611,9 @@ const nativeHideStyle = {
     for (let i = 0; i < numbers.length; i++) {
       const turn = numbers[i];
       if (turns.get(turn) === 'turn') {
-        // Hide the whole turn, then bring the tail row back so our own
-        // "deleted · restore" affordance stays clickable.
+        // Gone means gone: the whole turn leaves the flow, its own tail row
+        // included — deleting is a view-level removal with nothing left behind.
         css.push('[data-chat-turn="' + turn + '"]{display:none}');
-        css.push('[data-chat-turn="' + turn + '"][data-chat-flow-kind="turn-tail"]{display:revert}');
       } else {
         css.push('[data-chat-flow-kind="assistant-step"][data-chat-turn="' + turn + '"]{display:none}');
       }
@@ -1546,40 +1545,6 @@ function AnswerEditBox(props) {
 }
 
 /**
- * The placeholder a deleted row leaves behind: what was removed, and the one
- * click that puts it back. Deleting is a view flag, so nothing is lost.
- */
-function HiddenRow(props) {
-  const [busy, setBusy] = React.useState(false);
-  const [error, setError] = React.useState(null);
-
-  async function restore() {
-    setBusy(true);
-    setError(null);
-    try {
-      await hideMutate({
-        action: 'hide',
-        sessionId: props.sessionId,
-        turn: props.turn,
-        scope: props.scope,
-        hidden: false,
-      });
-    } catch (e) {
-      setError(String((e && e.message) || e));
-    }
-    setBusy(false);
-  }
-
-  return h('div', { className: 'mtt-hidden' },
-    h('span', { className: 'mtt-hidden-icon' }, h(TrashIcon)),
-    h('span', { className: 'mtt-hidden-note' }, props.note),
-    h('button', {
-      type: 'button', className: 'mtt-btn mtt-btn-small', disabled: busy, onClick: restore,
-    }, t('restore')),
-    error ? h(ErrorChip, { error: error }) : null);
-}
-
-/**
  * The answer card for one turn: the visible variant plus a ‹ 1/3 › ring whose
  * slot 0 is the model's own answer. Rendered through turnTail, so it sits in
  * the conversation flow exactly where the native answer would be — while the
@@ -1616,13 +1581,24 @@ function AnswerCard(props) {
     hidden.turn ? 'turn' : (hidden.answer || showingVariant ? 'answer' : null),
   );
 
-  if (hidden.turn) {
-    return h(HiddenRow, { sessionId: sessionId, turn: turn, scope: 'turn', note: t('turnDeleted') });
+  // Deleting leaves nothing behind — no placeholder, no "restore" row. A hidden
+  // turn hides its own tail row too (see the stylesheet rule), so there is
+  // nothing to draw here anyway.
+  if (hidden.turn || hidden.answer) return null;
+
+  if (!showingVariant) {
+    // A turn that ended without an answer has no native action row (DSH renders
+    // that row only for a turn with a closing message), so the failed answer
+    // would have no toolbar at all. This is the one place that draws it, with
+    // the actions that make sense on nothing: retry, retry with another model,
+    // delete.
+    const info = turnInfo(state, turn);
+    if (info !== undefined && info.answered === false && info.open !== true) {
+      return h('div', { className: 'mtt-tail-actions' },
+        h(AssistantToolbar, { sessionId: sessionId, turn: turn, failed: true }));
+    }
+    return null;
   }
-  if (hidden.answer) {
-    return h(HiddenRow, { sessionId: sessionId, turn: turn, scope: 'answer', note: t('answerDeleted') });
-  }
-  if (!showingVariant) return null;
 
   const active = isNative ? null : ring.active;
   const streamingText = live === null ? '' : live.text;
@@ -1647,6 +1623,17 @@ function AnswerCard(props) {
         ? h('div', { className: 'mtt-answer-wait' }, h(WaitLine, { label: t('generating') }))
         : h('div', { className: 'mtt-answer-body' },
           h(AnswerBody, { text: shownText, streaming: live !== null })));
+}
+
+/**
+ * Per-turn facts the host derives from the log, keyed by turn number: `text` of
+ * the user message, `open` for a turn that has not ended, `answered` once the
+ * turn got a durable answer, and `reason` (the `turn/end` kind).
+ */
+function turnInfo(state, turn) {
+  const turns = state && Array.isArray(state.turns) ? state.turns : null;
+  if (turns === null || typeof turn !== 'number') return undefined;
+  return turns.find(function (item) { return item.turn === turn; });
 }
 
 /* --------------------------------------------------------------- components -- */
@@ -1882,7 +1869,11 @@ function AssistantToolbar(props) {
   const message = messages && messages.find(function (m) { return m.id === messageId; });
   const self = versions && versions.find(function (v) { return v.sessionId === sessionId; });
   const isVersion = !!(self && self.parentSessionId);
-  const turn = message ? message.turn : undefined;
+  const turn = typeof props.turn === 'number' ? props.turn : (message ? message.turn : undefined);
+  // A failed turn has no answer, so the row offers only what makes sense on
+  // nothing: retry, retry with another model, delete. No edit, no translate —
+  // there is no text to edit and nothing to translate.
+  const failed = props.failed === true;
   const hiddenRows = hiddenOf(state, turn);
   const ring = answerRing(state ? state.answers : null, turn);
   const live = useLiveAnswer(sessionId, turn);
@@ -2119,6 +2110,12 @@ function AssistantToolbar(props) {
           action: 'answer-delete', sessionId: sessionId, turn: turn, id: current.active.id,
         });
         showToast(t('variantDeleted'));
+      } else if (failed) {
+        // A failed turn has no answer row to hide, so the whole turn goes.
+        await hideMutate({
+          action: 'hide', sessionId: sessionId, turn: turn, scope: 'turn', hidden: true,
+        });
+        showToast(t('turnHidden'));
       } else {
         await hideMutate({
           action: 'hide', sessionId: sessionId, turn: turn, scope: 'answer', hidden: true,
@@ -2135,11 +2132,13 @@ function AssistantToolbar(props) {
     h(ActionButton, {
       title: t('regenerate'), disabled: working || typeof turn !== 'number', onClick: regenerate,
     }, h(RetryIcon)),
-    h(ActionButton, {
-      title: edit !== null ? t('exitEdit') : t('editAnswer'), active: edit !== null,
-      disabled: working || typeof turn !== 'number',
-      onClick: openAnswerEditor,
-    }, h(PencilIcon)),
+    failed
+      ? null
+      : h(ActionButton, {
+        title: edit !== null ? t('exitEdit') : t('editAnswer'), active: edit !== null,
+        disabled: working || typeof turn !== 'number',
+        onClick: openAnswerEditor,
+      }, h(PencilIcon)),
     h(ModelMenuHost, {
       title: t('switchModel'),
       open: menu === 'model',
@@ -2154,20 +2153,22 @@ function AssistantToolbar(props) {
       onToggle: openModelMenu,
       onClose: function () { setMenu(null); },
     }),
-    h(LanguageMenuHost, {
-      title: t('translate'),
-      pickTitle: t('translateTo'),
-      open: menu === 'translate',
-      up: popUp,
-      disabled: busy || !message,
-      current: prefs.lang,
-      onToggle: function (event) { toggleMenu('translate', event); },
-      onPick: translate,
-      onClose: function () { setMenu(null); },
-    }),
+    failed
+      ? null
+      : h(LanguageMenuHost, {
+        title: t('translate'),
+        pickTitle: t('translateTo'),
+        open: menu === 'translate',
+        up: popUp,
+        disabled: busy || !message,
+        current: prefs.lang,
+        onToggle: function (event) { toggleMenu('translate', event); },
+        onPick: translate,
+        onClose: function () { setMenu(null); },
+      }),
     h('span', { className: 'mtt-menu-wrap' + (popUp ? ' mtt-up' : '') },
       h(ActionButton, {
-        title: deletingVariant ? t('deleteVariant') : t('deleteAnswer'),
+        title: failed ? t('deleteMessage') : (deletingVariant ? t('deleteVariant') : t('deleteAnswer')),
         active: confirmAnswer,
         disabled: working || typeof turn !== 'number',
         onClick: function (event) {
@@ -2178,7 +2179,7 @@ function AssistantToolbar(props) {
       confirmAnswer
         ? h('div', { className: 'mtt-pop mtt-pop-confirm' },
           h('div', { className: 'mtt-pop-title' },
-            deletingVariant ? t('deleteVariantConfirm') : t('deleteAnswerConfirm')),
+            failed ? t('deleteMessageConfirm') : (deletingVariant ? t('deleteVariantConfirm') : t('deleteAnswerConfirm'))),
           h('div', { className: 'mtt-pop-actions' },
             h('button', { type: 'button', className: 'mtt-btn', onClick: function () { setConfirmAnswer(false); } }, t('cancel')),
             h('button', { type: 'button', className: 'mtt-btn mtt-btn-danger', onClick: deleteVisible }, t('delete'))))
@@ -2374,7 +2375,7 @@ const CSS = [
   // Every surface we own starts from the themed label colour, and every control
   // we own inherits it: a button with no colour of its own would otherwise fall
   // back to the UA's ButtonText, which stays black under a dark app theme.
-  '.mtt-row,.mtt-toolbar,.mtt-answer,.mtt-alt,.mtt-hidden,.mtt-trans-wrap,.mtt-view,.mtt-editor,.mtt-pop,.mtt-toast{color:var(--mtt-fg)}',
+  '.mtt-row,.mtt-toolbar,.mtt-answer,.mtt-alt,.mtt-trans-wrap,.mtt-view,.mtt-editor,.mtt-pop,.mtt-toast{color:var(--mtt-fg)}',
   // `:where()` keeps this at zero specificity so a variant that does state its
   // own ink — .mtt-btn-primary, .mtt-btn-danger — still wins.
   ':where(button.mtt-btn,button.mtt-act,button.mtt-pop-item,button.mtt-ring-btn,button.mtt-node-card,button.mtt-trans-toggle,textarea.mtt-textarea){color:inherit}',
@@ -2419,6 +2420,7 @@ const CSS = [
   // The visible answer sits in the flow like a normal message: no card chrome,
   // no colour of our own — it inherits the answer typography of the app.
   '.mtt-answer{margin:6px 0 2px;width:100%;min-width:0}',
+  '.mtt-tail-actions{display:flex;justify-content:flex-end;margin:2px 0 4px}',
   '.mtt-answer-body{overflow-wrap:anywhere;min-width:0}',
   // Editing an answer where it stands: a well holding the markdown source, the
   // "editing" label on the left, the way out and the way to keep it on the
@@ -2478,10 +2480,6 @@ const CSS = [
   '.mtt-editor-actions{display:flex;gap:8px;align-items:center;justify-content:flex-end}',
   '.mtt-hint{font-size:11px;color:var(--mtt-fg-3)}',
   '.mtt-error{font-size:11px;color:var(--mtt-danger);margin-top:2px;max-width:76%;text-align:right;white-space:pre-wrap;align-self:flex-end}',
-  '.mtt-hidden{display:flex;align-items:center;gap:8px;margin:6px 0 2px;padding:6px 10px;border:.5px dashed var(--mtt-line-strong);border-radius:var(--mtt-radius-lg);background:var(--mtt-surface-2);color:var(--mtt-fg-3);font-size:12px}',
-  '.mtt-hidden-icon{display:inline-flex;align-items:center;color:var(--mtt-fg-3)}',
-  '.mtt-hidden-note{flex:1;min-width:0}',
-  '.mtt-hidden .mtt-btn{margin-left:auto}',
   '.mtt-trans-wrap{margin:6px 0 2px;display:flex;flex-direction:column;gap:6px;width:100%}',
   '.mtt-trans-card{border:1px solid var(--mtt-line);background:var(--mtt-surface-2);color:var(--mtt-fg);border-radius:var(--mtt-radius-lg);padding:8px 10px}',
   '.mtt-trans-head{display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:11px;color:var(--mtt-fg-2);margin-bottom:4px}',
@@ -2530,7 +2528,6 @@ const I18N = {
     archived: 'Archived',
     deletedCardTag: 'Deleted',
     currentTag: 'Current',
-    restore: 'Restore',
     copy: 'Copy',
     copied: 'Copied',
     edit: 'Edit message',
@@ -2579,9 +2576,6 @@ const I18N = {
     deleteMessageConfirm: 'Delete this message?',
     deleteAnswer: 'Delete this answer',
     deleteAnswerConfirm: 'Delete this answer?',
-    turnDeleted: 'This message was deleted',
-    answerDeleted: 'This answer was deleted',
-    restore: 'Restore',
     turnHidden: 'Message deleted',
     answerHidden: 'Answer deleted',
     delete: 'Delete',
@@ -2606,7 +2600,6 @@ const I18N = {
     archived: '已归档',
     deletedCardTag: '已删除',
     currentTag: '当前',
-    restore: '恢复',
     copy: '复制',
     copied: '已复制',
     edit: '编辑消息',
@@ -2655,9 +2648,6 @@ const I18N = {
     deleteMessageConfirm: '删除这条消息？',
     deleteAnswer: '删除这条回答',
     deleteAnswerConfirm: '删除这条回答？',
-    turnDeleted: '这条消息已删除',
-    answerDeleted: '这条回答已删除',
-    restore: '恢复',
     turnHidden: '已删除这条消息',
     answerHidden: '已删除这条回答',
     delete: '删除',

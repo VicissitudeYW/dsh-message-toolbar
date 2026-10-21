@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.6
+
+- **Deleting really deletes.** A hidden turn or answer no longer leaves a `deleted · restore` row behind:
+  the whole turn goes (its own tail row included) or just the answer row, and a toast confirms it. The
+  state flag and the generated stylesheet are unchanged — there is simply nothing drawn where the row was.
+- **A failed answer has a toolbar.** DSH draws its action row only for a turn with a closing message, so a
+  turn that ended in an error (or an abort) had no toolbar at all. The host now reports per-turn
+  `answered` / `reason` / `open` in the `turns` payload, and the answer card draws a row for a closed,
+  unanswered turn: regenerate, regenerate with another model, delete (which hides the whole turn, since
+  there is no answer row to hide). No edit and no translate — there is no text to work on.
+
 ## 0.4.5
 
 - **The answer stays above its file changes.** A variant is drawn in the turn tail, which is a *list*
