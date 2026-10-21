@@ -129,6 +129,8 @@ plugin does instead:
 The button asks one question (`Delete this answer?`) and nothing else: confirmations are reported by a
 banner at the top of the window — DSH's own `Toast` when the primitives package is present, a copy of
 its stylesheet otherwise — so the action row stays a row of icons and never grows status text.
+Success and failure take the same route: a failure keeps the host's sentence (it names what broke),
+holds longer, and carries the warning glyph instead of the check.
 
 Clearing a message out of the model's memory for good would need a rewritten session (a new child
 session seeded without that turn). That is a separate, much larger operation, and it is not part of
@@ -279,7 +281,9 @@ DSH 的会话日志是 append-only 的：`assistant/message` 只能追加到还�
 
 确认框只问一句「删除这条回答？」，不再附带说明；删完的结果由窗口顶部的横幅提示——装了
 primitives 就用 DSH 自己的 `Toast`，否则用一份照它的样式表画的副本——所以动作行永远只是图标，
-不会长出状态文字。插件所有颜色都走主题别名，浅色/深色切换时文字、边框、弹层、卡片一起跟着变。
+不会长出状态文字。成功和失败走同一条路：失败会把宿主给出的那句话原样显示（说明是哪一步坏了），
+停留更久，并且用的是警示图标而不是对勾。插件所有颜色都走主题别名，浅色/深色切换时文字、边框、
+弹层、卡片一起跟着变。
 
 要让某条消息真正从模型记忆里消失，需要重写会话（用一个不带该轮的种子开子会话）。那是另一个大得
 多的操作，不在这个功能的范围内。

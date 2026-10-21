@@ -7,7 +7,9 @@
 - **Results are reported by a banner, not by the row.** Every "answer deleted / message deleted /
   variant deleted / copied" notice that used to appear as text inside the action row is now a toast at
   the top of the window that fades on its own (DSH's own `Toast`, or a copy of its stylesheet when the
-  primitives package is missing). The action row is icons only.
+  primitives package is missing). The action row is icons only. Failures use the same banner — the
+  host's own sentence, the warning glyph and a longer hold — so a delete that did not happen says so
+  instead of failing silently behind a closed popover.
 - **Every colour now resolves through a theme alias.** The sheet defines its own aliases
   (`--mtt-surface`, `--mtt-fg`, `--mtt-line`, `--mtt-hover`, `--mtt-primary`, …) on `body`, where the
   theme declares its palette, and no rule hardcodes an ink colour any more — a guard test walks the

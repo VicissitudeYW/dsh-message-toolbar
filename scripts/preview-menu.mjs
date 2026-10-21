@@ -141,13 +141,13 @@ const markup = `
     <button class="mtt-btn mtt-btn-small">Restore</button>
   </div>
 
-  <div class="mtt-toast">Answer deleted</div>
+  <div class="mtt-toast mtt-toast-ok">Answer deleted</div>
+  <div class="mtt-toast mtt-toast-bad" style="top:96px">删除失败：正在运行的宿主插件还是旧版本。</div>
 
   <div class="mock-line"><span class="mtt-chip">deepseek-reasoner</span>
     <button class="mtt-btn">Neutral</button><button class="mtt-btn mtt-btn-primary">Save</button></div>
   <div class="mock-line"><textarea class="mtt-answer-textarea">Editable answer text…</textarea></div>
-  <div class="mock-line"><span class="mtt-error">重答失败：模型返回了空内容</span>
-    <span class="mtt-notice">已切换回答</span></div>
+  <div class="mock-line"><span class="mtt-error">重答失败：模型返回了空内容</span></div>
   <div class="mock-line"><div class="mtt-node-card">
     <div class="mtt-node-head"><span class="mtt-node-title">turn 2 · deepseek-reasoner</span>
       <span class="mtt-node-tag mtt-node-tag-current">current</span><span class="mtt-node-time">14:20</span></div>

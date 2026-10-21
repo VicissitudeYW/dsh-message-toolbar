@@ -354,7 +354,9 @@ test('a delete is confirmed with one question and reported through a toast', () 
   const source = fs.readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8');
   assert.match(source, /function useToast\(/, 'confirmations go through the toast hook');
   assert.match(source, /tone: 'success'/, 'the native toast confirms the deletion');
-  assert.match(source, /holdMs: 2200/, 'and disappears on its own');
+  assert.match(source, /holdMs: success \? 2200 : 4200/, 'and disappears on its own, a failure lingering longer');
+  assert.match(source, /function failureText\(/, 'a failed delete is reported, not swallowed');
+  assert.match(source, /showToast\(failureText\(e\), 'error'\)/, 'delete failures land in the same banner');
   assert.doesNotMatch(source, /hideNote/, 'the confirm popover asks the question only');
   assert.doesNotMatch(source, /deleteVariantNote/, 'the confirm popover asks the question only');
 });
