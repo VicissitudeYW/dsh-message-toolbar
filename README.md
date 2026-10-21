@@ -20,7 +20,7 @@ Cherry Studio.
 | **Edit** | user messages | Rewrites the turn in place: the conversation is rewound to just before that turn, a new child session is seeded with the edit, and the answer is regenerated. The original branch is preserved as a version card. |
 | **Regenerate** | user & assistant messages | Re-asks the same question in a new child session (no text change). |
 | **Switch model** | assistant messages | Re-asks the same turn with another provider/model. Every model answer becomes its own sibling session, i.e. a card you can flip through. |
-| **Translate** | user & assistant messages | Translates the message with an auxiliary model call and renders it *bilingual*: the original text stays, the translation sits underneath in a collapsible panel. Cached per session + turn + sequence, so it survives reloads without re-billing. |
+| **Translate** | assistant answers | Translates the message with an auxiliary model call and renders it *bilingual*: the original text stays, the translation sits underneath in a collapsible panel. Cached per session + turn + sequence, so it survives reloads without re-billing. |
 | **Delete** | version cards | Soft-deletes a version: the card is hidden from the ring and the version tree but the session log is untouched and it can be restored. The root conversation can never be deleted. |
 | **Version ring** | `‹ 2/3 ›` chip | Walks the sibling versions of a turn without leaving the conversation. |
 | **Version tree** | conversation view | A turn-level branching tree of the whole conversation family, with the active path highlighted, model labels, timestamps, and restore/delete controls. |
@@ -116,7 +116,7 @@ MIT
 | **编辑** | 用户消息 | 就地改写这一轮：对话回退到该轮之前，用编辑后的文本开启一个新的子会话并重新回答，原分支保留为版本卡片。 |
 | **重新生成** | 用户 / 助手消息 | 不改文本，在新的子会话里重问同一个问题。 |
 | **切换模型** | 助手消息 | 用另一个 provider/模型重问这一轮。每个模型的回答都是独立的兄弟会话，也就是可以来回翻的卡片。 |
-| **翻译** | 用户 / 助手消息 | 用一次辅助模型调用翻译该消息，并做**双语排版**：原文保留，译文以可折叠面板放在下面。按 会话+轮次+序号 缓存，刷新页面不会重复计费。 |
+| **翻译** | 助手回答 | 用一次辅助模型调用翻译该消息，并做**双语排版**：原文保留，译文以可折叠面板放在下面。按 会话+轮次+序号 缓存，刷新页面不会重复计费。 |
 | **删除** | 版本卡片 | 软删除：从版本徽标和版本树里隐藏，但会话日志不动，可随时恢复。根对话永远不可删除。 |
 | **版本左右翻** | `‹ 2/3 ›` 徽标 | 不离开当前对话就能在同轮的不同版本之间切换。 |
 | **版本树** | 会话视图 | 整个会话家族的逐轮分支树，高亮当前路径，带模型标签、时间以及恢复/删除按钮。 |

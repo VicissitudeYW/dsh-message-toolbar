@@ -871,15 +871,9 @@ function UserMessageView(props) {
       }, copied ? h(CheckIcon) : h(CopyIcon)),
       h(ActionButton, { title: t('edit'), disabled: !canEdit, onClick: beginEdit }, h(PencilIcon)),
       h(ActionButton, { title: t('regenerate'), disabled: !canEdit || busy, onClick: retry }, h(RetryIcon)),
-      h('span', { className: 'mtt-menu-wrap' },
-        h(ActionButton, {
-          title: t('translate'), disabled: busy || text === '',
-          active: menu === 'translate',
-          onClick: function () { setMenu(menu === 'translate' ? null : 'translate'); },
-        }, busy ? h('span', { className: 'mtt-dots' }, '···') : h(TranslateIcon)),
-        menu === 'translate'
-          ? h(LanguageMenu, { title: t('translateTo'), onPick: translate })
-          : null),
+      // No translate action on user bubbles: the bubbled prompt is already the
+      // language the user wrote in, and the useful direction to read is the
+      // answer's. Translation lives on assistant cards only.
       isVersion
         ? h('span', { className: 'mtt-menu-wrap' },
           h(ActionButton, {
