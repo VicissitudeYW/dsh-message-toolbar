@@ -89,14 +89,24 @@ test('apply() injects styles and registers every slot', () => {
   const { css, registrations } = applyToSlots();
   assert.ok(css.length > 0, 'CSS must be inserted');
   assert.match(css.join('\n'), /\.mtt-bubble/);
-  const slots = registrations.map((r) => r.descriptor.name).sort();
-  assert.deepEqual(slots, [
-    'conversation.chat.assistant-actions',
-    'conversation.chat.node',
-    'conversation.chat.turnTail',
-    'conversation.view',
-    'settings.section',
-  ]);
+  const counts = registrations.reduce((acc, r) => {
+    acc[r.descriptor.name] = (acc[r.descriptor.name] ?? 0) + 1;
+    return acc;
+  }, {});
+  assert.deepEqual(counts, {
+    'conversation.chat.assistant-actions': 1,
+    'conversation.chat.node': 1,
+    'conversation.chat.turnTail': 2,
+    'conversation.view': 1,
+    'settings.section': 1,
+  });
+  // Two turnTail entries: the answer variant card sits where the answer lives,
+  // the bilingual translation cards below it.
+  const tails = registrations
+    .filter((r) => r.descriptor.name === 'conversation.chat.turnTail')
+    .map((r) => r.descriptor.id)
+    .sort();
+  assert.deepEqual(tails, ['message-toolbar-answers', 'message-toolbar-translations']);
   for (const entry of registrations) assert.equal(typeof entry.component, 'function');
 });
 
@@ -130,4 +140,32 @@ test('the assistant action row receives a session-scoped inject', () => {
   const actions = registrations.find((r) => r.descriptor.name === 'conversation.chat.assistant-actions');
   assert.equal(typeof actions.descriptor.inject, 'function');
   assert.deepEqual(actions.descriptor.inject('sess-1'), { sessionId: 'sess-1' });
+});
+
+// Mounting each component once catches typos and hook-order mistakes that a
+// registration-only test cannot see (the host serves the bundle without any
+// build-time type checking). The cache starts empty, so every component below
+// takes its "no data yet" path — exactly what the first paint does.
+test('every registered component mounts without throwing', () => {
+  const { registrations } = applyToSlots();
+  const props = {
+    'conversation.chat.node': {
+      node: {
+        data: { content: [{ type: 'text', text: 'hello' }], seq: 1 },
+        location: { kind: 'turn', turn: 1 },
+      },
+    },
+    'conversation.chat.assistant-actions': { sessionId: 'sess-1', messageId: 'msg-1' },
+    'conversation.chat.turnTail': { sessionId: 'sess-1', turn: 1, seq: 3 },
+    'conversation.view': { sessionId: 'sess-1' },
+    'settings.section': {},
+  };
+  for (const { descriptor, component } of registrations) {
+    const injected = typeof descriptor.inject === 'function' ? descriptor.inject('sess-1') : {};
+    const base = props[descriptor.name] ?? {};
+    assert.doesNotThrow(
+      () => component(Object.assign({}, base, injected)),
+      descriptor.name + ' (' + (descriptor.id ?? descriptor.key ?? 'default') + ') must mount',
+    );
+  }
 });

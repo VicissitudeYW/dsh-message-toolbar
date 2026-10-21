@@ -14,6 +14,18 @@ process.env.USERPROFILE = TMP;
 process.env.HOME = TMP;
 
 const { apply } = await import('../lib/index.js');
+const { flushState, reloadState } = await import('../lib/state-store.js');
+
+/**
+ * The plugin keeps one durable state file, so answer-variant tests would
+ * otherwise see each other's variants. Flush the pending write, delete the
+ * file, and drop the in-memory cache.
+ */
+function resetPluginState() {
+  flushState();
+  fs.rmSync(path.join(TMP, '.dsh', 'message-toolbar', 'state.json'), { force: true });
+  reloadState();
+}
 
 /* ------------------------------------------------------------- fixtures -- */
 
@@ -245,6 +257,107 @@ test('POST translate calls the model once and caches the answer', async () => {
   const tree = await call(services.handler, 'GET', undefined, '?sessionId=A');
   assert.equal(tree.json.translations['8'].zh.text, 'TRANSLATED');
   assert.equal(tree.json.translations['8'].zh.turn, 2);
+});
+
+test('POST answer-generate keeps the answer in-session and builds a plain transcript', async () => {
+  const { ctx, services, created } = makeContext();
+  apply(ctx);
+  resetPluginState();
+
+  const { status, json } = await call(services.handler, 'POST', {
+    action: 'answer-generate', sessionId: 'A', turn: 2,
+    model: { provider: 'q', model: 'm2', name: 'Model M2' },
+  });
+  assert.equal(status, 200);
+  assert.equal(json.turn, 2);
+  assert.equal(json.items.length, 1);
+  assert.equal(json.active, json.items[0].id);
+  assert.equal(json.items[0].kind, 'model');
+  assert.equal(json.items[0].provider, 'q');
+  assert.equal(json.items[0].model, 'm2');
+  assert.equal(json.items[0].text, 'TRANSLATED');
+  // No branch was created: the whole point of the variant model.
+  assert.equal(created.length, 0);
+  // The transcript is plain chat: earlier turns plus this turn's question.
+  assert.deepEqual(services.lastStream.messages.map((m) => m.role), ['user', 'assistant', 'user']);
+  assert.equal(services.lastStream.messages[2].content[0].text, 'second question');
+  assert.equal(services.lastStream.system, undefined);
+
+  const tree = await call(services.handler, 'GET', undefined, '?sessionId=A');
+  assert.equal(tree.json.answers['2'].active, json.active);
+  assert.equal(tree.json.answers['2'].items[0].text, 'TRANSLATED');
+});
+
+test('POST answer-save stores an edit and answer-select returns to native', async () => {
+  const { ctx, services } = makeContext();
+  apply(ctx);
+  resetPluginState();
+
+  const generated = await call(services.handler, 'POST', {
+    action: 'answer-generate', sessionId: 'A', turn: 1,
+  });
+  assert.equal(generated.status, 200);
+
+  const saved = await call(services.handler, 'POST', {
+    action: 'answer-save', sessionId: 'A', turn: 1, text: 'my own rewrite',
+  });
+  assert.equal(saved.status, 200);
+  assert.equal(saved.json.items.length, 2);
+  assert.equal(saved.json.active, saved.json.items[1].id);
+  assert.equal(saved.json.items[1].kind, 'edit');
+  assert.equal(saved.json.items[1].text, 'my own rewrite');
+  assert.equal(saved.json.items[1].baseId, undefined);
+
+  const native = await call(services.handler, 'POST', {
+    action: 'answer-select', sessionId: 'A', turn: 1, id: 'native',
+  });
+  assert.equal(native.status, 200);
+  assert.equal(native.json.active, 'native');
+  assert.equal(native.json.items.length, 2);
+
+  const back = await call(services.handler, 'POST', {
+    action: 'answer-select', sessionId: 'A', turn: 1, id: saved.json.active,
+  });
+  assert.equal(back.json.active, saved.json.active);
+
+  const removed = await call(services.handler, 'POST', {
+    action: 'answer-delete', sessionId: 'A', turn: 1, id: saved.json.active,
+  });
+  assert.equal(removed.json.active, 'native');
+  assert.equal(removed.json.items.length, 1);
+});
+
+test('POST answer-source hands the editor the visible text and the logged text', async () => {
+  const { ctx, services } = makeContext();
+  apply(ctx);
+  resetPluginState();
+
+  const plain = await call(services.handler, 'POST', {
+    action: 'answer-source', sessionId: 'A', turn: 2,
+  });
+  assert.equal(plain.status, 200);
+  assert.equal(plain.json.active, 'native');
+  assert.equal(plain.json.text, 'second answer');
+  assert.equal(plain.json.native, 'second answer');
+
+  await call(services.handler, 'POST', { action: 'answer-generate', sessionId: 'A', turn: 2 });
+  const variant = await call(services.handler, 'POST', {
+    action: 'answer-source', sessionId: 'A', turn: 2,
+  });
+  assert.equal(variant.json.text, 'TRANSLATED');
+  assert.equal(variant.json.native, 'second answer');
+  assert.equal(variant.json.source, 'model');
+});
+
+test('answer-generate rejects a turn that does not exist', async () => {
+  const { ctx, services } = makeContext();
+  apply(ctx);
+
+  const { status, json } = await call(services.handler, 'POST', {
+    action: 'answer-generate', sessionId: 'A', turn: 9,
+  });
+  assert.equal(status, 400);
+  assert.match(json.error, /9/);
 });
 
 test('DELETE/RESTORE a version card flips its deleted flag', async () => {

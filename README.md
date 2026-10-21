@@ -18,11 +18,12 @@ Cherry Studio.
 | --- | --- | --- |
 | **Copy** | user & assistant messages | Copies the message text to the clipboard. |
 | **Edit** | user messages | Rewrites the turn in place: the conversation is rewound to just before that turn, a new child session is seeded with the edit, and the answer is regenerated. The original branch is preserved as a version card. |
-| **Regenerate** | user & assistant messages | Re-asks the same question in a new child session (no text change). |
-| **Switch model** | assistant messages | Re-asks the same turn with another provider/model. Every model answer becomes a card you can flip through, and the sidebar keeps showing only the one you are reading. |
-| **Translate** | assistant answers | Translates the message with an auxiliary model call and renders it *bilingual*: the original text stays, the translation sits underneath in a collapsible panel. Cached per session + turn + sequence, so it survives reloads without re-billing. |
+| **Regenerate** | assistant messages | **In place, no new conversation.** A fresh answer to the same question is stored as a variant of that turn and swapped in for the logged one; flip back with `‹ 1/2 ›`. |
+| **Switch model** | assistant messages | Same mechanism with another provider/model: every model's answer becomes a variant of the *same* turn, and `‹ 2/3 ›` walks them without leaving the conversation. The model menu's last row instead opens a real branch when you want a full agent run with tools. |
+| **Edit answer** | assistant messages & answer card | Your own rewrite of a model answer becomes another variant; the model's original text stays one `‹` away, and switching back is always possible. |
+| **Translate** | assistant answers | Translates the answer with an auxiliary model call and renders it *bilingual*: the original text stays, the translation sits underneath in a collapsible panel. Cached per session + turn + sequence, so it survives reloads without re-billing. |
 | **Delete** | version cards | Soft-deletes a version: the card is hidden from the ring and the version tree but the session log is untouched and it can be restored. The root conversation can never be deleted. |
-| **Version ring** | `‹ 2/3 ›` chip | Walks the sibling versions of a turn without leaving the conversation. |
+| **Version ring** | `‹ 2/3 ›` chip | Walks the answer variants of a turn (`1` is always the model's logged answer) and the sibling versions of a turn, without leaving the conversation. |
 | **Version tree** | conversation view | A turn-level branching tree of the whole conversation family, with the active path highlighted, model labels, timestamps, and restore/delete controls. |
 
 ### Requirements
@@ -71,20 +72,35 @@ host and client both load at startup.
 >
 > `test/bundle.test.mjs` pins this contract, so `npm test` catches a regression before install.
 
-### Notes on how editing works
+### How answers are replaced in place
 
-Every edit / regenerate / model switch seeds a **new child session** instead of mutating the log
-(DSH session logs are append-only). The child inherits the parent's events up to the boundary,
-then carries an `ignorable` marker event of type `message-toolbar/version` describing the operation
-and its inverse. That marker is what the version ring, the tree view and delete/restore are built
-from. Consequently:
+A closed turn can never gain a second answer: DSH's session log requires an open step to append an
+`assistant/message`, and a turn's step numbers only grow. So "answer again with another model" cannot
+be written into the log. This plugin therefore does two different things:
 
-- branches are real sessions — they can be continued independently and are
-  never `origin: 'subagent'` (that would fence them from model selection);
-- only one member of a family is visible at a time: switching archives the others, because
-  DSH's session log cannot hold two answers for one closed turn (see
-  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)). The hidden ones stay one click away in the
-  version ring, and the workspace's archived filter always lists them;
+**1 · Answer variants (default: regenerate / switch model / edit answer).** The new answer is stored
+in the plugin's own state file (`~/.dsh/message-toolbar/state.json`), keyed by session and turn, with
+its provider, model and text. The client renders it in the conversation flow exactly where the answer
+belongs and hides the logged answer of that turn with a generated stylesheet
+(`[data-chat-flow-kind="assistant-step"][data-chat-turn="N"]{display:none}`). Slot `1` of the
+`‹ 1/2 ›` ring is always the model's original answer, so nothing is lost. Consequences, stated plainly:
+
+- a variant is a **pure text generation**: no tools, no file reads. It answers the same question from
+  the same plain-chat transcript, which is what a model comparison should be;
+- the log is not modified, so **later turns still see the original answer** in their context. Editing
+  an answer changes what *you* read, not what the model remembers;
+- if a future DSH changes those `data-chat-*` attributes, the rule stops matching and both answers
+  render — a visible degradation, never a crash.
+
+**2 · Real branches (the model menu's last row, and user-message edits).** These seed a **new child
+session** instead: the child inherits the parent's events up to the boundary, then carries an
+`ignorable` marker event of type `message-toolbar/version` describing the operation and its inverse.
+That marker is what the version ring, the tree view and delete/restore are built from. Consequently:
+
+- branches are real sessions — they can be continued independently, tools and all, and are never
+  `origin: 'subagent'` (that would fence them from model selection);
+- only one member of a family is visible at a time: switching archives the others. The hidden ones
+  stay one click away in the version ring, and the workspace's archived filter always lists them;
 - deleting a card only flips a flag in the plugin's state file, it never destroys a session;
 - switching between versions is navigation, not mutation, so it is always reversible.
 
@@ -118,11 +134,12 @@ MIT
 | --- | --- | --- |
 | **复制** | 用户 / 助手消息 | 把消息正文复制到剪贴板。 |
 | **编辑** | 用户消息 | 就地改写这一轮：对话回退到该轮之前，用编辑后的文本开启一个新的子会话并重新回答，原分支保留为版本卡片。 |
-| **重新生成** | 用户 / 助手消息 | 不改文本，在新的子会话里重问同一个问题。 |
-| **切换模型** | 助手消息 | 用另一个 provider/模型重问这一轮。每个模型的回答都是一张可以来回翻的卡片，而侧边栏始终只显示你正在读的那一张。 |
+| **重新生成** | 助手消息 | **就地重答，不新开对话。** 同一个问题的新回答存成这一轮的一个「备选」，直接替换显示；用 `‹ 1/2 ›` 翻回去。 |
+| **切换模型** | 助手消息 | 同一机制换 provider/模型：每个模型的回答都是**同一轮**的备选，`‹ 2/3 ›` 就地来回切换，不离开当前对话。模型菜单最后一行则走真正的分支，用于需要调用工具的完整重跑。 |
+| **编辑回答** | 助手消息 / 回答卡片 | 你改写的回答作为另一个备选保存，模型原文始终在 `‹` 里可找回，随时能切回去。 |
 | **翻译** | 助手回答 | 用一次辅助模型调用翻译该消息，并做**双语排版**：原文保留，译文以可折叠面板放在下面。按 会话+轮次+序号 缓存，刷新页面不会重复计费。 |
 | **删除** | 版本卡片 | 软删除：从版本徽标和版本树里隐藏，但会话日志不动，可随时恢复。根对话永远不可删除。 |
-| **版本左右翻** | `‹ 2/3 ›` 徽标 | 不离开当前对话就能在同轮的不同版本之间切换。 |
+| **版本左右翻** | `‹ 2/3 ›` 徽标 | 在不离开当前对话的情况下翻看这一轮的回答备选（第 1 位永远是模型原始回答）以及同轮的不同版本。 |
 | **版本树** | 会话视图 | 整个会话家族的逐轮分支树，高亮当前路径，带模型标签、时间以及恢复/删除按钮。 |
 
 ### 环境要求
