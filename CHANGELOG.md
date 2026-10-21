@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.3
+
+- **Saving an edit overwrites the answer you were looking at** instead of adding a second one, so the
+  ring no longer shows `‹ 1/2 ›` after a rewrite. A visible alternative is rewritten in place (same id,
+  same place in the ring, `edited: true`); the logged answer — which no API can rewrite — takes an
+  `override` on the turn record, leaving `active: 'native'` and `items: []` so the ring stays hidden.
+- **An edited answer keeps the styling of a generated one**: the card draws whatever text is visible
+  through the same `AnswerBody` → `MarkdownText` body, so markdown, code blocks and typography are
+  unchanged.
+- **The overwrite is reversible**: an overridden answer carries one muted line, `Edited by you ·
+  Restore the original`, whose button drops the override (`answer-restore`) and gives the model's text
+  back. Alternatives rewritten in place keep their earlier text nowhere, exactly like any other
+  in-place edit — undo them by regenerating.
+
 ## 0.4.2
 
 - **Editing an answer happens in the answer.** The pencil no longer opens a popover: the answer's place

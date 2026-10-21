@@ -323,7 +323,10 @@ test('POST answer-generate stream=true writes start, delta and done frames', asy
   assert.equal(done.active, done.items[0].id);
 });
 
-test('POST answer-save stores an edit and answer-select returns to native', async () => {
+// Editing overwrites what is on screen: a visible variant is rewritten in place,
+// and the logged answer (which no API can rewrite) takes an override. Either way
+// the ring does not grow — saving an edit is not a new answer.
+test('POST answer-save overwrites the visible alternative instead of adding one', async () => {
   const { ctx, services } = makeContext();
   apply(ctx);
   resetPluginState();
@@ -332,42 +335,60 @@ test('POST answer-save stores an edit and answer-select returns to native', asyn
     action: 'answer-generate', sessionId: 'A', turn: 1,
   });
   assert.equal(generated.status, 200);
+  const variantId = generated.json.items[0].id;
 
   const saved = await call(services.handler, 'POST', {
     action: 'answer-save', sessionId: 'A', turn: 1, text: 'my own rewrite',
   });
   assert.equal(saved.status, 200);
-  assert.equal(saved.json.items.length, 2);
-  assert.equal(saved.json.active, saved.json.items[1].id);
-  assert.equal(saved.json.items[1].kind, 'edit');
-  assert.equal(saved.json.items[1].text, 'my own rewrite');
-  assert.equal(saved.json.items[1].baseId, undefined);
+  assert.equal(saved.json.items.length, 1, 'the edit replaces the variant, it does not add one');
+  assert.equal(saved.json.items[0].id, variantId, 'the same alternative keeps its identity');
+  assert.equal(saved.json.items[0].text, 'my own rewrite');
+  assert.equal(saved.json.items[0].edited, true);
+  assert.equal(saved.json.active, variantId);
 
   const native = await call(services.handler, 'POST', {
     action: 'answer-select', sessionId: 'A', turn: 1, id: 'native',
   });
   assert.equal(native.status, 200);
   assert.equal(native.json.active, 'native');
-  assert.equal(native.json.items.length, 2);
-
-  const back = await call(services.handler, 'POST', {
-    action: 'answer-select', sessionId: 'A', turn: 1, id: saved.json.active,
-  });
-  assert.equal(back.json.active, saved.json.active);
+  assert.equal(native.json.items.length, 1);
 
   const removed = await call(services.handler, 'POST', {
-    action: 'answer-delete', sessionId: 'A', turn: 1, id: saved.json.active,
+    action: 'answer-delete', sessionId: 'A', turn: 1, id: variantId,
   });
-  // The answer before it in the ring takes over, not the logged one: after
-  // <2/3> is deleted the reader keeps the answer they were looking at (<1/2>).
-  assert.equal(removed.json.active, saved.json.items[0].id);
-  assert.equal(removed.json.items.length, 1);
+  assert.equal(removed.json.active, 'native');
+  assert.equal(removed.json.items.length, 0);
+});
 
-  const last = await call(services.handler, 'POST', {
-    action: 'answer-delete', sessionId: 'A', turn: 1, id: saved.json.items[0].id,
+test('editing the logged answer stores an override the reader can undo', async () => {
+  const { ctx, services } = makeContext();
+  apply(ctx);
+  resetPluginState();
+
+  const saved = await call(services.handler, 'POST', {
+    action: 'answer-save', sessionId: 'A', turn: 2, text: 'rewritten by hand',
   });
-  assert.equal(last.json.active, 'native');
-  assert.equal(last.json.items.length, 0);
+  assert.equal(saved.status, 200);
+  assert.equal(saved.json.active, 'native', 'still one answer: no alternative was added');
+  assert.equal(saved.json.items.length, 0);
+  assert.equal(saved.json.override.text, 'rewritten by hand');
+
+  const source = await call(services.handler, 'POST', {
+    action: 'answer-source', sessionId: 'A', turn: 2,
+  });
+  assert.equal(source.json.text, 'rewritten by hand', 'the editor reopens on the override');
+  assert.equal(source.json.native, 'second answer', 'the log still holds the model text');
+
+  const restored = await call(services.handler, 'POST', {
+    action: 'answer-restore', sessionId: 'A', turn: 2,
+  });
+  assert.equal(restored.status, 200);
+  assert.equal(restored.json.override, null);
+  const after = await call(services.handler, 'POST', {
+    action: 'answer-source', sessionId: 'A', turn: 2,
+  });
+  assert.equal(after.json.text, 'second answer');
 });
 
 test('POST answer-source hands the editor the visible text and the logged text', async () => {

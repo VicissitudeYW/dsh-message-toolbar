@@ -91,10 +91,11 @@ from `llm.listProviders()` + `llm.listModels(provider)`.
 | `activate` | `sessionId` | un-archives (if needed) and attaches to the parent workspace |
 | `focus` | `sessionId` | un-archives the target, archives every other family member (one visible conversation) |
 | `answer-generate` | `sessionId, turn, model?, stream?` | `llm.stream` over a plain-chat transcript, stored as an answer variant; with `stream: true` the reply is an NDJSON frame stream (`start` / `delta` / `done` / `error`) |
-| `answer-save` | `sessionId, turn, text, baseId?` | stores a hand-edited answer as a variant |
-| `answer-source` | `sessionId, turn, answerId?` | `{ turn, active, items, native, text }` — baseline for the editor |
+| `answer-save` | `sessionId, turn, text, answerId?` | overwrites the visible answer in place: a variant's text is replaced (the ring keeps its size), the logged answer gets an `override` because the log cannot be rewritten |
+| `answer-source` | `sessionId, turn, answerId?` | `{ turn, active, items, override, native, text }` — baseline for the editor |
 | `answer-select` | `sessionId, turn, answerId` | flips the visible variant (`'native'` is legal) |
 | `answer-delete` | `sessionId, turn, answerId` | drops a variant; if it was visible, the one before it in the ring (`native` first) takes over |
+| `answer-restore` | `sessionId, turn` | drops the `override`, so the model's logged answer shows again |
 | `hide` | `sessionId, turn, scope: "turn"\|"answer", hidden: bool` | hides/restores one turn or one answer in the transcript view; returns the new lists |
 | `models` | — | same catalog as `?models=1` |
 
@@ -195,6 +196,14 @@ state instead:
    never lost and `active: 'native'` renders with no stylesheet rule at all. The row only draws the
    control when the turn has more than one answer; deleting the visible variant goes through
    `answer-delete`, and the answer before it in the ring (native when it was first) takes over.
+5. **Editing overwrites the visible answer**, it does not append one: `answer-save` rewrites the
+   active variant's `text` in place (`edited: true`, same id, ring size unchanged) and the card draws
+   it through the very same `AnswerBody` → `MarkdownText` path as a generated answer, so nothing
+   about its styling changes. When the visible answer *is* the logged one there is no variant to
+   rewrite, so the turn record takes `override: { text, at }` instead: `active` stays `'native'`,
+   `items` stays empty, and the ring never appears. The card then renders `override.text` and one
+   muted line (`Edited by you · Restore the original`) whose button posts `answer-restore`, dropping
+   the override so the model's own text is back.
 
 Consequences worth knowing: the log is untouched, so **later turns still see the original answer**
 in their model context; and if a future DSH renames those attributes the rule simply stops

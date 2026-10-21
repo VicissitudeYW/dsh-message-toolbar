@@ -364,6 +364,22 @@ test('the editor opens in the answer area, not in a popover', () => {
   assert.match(source, /const edit = useAnswerEdit\(sessionId, turn\);/, 'the card owns the open editor');
 });
 
+// Saving an edit is an overwrite, not a new answer: the render path must be the
+// same Markdown body a generated answer uses (so an edited answer keeps its
+// styling), and the only extra affordance is the one-line way back.
+test('an edited answer renders through the normal markdown body', () => {
+  const { css } = applyToSlots();
+  const sheet = css.join('\n');
+  assert.match(sheet, /\.mtt-answer-note/);
+
+  const source = fs.readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8');
+  assert.match(source, /function answerOverride\(/, 'the override is read from the turn record');
+  assert.match(source, /const shownText = live !== null/, 'one text feeds the body for every case');
+  assert.match(source, /h\(AnswerBody, \{ text: shownText, streaming: live !== null \}\)/);
+  assert.match(source, /action: 'answer-restore'/, 'an overwritten answer can be given back');
+  assert.doesNotMatch(source, /kind: 'edit'/, 'saving no longer creates an alternative');
+});
+
 // A variant being written must look like the app generating, not like a plugin
 // widget: the request asks for NDJSON frames, the empty state is the native
 // shimmer line, and the body is plain flow text with no card chrome of ours.

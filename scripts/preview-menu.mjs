@@ -133,7 +133,9 @@ const markup = `
     </div>
   </div>
 
-  <div class="mtt-answer"><div class="mtt-answer-body">A plain answer body — this text has to follow the theme, never the browser's default ink.</div></div>
+  <div class="mtt-answer"><div class="mtt-answer-body">A plain answer body — this text has to follow the theme, never the browser's default ink.</div>
+    <div class="mtt-answer-note"><span>Edited by you</span><button class="mtt-link">Restore the original</button></div>
+  </div>
 
   <div class="mtt-answer">
     <div class="mtt-answer-edit">
