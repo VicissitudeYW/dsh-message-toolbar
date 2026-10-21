@@ -619,6 +619,29 @@ function popupOpensUp(event) {
   return rect.top >= below;
 }
 
+// A menu must not outlive the user's attention: close it as soon as a pointer
+// goes down outside any menu wrapper, or on Escape. The captured `close` only
+// calls a state setter, so it stays valid for the lifetime of the listener.
+function useDismiss(open, close) {
+  React.useEffect(function () {
+    if (!open) return undefined;
+    function onPointer(event) {
+      const target = event.target;
+      if (target && typeof target.closest === 'function' && target.closest('.mtt-menu-wrap') !== null) return;
+      close();
+    }
+    function onKey(event) {
+      if (event.key === 'Escape') close();
+    }
+    document.addEventListener('pointerdown', onPointer, true);
+    document.addEventListener('keydown', onKey, true);
+    return function () {
+      document.removeEventListener('pointerdown', onPointer, true);
+      document.removeEventListener('keydown', onKey, true);
+    };
+  }, [open]);
+}
+
 function ModelChip(props) {
   const label = modelLabel(props.model);
   if (!label) return null;
@@ -751,6 +774,8 @@ function UserMessageView(props) {
   const [confirmDelete, setConfirmDelete] = React.useState(false);
   const [popUp, setPopUp] = React.useState(false);
   const [notice, setNotice] = React.useState(null);
+
+  useDismiss(confirmDelete, function () { setConfirmDelete(false); });
 
   const canEdit = !running && sessionId !== undefined && typeof turn === 'number' && text !== '' && !editing;
 
@@ -939,6 +964,8 @@ function AssistantToolbar(props) {
   const [panel, setPanel] = React.useState(null);
   const [confirmDelete, setConfirmDelete] = React.useState(false);
   const [popUp, setPopUp] = React.useState(false);
+
+  useDismiss(menu !== null || confirmDelete, function () { setMenu(null); setConfirmDelete(false); });
 
   // Every menu in this row records whether it must open upwards, so the last
   // message of a conversation is not covered by the composer.
