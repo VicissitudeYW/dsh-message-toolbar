@@ -67,6 +67,17 @@ function pluginCss() {
 
 const markup = `
 <div class="mock">
+  <div class="mtt-row">
+    <div class="mtt-line">
+      <div class="mtt-bubble">帮我把深色模式适配一下，顺便看看用户消息的框为什么变灰了。</div>
+    </div>
+    <div class="mtt-actions">
+      <span class="mtt-toolbar">
+        <button class="mtt-act">copy</button><button class="mtt-act">✎</button>
+        <span class="mtt-ring"><button class="mtt-ring-btn">‹</button>1/1<button class="mtt-ring-btn">›</button></span>
+      </span>
+    </div>
+  </div>
   <div class="mock-row">
     <span class="mtt-toolbar">
       <button class="mtt-act" title="retry">↻</button>

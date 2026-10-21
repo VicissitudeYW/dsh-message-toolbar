@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.2
+
+- **The user bubble is DSH's bubble again.** It had been painted with the same neutral tint the rest
+  of the old CSS used, which turned the light-blue bubble grey. The rule now mirrors DSH's own
+  `Sixlwa_bubble`: `background: var(--dsw-specific-bubble)` (deepseek-50 in light, neutral-bluish-850
+  in dark), `border-radius: var(--dsw-radius-xl)`, `padding: 10px 16px`, the content-font line height
+  and the same max-width formula.
+
 ## 0.2.1
 
 - **The menus follow the theme.** Every colour now comes from DSH's own aliases (`bg-layer-2/3`,
