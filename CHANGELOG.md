@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.1
+
+- **The delete button asks one question.** Both confirmations lost their explanatory paragraph: the
+  sheet is the question and the two buttons, nothing else.
+- **Results are reported by a banner, not by the row.** Every "answer deleted / message deleted /
+  variant deleted / copied" notice that used to appear as text inside the action row is now a toast at
+  the top of the window that fades on its own (DSH's own `Toast`, or a copy of its stylesheet when the
+  primitives package is missing). The action row is icons only.
+- **Every colour now resolves through a theme alias.** The sheet defines its own aliases
+  (`--mtt-surface`, `--mtt-fg`, `--mtt-line`, `--mtt-hover`, `--mtt-primary`, …) on `body`, where the
+  theme declares its palette, and no rule hardcodes an ink colour any more — a guard test walks the
+  sheet and fails on any `color` value that is not a `var()`, `inherit`, `transparent` or
+  `currentColor`. Container rules also re-assert `color: var(--mtt-fg)` so text inside a node never
+  falls back to the browser default (black) in dark mode, and buttons/fields inherit through
+  `:where()`, which keeps `.mtt-btn-primary`'s inverted label winning at equal specificity.
+
 ## 0.4.0
 
 - **Switching a model now looks like answering.** `answer-generate` streams NDJSON frames (`start`,

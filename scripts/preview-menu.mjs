@@ -126,12 +126,22 @@ const markup = `
   </div>
 
   <div class="mtt-pop mtt-pop-confirm mock-static">
-    <div class="mtt-pop-title">Delete this version card?</div>
+    <div class="mtt-pop-title">Delete this answer?</div>
     <div class="mtt-pop-actions">
       <button class="mtt-btn mtt-btn-small">Cancel</button>
       <button class="mtt-btn mtt-btn-danger mtt-btn-small">Delete</button>
     </div>
   </div>
+
+  <div class="mtt-answer"><div class="mtt-answer-body">A plain answer body — this text has to follow the theme, never the browser's default ink.</div></div>
+
+  <div class="mtt-hidden">
+    <span class="mtt-hidden-icon">⌦</span>
+    <span class="mtt-hidden-note">Answer deleted from the transcript view</span>
+    <button class="mtt-btn mtt-btn-small">Restore</button>
+  </div>
+
+  <div class="mtt-toast">Answer deleted</div>
 
   <div class="mock-line"><span class="mtt-chip">deepseek-reasoner</span>
     <button class="mtt-btn">Neutral</button><button class="mtt-btn mtt-btn-primary">Save</button></div>

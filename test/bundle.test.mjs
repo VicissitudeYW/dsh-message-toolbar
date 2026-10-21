@@ -341,3 +341,38 @@ test('the answer stream is NDJSON and the empty state uses the native shimmer', 
   assert.match(sheet, /\.mtt-answer-wait/);
   assert.doesNotMatch(sheet, /\.mtt-live-caret/);
 });
+
+// Deleting is confirmed with a question and reported with a banner: the action
+// row stays a row of icons, so nothing may write status text into it, and the
+// banner is the app's own Toast when the primitives package is around.
+test('a delete is confirmed with one question and reported through a toast', () => {
+  const { css } = applyToSlots();
+  const sheet = css.join('\n');
+  assert.match(sheet, /\.mtt-toast/);
+  assert.doesNotMatch(sheet, /\.mtt-notice/, 'the row must not print "deleted" text any more');
+
+  const source = fs.readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8');
+  assert.match(source, /function useToast\(/, 'confirmations go through the toast hook');
+  assert.match(source, /tone: 'success'/, 'the native toast confirms the deletion');
+  assert.match(source, /holdMs: 2200/, 'and disappears on its own');
+  assert.doesNotMatch(source, /hideNote/, 'the confirm popover asks the question only');
+  assert.doesNotMatch(source, /deleteVariantNote/, 'the confirm popover asks the question only');
+});
+
+// Text must never be painted with a literal colour: every value has to come
+// from a theme alias, otherwise dark mode keeps light-mode ink. `CanvasText`
+// and friends are system colours, so they follow the app's colour scheme too.
+test('every colour in the sheet resolves through a theme alias', () => {
+  const { css } = applyToSlots();
+  const literals = [];
+  for (const rule of css) {
+    for (const match of rule.matchAll(/(?:^|[;{])color:([^;}]+)/g)) {
+      const value = match[1].trim();
+      if (value.startsWith('var(--')) continue;
+      if (value === 'inherit' || value === 'transparent' || value === 'currentColor') continue;
+      literals.push(value);
+    }
+  }
+  assert.deepEqual(literals, [], 'these rules paint a hard-coded colour');
+});
+

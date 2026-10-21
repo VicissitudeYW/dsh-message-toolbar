@@ -126,6 +126,10 @@ plugin does instead:
 - the deleted spot keeps a `deleted · restore` row, so the action is always reversible;
 - the log is untouched, so **later turns still carry the deleted text in the model's context**.
 
+The button asks one question (`Delete this answer?`) and nothing else: confirmations are reported by a
+banner at the top of the window — DSH's own `Toast` when the primitives package is present, a copy of
+its stylesheet otherwise — so the action row stays a row of icons and never grows status text.
+
 Clearing a message out of the model's memory for good would need a rewritten session (a new child
 session seeded without that turn). That is a separate, much larger operation, and it is not part of
 this feature.
@@ -272,6 +276,10 @@ DSH 的会话日志是 append-only 的：`assistant/message` 只能追加到还�
   重新显示，保证「恢复」按钮还能点到；只删回答时只隐藏 `assistant-step` 那行）；
 - 删除的位置留下「已删除 · 恢复」一行，所以这个操作永远可逆；
 - 日志没有变，所以**后续轮次的模型上下文里仍然带着这段被删掉的内容**。
+
+确认框只问一句「删除这条回答？」，不再附带说明；删完的结果由窗口顶部的横幅提示——装了
+primitives 就用 DSH 自己的 `Toast`，否则用一份照它的样式表画的副本——所以动作行永远只是图标，
+不会长出状态文字。插件所有颜色都走主题别名，浅色/深色切换时文字、边框、弹层、卡片一起跟着变。
 
 要让某条消息真正从模型记忆里消失，需要重写会话（用一个不带该轮的种子开子会话）。那是另一个大得
 多的操作，不在这个功能的范围内。
