@@ -1,7 +1,7 @@
 {
   "name": "dsh-message-toolbar",
-  "version": "0.1.0",
-  "description": "DSH message toolbar: edit, regenerate, per-model branches, bilingual translation, copy, delete and a version tree",
+  "version": "0.2.0",
+  "description": "DSH message toolbar: copy, regenerate and switch models in place, edit answers, bilingual translation, edit user turns, delete and a version tree",
   "license": "MIT",
   "type": "module",
   "main": "lib/index.js",
@@ -22,6 +22,7 @@
     "docs/",
     "scripts/",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "keywords": [

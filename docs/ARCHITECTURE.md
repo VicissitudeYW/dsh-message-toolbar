@@ -71,6 +71,8 @@ Route `/message-toolbar` (registered lazily inside `ctx.effect`).
   "tree": [{"id","parentId","sessionId","turn","operation","text","time","current",
             "onCurrentPath","deleted","archived"}],
   "messages": { "<messageId>": {"seq","turn","role"} },
+  "answers": { "<turn>": { "active": "native|<id>",
+                           "items": [{ "id","kind":"model|edit","provider","model","name","text","at","baseId" }] } },
   "translations": { "<eventSeq>": { "<lang>": {"text","provider","model","turn","role"} } } }
 ```
 
@@ -88,6 +90,11 @@ from `llm.listProviders()` + `llm.listModels(provider)`.
 | `restore-version` | `sessionId` | clears the flag |
 | `activate` | `sessionId` | un-archives (if needed) and attaches to the parent workspace |
 | `focus` | `sessionId` | un-archives the target, archives every other family member (one visible conversation) |
+| `answer-generate` | `sessionId, turn, model?` | `llm.stream` over a plain-chat transcript, stored as an answer variant |
+| `answer-save` | `sessionId, turn, text, baseId?` | stores a hand-edited answer as a variant |
+| `answer-source` | `sessionId, turn, answerId?` | `{ turn, active, items, native, text }` — baseline for the editor |
+| `answer-select` | `sessionId, turn, answerId` | flips the visible variant (`'native'` is legal) |
+| `answer-delete` | `sessionId, turn, answerId` | drops a variant, falling back to `native` when active |
 | `models` | — | same catalog as `?models=1` |
 
 Errors: `TypeError` → `400 {error}`, anything else → `409 {error}`.
@@ -99,8 +106,12 @@ Errors: `TypeError` → `400 {error}`, anything else → `409 {error}`.
 ```json
 { "schema": 1,
   "deleted": { "<sessionId>": { "at": 0, "operation": "...", "targetTurn": 0 } },
+  "answers": { "<sessionId>": { "<turn>": { "active": "native", "items": [] } } },
   "translations": { "<sessionId>": { "<eventSeq>": { "<lang>": { "text": "...", "at": 0 } } } } }
 ```
+
+`answers` holds the in-session answer variants — answers that deliberately never enter the
+session log (see below). `active: "native"` means the logged answer is the visible one.
 
 Writes are debounced (200 ms) and atomic (temp file + rename). The store is a convenience
 layer: a failure to persist never fails the operation. Delete is deliberately soft — the
@@ -117,16 +128,46 @@ Registrations (`slots.inject(name, () => slots.register(descriptor, Component))`
 | slot | descriptor | component |
 | --- | --- | --- |
 | `settings.section` | `id: message-toolbar, order` | prefs (stop previous turn, target language, translate model) |
-| `conversation.chat.node` | `key: 'user', priority: -1` | `UserMessageView` — bubble + copy/edit/regenerate/translate/delete-card controls, inline editor (textarea, ⌘/Ctrl+Enter to send) |
-| `conversation.chat.assistant-actions` | `id: message-toolbar, order: 30, inject: sessionId => ({ sessionId })` | `AssistantToolbar` — copy, regenerate, model switch, translate, delete card. Rendered inside the turn-tail action row, next to DSH's built-in copy/branch buttons |
+| `conversation.chat.node` | `key: 'user', priority: -1` | `UserMessageView` — bubble + copy/edit/regenerate/delete-card controls, inline editor (textarea, ⌘/Ctrl+Enter to send) |
+| `conversation.chat.assistant-actions` | `id: message-toolbar, order: 30, inject: sessionId => ({ sessionId })` | `AssistantToolbar` — copy, regenerate (in place), model switch (in place), edit answer, translate, delete card. Rendered inside the turn-tail action row, next to DSH's built-in copy/branch buttons |
+| `conversation.chat.turnTail` | `id: message-toolbar-answers, order: 4` | `AnswerCard` — the active answer variant of a turn, with `‹ i/n ›` and the variant tools |
 | `conversation.chat.turnTail` | `id: message-toolbar-translations, order: 5` | `TranslationTail` — bilingual panels under a turn |
 | `conversation.view` | `id: message-toolbar, order` | `VersionsView` — turn-level branching tree with flip/restore/delete |
+
+`TurnTailOwnerProps.turn` is a `TurnLocation` object (`{ turn, status, steps, … }`), not a number —
+both turn-tail components therefore run it through `turnNumberOf()` before indexing state.
+
+Icons inline the official primitives artwork (`@deepseek-ai/dsh-client-ui-primitives`, 16 px grid,
+`strokeWidth: 1` / `ICON_MEDIUM_STROKE`), so the toolbar matches DSH's own action row in size,
+weight and hover behaviour without depending on a client-side module resolution at runtime.
 
 Data comes from a small SWR store (`bySession`, 8 s TTL, invalidated on `sessions.list`
 changes). Navigating to a version activates it first (un-archive → attach → `openSession`)
 and waits for the session list to contain it (`openWhenListed`).
 
-### Why answers are separate sessions, and how the list stays clean
+### In-session answer variants
+
+Because a closed turn can never gain a second `assistant/message` (next section), "answer this
+again in the same conversation" cannot be a log write. The plugin keeps those answers in its own
+state instead:
+
+1. `answer-generate` builds a **plain-chat transcript** for the turn (`transcriptMessages`): the
+   user texts of every turn up to the target, plus the last appended assistant text of each
+   preceding turn. Tool calls, file reads and process cards are deliberately excluded — a variant
+   is a model comparison, not an agent run.
+2. The streamed text is stored as an item of `answers[sessionId][turn]` and becomes `active`.
+3. `AnswerCard` (turn tail) renders the active variant **in place** and calls `setTurnHidden(turn, true)`,
+   which rewrites a generated `<style data-plugin="dsh-message-toolbar-dyn">` containing
+   `[data-chat-flow-kind="assistant-step"][data-chat-turn="N"]{display:none}` — the same node
+   attributes the chat view itself emits (`data-chat-flow-kind` from `routedNode.kind`,
+   `data-chat-turn` from `turnOf(node)`, which returns `location.turn.turn`).
+4. `‹ 1/2 ›` writes `answer-select`; slot `1` is always `native`, i.e. the logged answer, so the
+   original is never lost and `active: 'native'` renders with no stylesheet rule at all.
+
+Consequences worth knowing: the log is untouched, so **later turns still see the original answer**
+in their model context; and if a future DSH renames those attributes the rule simply stops
+matching, leaving both answers visible instead of breaking the view.
+
 
 The session log cannot hold two answers for one turn. `dsh-session`'s invariant admits
 `assistant/message` only while its own `turn`/`step` is open, and `step/start` numbers must

@@ -44,7 +44,7 @@ Or from a packed tarball:
 
 ```bash
 npm pack
-dsh plugin --profile web add file:./dsh-message-toolbar-0.1.0.tgz
+dsh plugin --profile web add file:./dsh-message-toolbar-0.2.0.tgz
 ```
 
 Then add `dsh-message-toolbar` to `dsh.profile.bundles` in the profile `package.json`
@@ -160,7 +160,7 @@ dsh plugin --profile web add file:$(pwd)
 
 ```bash
 npm pack
-dsh plugin --profile web add file:./dsh-message-toolbar-0.1.0.tgz
+dsh plugin --profile web add file:./dsh-message-toolbar-0.2.0.tgz
 ```
 
 如果插件管理器没有自动登记，请手动把 `dsh-message-toolbar` 加进 profile 的 `package.json`
@@ -187,13 +187,30 @@ dsh plugin --profile web add file:./dsh-message-toolbar-0.1.0.tgz
 >
 > `test/bundle.test.mjs` 已经把这个契约钉死，`npm test` 会在安装前拦住回归。
 
-### 编辑机制说明
+### 就地替换回答是怎么实现的
 
-编辑 / 重新生成 / 切换模型都不会改动历史日志（DSH 的会话日志是只追加的），而是**派生一个新的子会话**：
-子会话继承父会话到边界为止的事件，再写入一条 `ignorable` 的 `message-toolbar/version` 标记事件，
-记录操作类型及其逆向操作。版本徽标、版本树、删除/恢复都建立在这条标记之上。因此：
+一个已结束的轮次永远不可能再获得第二份回答：DSH 的会话日志要求 `assistant/message` 落在自己
+还没关闭的 `turn`/`step` 里，而 `step` 编号只增不减。所以「换个模型再答一次」写不进日志。
+本插件因此做的是两件不同的事：
 
-- 分支就是真实会话——可以独立继续，且绝不会被标成 `origin: 'subagent'`
+**1 · 回答备选（默认行为：重新生成 / 切换模型 / 编辑回答）。** 新回答存在插件自己的状态文件
+（`~/.dsh/message-toolbar/state.json`）里，按 会话 + 轮次 归档，带 provider、模型和正文。客户端把
+它渲染在会话流里该回答本该在的位置，并用一张动态生成的样式表把日志里的那份回答隐藏起来
+（`[data-chat-flow-kind="assistant-step"][data-chat-turn="N"]{display:none}`）。`‹ 1/2 ›` 的第 1 位
+永远是模型原始回答，所以什么都不丢。需要说清的三点后果：
+
+- 备选只是一次**纯文本生成**：不调工具、不读文件。它回答的是同一个问题、吃的是同一份纯对话转录
+  ——这正是「对比模型」该有的样子；
+- 日志没有被改动，所以**后续轮次的模型上下文里仍然是原始回答**。编辑回答改变的是你读到的内容，
+  不是模型记住的内容；
+- 如果将来 DSH 改了这些 `data-chat-*` 属性，规则就不再命中，于是两份回答都显示出来——是可见的
+  退化，而不是崩掉。
+
+**2 · 真分支（模型菜单最后一行，以及编辑用户消息）。** 这条路才是**派生子会话**：子会话继承父会话
+到边界为止的事件，再写入一条 `ignorable` 的 `message-toolbar/version` 标记事件，记录操作类型及其
+逆向操作。版本徽标、版本树、删除/恢复都建立在这条标记之上。因此：
+
+- 分支就是真实会话——可以带着工具独立继续，且绝不会被标成 `origin: 'subagent'`
   （那会让它被模型选择限制在 "agent-busy" 之外）；
 - 同一家族里同一时刻只显示一个会话：切换时把其余成员归档，因为 DSH 的会话日志不允许
   一个已结束的轮次存在两份回答（见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)）。
