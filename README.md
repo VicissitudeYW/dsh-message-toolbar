@@ -119,7 +119,8 @@ only makes sense on the built `lib/client.js`.
 `scripts/preview-menu.mjs` pulls the real variables out of `@deepseek-ai/dsh-client-ui-theme` and
 the plugin stylesheet out of the bundle, then paints the menus, cards and buttons twice — once on
 `<body>` and once on `<body data-ds-dark-theme>`. Screenshot that page after touching the CSS: a
-colour that ignores the theme shows up immediately.
+colour that ignores the theme shows up immediately. [docs/theme-preview.png](docs/theme-preview.png)
+is that screenshot (light on the left, dark on the right).
 
 ### License
 
