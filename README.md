@@ -44,7 +44,7 @@ Or from a packed tarball:
 
 ```bash
 npm pack
-dsh plugin --profile web add file:./dsh-message-toolbar-0.2.0.tgz
+dsh plugin --profile web add file:./dsh-message-toolbar-0.2.1.tgz
 ```
 
 Then add `dsh-message-toolbar` to `dsh.profile.bundles` in the profile `package.json`
@@ -110,10 +110,16 @@ That marker is what the version ring, the tree view and delete/restore are built
 npm run build                      # plugin.client.js -> lib/client.js (__ModuleLoader__ wrapper)
 node --test test/host.test.mjs     # host HTTP contract
 node --test test/logic.test.mjs    # pure tree logic
+node scripts/preview-menu.mjs      # test/preview-menu.html: same CSS on light and dark
 ```
 
 `plugin.client.js` is an IIFE body (it ends with `return { inject, apply }`), so `node --check`
 only makes sense on the built `lib/client.js`.
+
+`scripts/preview-menu.mjs` pulls the real variables out of `@deepseek-ai/dsh-client-ui-theme` and
+the plugin stylesheet out of the bundle, then paints the menus, cards and buttons twice — once on
+`<body>` and once on `<body data-ds-dark-theme>`. Screenshot that page after touching the CSS: a
+colour that ignores the theme shows up immediately.
 
 ### License
 
@@ -160,7 +166,7 @@ dsh plugin --profile web add file:$(pwd)
 
 ```bash
 npm pack
-dsh plugin --profile web add file:./dsh-message-toolbar-0.2.0.tgz
+dsh plugin --profile web add file:./dsh-message-toolbar-0.2.1.tgz
 ```
 
 如果插件管理器没有自动登记，请手动把 `dsh-message-toolbar` 加进 profile 的 `package.json`

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.1
+
+- **The menus follow the theme.** Every colour now comes from DSH's own aliases (`bg-layer-2/3`,
+  `border-l3/l4`, `label-primary/secondary/tertiary`, `interactive-bg-hover`, `button-primary-fill`,
+  `state-error/success-primary`, `shadow-lv2`, `radius-*`). The old markup used
+  `--dsw-alias-bg-elevated` — a token that **does not exist** — so the `#fff` fallback always won and
+  the model menu, the edit popover, the version tree and the settings fields stayed white in dark
+  mode. The alias block sits on `<body>` (not `:root`) because DSH applies its palettes to
+  `body`/`body[data-ds-dark-theme]`, and a `var()` inside a custom property resolves against the
+  element it is declared on.
+- `scripts/preview-menu.mjs` renders the plugin's real CSS and DSH's real variables twice (light and
+  dark) into `test/preview-menu.html`, so a colour that ignores the theme is visible in one
+  screenshot.
+
 ## 0.2.0
 
 - **Answer variants, in place.** Regenerate, switch model and edit-answer no longer fork a
