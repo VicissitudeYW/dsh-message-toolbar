@@ -129,12 +129,16 @@ Registrations (`slots.inject(name, () => slots.register(descriptor, Component))`
 
 | slot | descriptor | component |
 | --- | --- | --- |
-| `settings.section` | `id: message-toolbar, order` | prefs (stop previous turn, target language, translate model) |
-| `conversation.chat.node` | `key: 'user', priority: -1` | `UserMessageView` — bubble + copy/edit/regenerate/delete-card controls, inline editor (textarea, ⌘/Ctrl+Enter to send) |
-| `conversation.chat.assistant-actions` | `id: message-toolbar, order: 30, inject: sessionId => ({ sessionId })` | `AssistantToolbar` — copy, regenerate (in place), model switch (in place), edit answer, translate, delete card. Rendered inside the turn-tail action row, next to DSH's built-in copy/branch buttons |
+| `conversation.chat.node` | `key: 'user', priority: -1` | `UserMessageView` — bubble + copy/edit/regenerate/delete controls, inline editor (textarea, ⌘/Ctrl+Enter to send) |
+| `conversation.chat.assistant-actions` | `id: message-toolbar, order: 30, inject: sessionId => ({ sessionId })` | `AssistantToolbar` — copy, regenerate (in place), model switch (in place), edit answer, translate, delete. Rendered inside the turn-tail action row, next to DSH's built-in copy/branch buttons |
 | `conversation.chat.turnTail` | `id: message-toolbar-answers, order: 4` | `AnswerCard` — the active answer variant of a turn, with `‹ i/n ›` and the variant tools |
 | `conversation.chat.turnTail` | `id: message-toolbar-translations, order: 5` | `TranslationTail` — bilingual panels under a turn |
 | `conversation.view` | `id: message-toolbar, order` | `VersionsView` — turn-level branching tree with flip/restore/delete |
+
+There is **no settings section**: the translate button opens the language dropdown at the moment it is
+pressed (`LanguageMenuHost`, the same `Menu` the model picker uses), so the target language and the
+translating model never need configuring. The only stored preference is the last language, so the
+menu can tick it.
 
 `TurnTailOwnerProps.turn` is a `TurnLocation` object (`{ turn, status, steps, … }`), not a number —
 both turn-tail components therefore run it through `turnNumberOf()` before indexing state.
@@ -235,7 +239,7 @@ and copyable side by side.
 - Peer: `@deepseek-ai/dsh >=0.2.0-rc.2 <0.3.0-0`.
 - Slot contracts were written against `dsh-client-ui-conversation` /
   `dsh-client-ui-chat` `0.2.0-rc.2` (`conversation.chat.node`, `conversation.chat.assistant-actions`,
-  `conversation.chat.turnTail`, `conversation.view`, `settings.section`).
+  `conversation.chat.turnTail`, `conversation.view`).
 - A `conversation.chat.node` collision (e.g. `dsh-plugin-message-edit` also shadowing `user`)
   degrades to "the other plugin wins" for that slot; the remaining registrations still apply.
 - `message-toolbar` is used as the cordis plugin id, HTTP path segment, event type prefix and

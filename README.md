@@ -21,7 +21,7 @@ Cherry Studio.
 | **Regenerate** | assistant messages | **In place, no new conversation.** A fresh answer to the same question is stored as a variant of that turn and swapped in for the logged one; flip back with `‹ 1/2 ›`. |
 | **Switch model** | assistant messages | Same mechanism with another provider/model: every model's answer becomes a variant of the *same* turn, and `‹ 2/3 ›` walks them without leaving the conversation. The picker is DSH's own dropdown (the one under the composer), so it looks and keys exactly like the rest of the app; its last row instead opens a real branch when you want a full agent run with tools. |
 | **Edit answer** | assistant messages & answer card | Your own rewrite of a model answer becomes another variant; the model's original text stays one `‹` away, and switching back is always possible. |
-| **Translate** | assistant answers | Translates the answer with an auxiliary model call and renders it *bilingual*: the original text stays, the translation sits underneath in a collapsible panel. Cached per session + turn + sequence, so it survives reloads without re-billing. |
+| **Translate** | assistant answers | Pressing translate opens a dropdown of target languages (the same native menu as the model picker) — pick one and the answer is translated; nothing has to be configured beforehand. The result is *bilingual*: the original stays, the translation sits underneath in a collapsible panel. Cached per session + turn + sequence, so it survives reloads without re-billing. |
 | **Delete** | version cards | Soft-deletes a version: the card is hidden from the ring and the version tree but the session log is untouched and it can be restored. The root conversation can never be deleted. |
 | **Delete message / answer** | user bubbles & assistant answers | Removes one turn (message, answer, tool cards) or just one answer from the transcript, e.g. to clear a pile of "continue" prompts left by a stalled turn. A `deleted · restore` row takes its place, so it is always one click back. |
 | **Version ring** | `‹ 2/3 ›` chip | Walks the answer variants of a turn (`1` is always the model's logged answer) and the sibling versions of a turn, without leaving the conversation. |
@@ -45,7 +45,7 @@ Or from a packed tarball:
 
 ```bash
 npm pack
-dsh plugin --profile web add file:./dsh-message-toolbar-0.3.3.tgz
+dsh plugin --profile web add file:./dsh-message-toolbar-0.3.4.tgz
 ```
 
 Then add `dsh-message-toolbar` to `dsh.profile.bundles` in the profile `package.json`
@@ -162,7 +162,7 @@ MIT
 | **重新生成** | 助手消息 | **就地重答，不新开对话。** 同一个问题的新回答存成这一轮的一个「备选」，直接替换显示；用 `‹ 1/2 ›` 翻回去。 |
 | **切换模型** | 助手消息 | 同一机制换 provider/模型：每个模型的回答都是**同一轮**的备选，`‹ 2/3 ›` 就地来回切换，不离开当前对话。模型选择器直接复用输入框右下角那个原生下拉（外观与键盘操作完全一致），它的最后一行则走真正的分支，用于需要调用工具的完整重跑。 |
 | **编辑回答** | 助手消息 / 回答卡片 | 你改写的回答作为另一个备选保存，模型原文始终在 `‹` 里可找回，随时能切回去。 |
-| **翻译** | 助手回答 | 用一次辅助模型调用翻译该消息，并做**双语排版**：原文保留，译文以可折叠面板放在下面。按 会话+轮次+序号 缓存，刷新页面不会重复计费。 |
+| **翻译** | 助手回答 | 点翻译直接弹出语言下拉（就是切换模型那个原生菜单），选一种语言就翻，不需要事先在设置里配任何东西。结果是**双语排版**：原文保留，译文以可折叠面板放在下面。按 会话+轮次+序号 缓存，刷新页面不会重复计费。 |
 | **删除** | 版本卡片 | 软删除：从版本徽标和版本树里隐藏，但会话日志不动，可随时恢复。根对话永远不可删除。 |
 | **删除消息 / 回答** | 用户气泡 / 助手回答 | 把某一轮（消息、回答、工具卡片）或单独一条回答从对话里删掉，比如清掉某一轮卡住后连发的一串「继续」。原位留下「已删除 · 恢复」一行，随时能一键找回。 |
 | **版本左右翻** | `‹ 2/3 ›` 徽标 | 在不离开当前对话的情况下翻看这一轮的回答备选（第 1 位永远是模型原始回答）以及同轮的不同版本。 |
@@ -186,7 +186,7 @@ dsh plugin --profile web add file:$(pwd)
 
 ```bash
 npm pack
-dsh plugin --profile web add file:./dsh-message-toolbar-0.3.3.tgz
+dsh plugin --profile web add file:./dsh-message-toolbar-0.3.4.tgz
 ```
 
 如果插件管理器没有自动登记，请手动把 `dsh-message-toolbar` 加进 profile 的 `package.json`

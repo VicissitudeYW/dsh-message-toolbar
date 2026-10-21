@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.4
+
+- **The settings panel is gone; translate asks for the language itself.** Pressing translate now opens
+  a dropdown of target languages — the same native `Menu` the model picker uses — and the picked
+  language is used immediately. Nothing has to be configured up front, which removes the entire
+  `settings.section` registration along with the target-language and translate-model fields.
+- The translating model is no longer a preference: the host picks its default resolution (the model
+  that answered the turn), so `translate` is called without a `model` argument.
+- The last language picked is remembered locally so the menu can tick it; the fallback popover (when
+  the primitives package is missing) marks it the same way.
+
 ## 0.3.3
 
 - **Delete a message, or just an answer.** The user bubble gained "delete this message" and the

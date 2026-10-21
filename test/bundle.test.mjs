@@ -118,7 +118,6 @@ test('apply() injects styles and registers every slot', () => {
     'conversation.chat.node': 1,
     'conversation.chat.turnTail': 2,
     'conversation.view': 1,
-    'settings.section': 1,
   });
   // Two turnTail entries: the answer variant card sits where the answer lives,
   // the bilingual translation cards below it.
@@ -178,7 +177,6 @@ test('every registered component mounts without throwing', () => {
     'conversation.chat.assistant-actions': { sessionId: 'sess-1', messageId: 'msg-1' },
     'conversation.chat.turnTail': { sessionId: 'sess-1', turn: 1, seq: 3 },
     'conversation.view': { sessionId: 'sess-1' },
-    'settings.section': {},
   };
   for (const { descriptor, component } of registrations) {
     const injected = typeof descriptor.inject === 'function' ? descriptor.inject('sess-1') : {};
@@ -232,7 +230,6 @@ test('every inline icon actually paints', () => {
     'conversation.chat.assistant-actions': { sessionId: 'sess-1', messageId: 'msg-1' },
     'conversation.chat.turnTail': { sessionId: 'sess-1', turn: 1, seq: 3 },
     'conversation.view': { sessionId: 'sess-1' },
-    'settings.section': {},
   };
   const svgs = [];
   for (const { descriptor, component } of registrations) {
@@ -287,6 +284,29 @@ test('without the primitives package the picker falls back to the built-in popov
 function titlesOf(nodes) {
   return nodes.map((node) => node.props && node.props.title).filter((title) => typeof title === 'string');
 }
+
+// Translating must not need configuring first: pressing translate opens the
+// same native dropdown as the model picker and lists nothing but languages.
+test('translate picks the target language in the native dropdown', () => {
+  const menus = assistantToolbarNodes().filter(
+    (node) => node.props && node.props['data-native-menu'] !== undefined,
+  );
+  assert.ok(menus.length >= 2, 'model picker and language picker both use the primitives Menu');
+  const languages = menus.find((menu) => String(menu.props['data-menu-items']).includes('ja'));
+  assert.ok(languages, 'the language dropdown lists the target languages');
+  assert.ok(String(languages.props['data-menu-items']).includes('zh-TW'));
+  assert.equal(languages.props['data-menu-side'], 'bottom');
+});
+
+test('the plugin ships no settings panel', () => {
+  const { registrations, css } = applyToSlots();
+  assert.equal(
+    registrations.some((r) => r.descriptor.name === 'settings.section'),
+    false,
+    'translation options live in the translate menu, not in settings',
+  );
+  assert.equal(/\.mtt-settings/.test(css.join('\n')), false);
+});
 
 // Deleting a message is the whole point of a toolbar for a stalled turn, so
 // both rows must expose it — and the stylesheet must carry the hidden-row rule
