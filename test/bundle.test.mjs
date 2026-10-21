@@ -120,12 +120,18 @@ test('apply() injects styles and registers every slot', () => {
     'conversation.view': 1,
   });
   // Two turnTail entries: the answer variant card sits where the answer lives,
-  // the bilingual translation cards below it.
+  // the bilingual translation cards below it — and both above the deliverables
+  // card ("files changed"), which registers at the default order 0.
   const tails = registrations
     .filter((r) => r.descriptor.name === 'conversation.chat.turnTail')
-    .map((r) => r.descriptor.id)
-    .sort();
-  assert.deepEqual(tails, ['message-toolbar-answers', 'message-toolbar-translations']);
+    .sort((a, b) => a.descriptor.order - b.descriptor.order);
+  assert.deepEqual(
+    tails.map((r) => r.descriptor.id),
+    ['message-toolbar-answers', 'message-toolbar-translations'],
+  );
+  for (const entry of tails) {
+    assert.ok(entry.descriptor.order < 0, 'a negative order keeps the answer above its file changes');
+  }
   for (const entry of registrations) assert.equal(typeof entry.component, 'function');
 });
 

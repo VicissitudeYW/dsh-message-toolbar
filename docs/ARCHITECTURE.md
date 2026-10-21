@@ -132,8 +132,8 @@ Registrations (`slots.inject(name, () => slots.register(descriptor, Component))`
 | --- | --- | --- |
 | `conversation.chat.node` | `key: 'user', priority: -1` | `UserMessageView` — bubble + copy/edit/regenerate/delete controls, inline editor (textarea, ⌘/Ctrl+Enter to send) |
 | `conversation.chat.assistant-actions` | `id: message-toolbar, order: 30, inject: sessionId => ({ sessionId })` | `AssistantToolbar` — copy, regenerate (in place), model switch (in place), edit answer, translate, delete. Rendered inside the turn-tail action row, next to DSH's built-in copy/branch buttons |
-| `conversation.chat.turnTail` | `id: message-toolbar-answers, order: 4` | `AnswerCard` — the active answer variant of a turn, with `‹ i/n ›` and the variant tools |
-| `conversation.chat.turnTail` | `id: message-toolbar-translations, order: 5` | `TranslationTail` — bilingual panels under a turn |
+| `conversation.chat.turnTail` | `id: message-toolbar-answers, order: -10` | `AnswerCard` — the active answer variant of a turn, drawn where the answer sits (negative order: the deliverables card, i.e. the files-changed block, registers at 0, so the answer stays above it) |
+| `conversation.chat.turnTail` | `id: message-toolbar-translations, order: -5` | `TranslationTail` — bilingual panels under the answer, still above the file changes |
 | `conversation.view` | `id: message-toolbar, order` | `VersionsView` — turn-level branching tree with flip/restore/delete |
 
 There is **no settings section**: the translate button opens the language dropdown at the moment it is

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.5
+
+- **The answer stays above its file changes.** A variant is drawn in the turn tail, which is a *list*
+  slot: `@deepseek-ai/dsh-client-ui-deliverables` (the "files changed" card) registers there with the
+  default `order: 0`, and ours was `4`/`5` — ascending, so the answer landed underneath it once the
+  logged row was hidden. Both entries now register at a negative order (`-10` for the answer, `-5` for
+  the bilingual panel), which puts them first in the tail, exactly where the app itself draws the
+  answer relative to that card.
+
 ## 0.4.4
 
 - **A saved edit is now rendered, not shown as source.** The renderer lookup tested
