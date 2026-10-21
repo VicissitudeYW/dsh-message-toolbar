@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.2
+
+- **Editing an answer happens in the answer.** The pencil no longer opens a popover: the answer's place
+  turns into a bordered editor holding the markdown source of its text — labelled `Editing` on the left,
+  with ✕ to leave and a save button on the right, Esc to close and ⌘/Ctrl+Enter to save. The field grows
+  with its content and keeps a resize handle. Tool calls and file-change cards are not part of an
+  answer's text, so they stay on screen beside the box instead of inside it. User bubbles keep their own
+  inline editor, which already worked this way.
+- **The copy follows the reader.** Every string was already bilingual, but the bound translator took the
+  app's locale as the only truth, and that value is provisional and browser-derived — which is how
+  `Answer deleted` surfaced under a Chinese UI. A Chinese browser or document now wins outright and the
+  locale service decides only when neither speaks Chinese; a locale switch drops the cached choice and
+  already-mounted rows re-render.
+
 ## 0.4.1
 
 - **The delete button asks one question.** Both confirmations lost their explanatory paragraph: the

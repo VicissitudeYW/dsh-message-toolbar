@@ -20,7 +20,7 @@ Cherry Studio.
 | **Edit** | user messages | Rewrites the turn in place: the conversation is rewound to just before that turn, a new child session is seeded with the edit, and the answer is regenerated. The original branch is preserved as a version card. |
 | **Regenerate** | assistant messages | **In place, no new conversation.** A fresh answer to the same question is stored as a variant of that turn and swapped in for the logged one. The `‹ 1/2 ›` control lives in the answer's action row, next to delete, and walks the variants in place. |
 | **Switch model** | assistant messages | Same mechanism with another provider/model: every model's answer becomes a variant of the *same* turn, and `‹ 2/3 ›` walks them without leaving the conversation. The picker is DSH's own dropdown (the one under the composer), so it looks and keys exactly like the rest of the app; its last row instead opens a real branch when you want a full agent run with tools. |
-| **Edit answer** | assistant messages & answer card | Your own rewrite of a model answer becomes another variant; the model's original text stays one `‹` away, and switching back is always possible. |
+| **Edit answer** | assistant messages & answer card | The pencil turns the answer into an editor *where the answer stands*: a bordered box holding the markdown source of its text (tool and file-change blocks are not part of it, so they stay on screen), labelled `Editing` with a ✕ to leave and a save button on the right. Esc closes, ⌘/Ctrl+Enter saves. Your rewrite becomes another variant, so the model's original text stays one `‹` away. |
 | **Translate** | assistant answers | Pressing translate opens a dropdown of target languages (the same native menu as the model picker) — pick one and the answer is translated; nothing has to be configured beforehand. The result is *bilingual*: the original stays, the translation sits underneath in a collapsible panel. Cached per session + turn + sequence, so it survives reloads without re-billing. |
 | **Delete** | version cards | Soft-deletes a version: the card is hidden from the ring and the version tree but the session log is untouched and it can be restored. The root conversation can never be deleted. |
 | **Delete message / answer** | user bubbles & assistant answers | Removes one turn (message, answer, tool cards) or just one answer from the transcript, e.g. to clear a pile of "continue" prompts left by a stalled turn. A `deleted · restore` row takes its place, so it is always one click back. |
@@ -132,6 +132,11 @@ its stylesheet otherwise — so the action row stays a row of icons and never gr
 Success and failure take the same route: a failure keeps the host's sentence (it names what broke),
 holds longer, and carries the warning glyph instead of the check.
 
+Copy follows the reader, not a stored flag: the plugin speaks Chinese when the browser or the document
+does, English otherwise, and consults the app's locale service last — that value is provisional and can
+still read `en` while the page is Chinese, which is exactly how `Answer deleted` once showed up under a
+Chinese UI.
+
 Clearing a message out of the model's memory for good would need a rewritten session (a new child
 session seeded without that turn). That is a separate, much larger operation, and it is not part of
 this feature.
@@ -175,7 +180,7 @@ MIT
 | **编辑** | 用户消息 | 就地改写这一轮：对话回退到该轮之前，用编辑后的文本开启一个新的子会话并重新回答，原分支保留为版本卡片。 |
 | **重新生成** | 助手消息 | **就地重答，不新开对话。** 同一个问题的新回答存成这一轮的一个「备选」，直接替换显示。`‹ 1/2 ›` 切换按钮就在这一轮的动作行里、删除按钮右边，可以就地来回翻。 |
 | **切换模型** | 助手消息 | 同一机制换 provider/模型：每个模型的回答都是**同一轮**的备选，`‹ 2/3 ›` 就地来回切换，不离开当前对话。模型选择器直接复用输入框右下角那个原生下拉（外观与键盘操作完全一致），它的最后一行则走真正的分支，用于需要调用工具的完整重跑。 |
-| **编辑回答** | 助手消息 / 回答卡片 | 你改写的回答作为另一个备选保存，模型原文始终在 `‹` 里可找回，随时能切回去。 |
+| **编辑回答** | 助手消息 / 回答卡片 | 点铅笔就在**回答原来的位置**变成编辑器：带边框的框里放这条回答的 markdown 源码（工具调用、文件改动不属于它的文本，所以留在框外照常显示），左上角写「编辑中」，右上角是 ✕（退出）和保存。Esc 退出，⌘/Ctrl+Enter 保存。你的改写作为另一个备选保存，模型原文始终在 `‹` 里可找回。 |
 | **翻译** | 助手回答 | 点翻译直接弹出语言下拉（就是切换模型那个原生菜单），选一种语言就翻，不需要事先在设置里配任何东西。结果是**双语排版**：原文保留，译文以可折叠面板放在下面。按 会话+轮次+序号 缓存，刷新页面不会重复计费。 |
 | **删除** | 版本卡片 | 软删除：从版本徽标和版本树里隐藏，但会话日志不动，可随时恢复。根对话永远不可删除。 |
 | **删除消息 / 回答** | 用户气泡 / 助手回答 | 把某一轮（消息、回答、工具卡片）或单独一条回答从对话里删掉，比如清掉某一轮卡住后连发的一串「继续」。原位留下「已删除 · 恢复」一行，随时能一键找回。 |
@@ -284,6 +289,10 @@ primitives 就用 DSH 自己的 `Toast`，否则用一份照它的样式表画�
 不会长出状态文字。成功和失败走同一条路：失败会把宿主给出的那句话原样显示（说明是哪一步坏了），
 停留更久，并且用的是警示图标而不是对勾。插件所有颜色都走主题别名，浅色/深色切换时文字、边框、
 弹层、卡片一起跟着变。
+
+文案跟着读者走，不看存储的开关：浏览器或文档是中文就说中文，否则说英文；应用自己的 locale 服务
+最后才参考——那个值是临时的、由浏览器推导，页面明明是中文它也可能还写着 `en`，之前工具栏里冒出
+一句英文 `Answer deleted` 就是这么来的。
 
 要让某条消息真正从模型记忆里消失，需要重写会话（用一个不带该轮的种子开子会话）。那是另一个大得
 多的操作，不在这个功能的范围内。

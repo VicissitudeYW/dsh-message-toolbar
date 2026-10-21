@@ -135,6 +135,23 @@ const markup = `
 
   <div class="mtt-answer"><div class="mtt-answer-body">A plain answer body — this text has to follow the theme, never the browser's default ink.</div></div>
 
+  <div class="mtt-answer">
+    <div class="mtt-answer-edit">
+      <div class="mtt-answer-edit-head">
+        <span class="mtt-answer-edit-label">Editing · 编辑中</span>
+        <span class="mtt-answer-edit-tools">
+          <button class="mtt-act" title="Close">✕</button>
+          <button class="mtt-btn mtt-btn-small mtt-btn-primary">Save</button>
+        </span>
+      </div>
+      <textarea class="mtt-answer-edit-input" rows="7">### 一、你的清单里漏了刷题
+
+你上一条自己说的是 "每天刷题 + Zero to Hero + 项目"，这一条却把刷题丢了。刷题是**唯一一个必须每天碰**的东西。
+
+把它当成刷牙：**不看心情，每天 1–2 题**，Hot 100 为主。</textarea>
+    </div>
+  </div>
+
   <div class="mtt-hidden">
     <span class="mtt-hidden-icon">⌦</span>
     <span class="mtt-hidden-note">Answer deleted from the transcript view</span>

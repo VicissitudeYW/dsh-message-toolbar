@@ -318,14 +318,50 @@ test('both rows offer a delete action and the sheet knows how to hide a turn', (
     sessionId: 'sess-1',
     node: { data: { content: [{ type: 'text', text: 'hi' }], seq: 1 }, location: { kind: 'turn', turn: 1 } },
   })));
-  assert.ok(userTitles.includes('deleteMessage'), 'the user row must offer "delete this message"');
+  assert.ok(userTitles.includes('Delete this message'), 'the user row must offer "delete this message"');
 
   const assistantTitles = titlesOf(assistantToolbarNodes());
-  assert.ok(assistantTitles.includes('deleteAnswer'), 'the assistant row must offer "delete this answer"');
+  assert.ok(assistantTitles.includes('Delete this answer'), 'the assistant row must offer "delete this answer"');
 
   const sheet = css.join('\n');
   assert.match(sheet, /\.mtt-hidden/);
   assert.match(sheet, /\.mtt-pop-note/);
+});
+
+// Copy follows the reader, not a stored preference: a Chinese document must
+// produce Chinese rows even when the locale service reports nothing, which is
+// how "Answer deleted" once showed up as English under a Chinese UI.
+test('rows read Chinese when the document is Chinese', () => {
+  globalThis.document.documentElement = { lang: 'zh-CN' };
+  try {
+    const { registrations } = applyToSlots();
+    const node = registrations.find((r) => r.descriptor.name === 'conversation.chat.node');
+    const titles = titlesOf(expand(node.component({
+      sessionId: 'sess-1',
+      node: { data: { content: [{ type: 'text', text: 'hi' }], seq: 1 }, location: { kind: 'turn', turn: 1 } },
+    })));
+    assert.ok(titles.includes('删除这条消息'), 'a Chinese document gets Chinese copy: ' + titles.join(' | '));
+    assert.ok(titles.includes('编辑消息'), 'the edit action is localized too: ' + titles.join(' | '));
+  } finally {
+    delete globalThis.document.documentElement;
+  }
+});
+
+// Editing an answer happens where the answer is: the box opens between the
+// action row and the answer it replaces, so it must be a real slot component
+// (not a popover) driven through the store the row writes to.
+test('the editor opens in the answer area, not in a popover', () => {
+  const { css } = applyToSlots();
+  const sheet = css.join('\n');
+  assert.match(sheet, /\.mtt-answer-edit/);
+  assert.match(sheet, /\.mtt-answer-edit-input/);
+  assert.doesNotMatch(sheet, /\.mtt-pop-answer/, 'the popover editor is gone');
+
+  const source = fs.readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8');
+  assert.match(source, /function AnswerEditBox\(/);
+  assert.match(source, /store\.setEdit\(props\.sessionId, props\.turn, null\)/, 'the box closes itself');
+  assert.match(source, /action: 'answer-save'/, 'the box saves into a variant');
+  assert.match(source, /const edit = useAnswerEdit\(sessionId, turn\);/, 'the card owns the open editor');
 });
 
 // A variant being written must look like the app generating, not like a plugin
