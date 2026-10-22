@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.6.0
+
+- **Translation replaces the answer in place.** Picking a language used to leave the answer alone, drop a
+  small preview popover under the action row and append a collapsible bilingual card to the turn tail — so
+  one translate produced two extra boxes. Now the translated text *becomes* the answer: `translate` stores
+  it and records which language the turn shows (`shown`), `AnswerCard` draws it through the same
+  `AnswerBody` → `MarkdownText` path, and the logged row steps aside exactly as it does for a variant. Same
+  typography, same code blocks, no extra surface.
+- **The way back is the same menu.** While a translation is displayed the translate icon reads as on and the
+  dropdown's first row is "Show the original" (`translate-off`), which only drops the language record — the
+  cached translation stays, so flipping costs nothing.
+- **Translated text can come from the screen, not just the log.** A variant or an edited answer is not in the
+  session log, so the client now sends the text it is currently showing; the host caches it under
+  `turn:<n>` and translates that instead of the (possibly stale) logged answer.
+- Removed with it: `TranslationTail`, `TranslationPanel`, their stylesheet, and the `translationBadge` /
+  `fromUser` / `fromAssistant` / `expand` / `collapse` strings. The plugin now registers four slots.
+
 ## 0.5.2
 
 - **A switched-in answer now reads as if the turn had never been answered.** Replacing an answer used

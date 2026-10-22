@@ -130,19 +130,14 @@ test('apply() injects styles and registers every slot', () => {
   assert.deepEqual(counts, {
     'conversation.chat.assistant-actions': 1,
     'conversation.chat.node': 1,
-    'conversation.chat.turnTail': 2,
+    'conversation.chat.turnTail': 1,
     'conversation.view': 1,
   });
-  // Two turnTail entries: the answer variant card sits where the answer lives,
-  // the bilingual translation cards below it — and both above the deliverables
-  // card ("files changed"), which registers at the default order 0.
-  const tails = registrations
-    .filter((r) => r.descriptor.name === 'conversation.chat.turnTail')
-    .sort((a, b) => a.descriptor.order - b.descriptor.order);
-  assert.deepEqual(
-    tails.map((r) => r.descriptor.id),
-    ['message-toolbar-answers', 'message-toolbar-translations'],
-  );
+  // One turnTail entry: the answer card, which also draws a translation in
+  // place — and it must stay above the deliverables card ("files changed"),
+  // which registers at the default order 0.
+  const tails = registrations.filter((r) => r.descriptor.name === 'conversation.chat.turnTail');
+  assert.deepEqual(tails.map((r) => r.descriptor.id), ['message-toolbar-answers']);
   for (const entry of tails) {
     assert.ok(entry.descriptor.order < 0, 'a negative order keeps the answer above its file changes');
   }
@@ -316,6 +311,31 @@ test('translate picks the target language in the native dropdown', () => {
   assert.ok(languages, 'the language dropdown lists the target languages');
   assert.ok(String(languages.props['data-menu-items']).includes('zh-TW'));
   assert.equal(languages.props['data-menu-side'], 'bottom');
+});
+
+test('a translation replaces the answer in place instead of opening a panel', () => {
+  const { css } = applyToSlots();
+  const sheet = css.join('\n');
+  const source = SOURCE;
+  // The old bilingual card and the little preview popover are gone: the answer
+  // area itself draws the translation, through the same markdown body.
+  assert.doesNotMatch(sheet, /\.mtt-trans-card/);
+  assert.doesNotMatch(source, /TranslationTail/);
+  assert.doesNotMatch(source, /TranslationPanel/);
+  assert.match(source, /function translationOf\(state, turn\)/);
+  assert.match(source, /function shownLangOf\(state, turn\)/);
+  assert.match(source, /const translation = translationOf\(state, turn\);/);
+  assert.match(source, /: translation !== null \? translation\.text : '';/);
+  // ...and the way back is a host call, so it survives a reload.
+  assert.match(source, /action: 'translate-off'/);
+  assert.match(source, /store\.patchShown\(sessionId, turn, null\)/);
+});
+
+test('the language menu offers the way back to the original', () => {
+  const source = SOURCE;
+  assert.match(source, /const ORIGINAL_ROW = 'message-toolbar\/original';/);
+  assert.match(source, /if \(id === ORIGINAL_ROW\) \{ props\.onOriginal\(\); return; \}/);
+  assert.match(source, /original: shownLang !== null,/);
 });
 
 test('the plugin ships no settings panel', () => {

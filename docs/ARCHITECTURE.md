@@ -73,7 +73,8 @@ Route `/message-toolbar` (registered lazily inside `ctx.effect`).
   "messages": { "<messageId>": {"seq","turn","role"} },
   "answers": { "<turn>": { "active": "native|<id>",
                            "items": [{ "id","kind":"model|edit","provider","model","name","text","at","baseId" }] } },
-  "translations": { "<eventSeq>": { "<lang>": {"text","provider","model","turn","role"} } } }
+  "translations": { "<eventSeq|turn:n>": { "<lang>": {"text","provider","model","turn","role"} } },
+  "shown": { "<turn>": "<lang>" } }
 ```
 
 `GET /message-toolbar?models=1` → `{ "providers": [{ "id","name","models":[{"id","name"}] }] }`
@@ -85,7 +86,8 @@ from `llm.listProviders()` + `llm.listModels(provider)`.
 | --- | --- | --- |
 | `edit` | `sessionId, eventSeq, blockIndex, text` | rewound child + followup |
 | `retry` | `sessionId, turn, model?` | rewound child + followup (model optional) |
-| `translate` | `sessionId, seq, lang, model?` | auxiliary `llm.stream` call, cached |
+| `translate` | `sessionId, lang, eventSeq? , turn?, text?, model?` | auxiliary `llm.stream` call, cached under `eventSeq` or `turn:<n>`; also records `shown[turn] = lang` so the answer becomes the translation in place |
+| `translate-off` | `sessionId, turn` | drops `shown[turn]`, putting the original answer back (the cached translation stays) |
 | `delete-version` | `sessionId` | flags the card deleted (root refused, 400) |
 | `restore-version` | `sessionId` | clears the flag |
 | `activate` | `sessionId` | un-archives (if needed) and attaches to the parent workspace |
@@ -110,7 +112,8 @@ Errors: `TypeError` → `400 {error}`, anything else → `409 {error}`.
   "deleted": { "<sessionId>": { "at": 0, "operation": "...", "targetTurn": 0 } },
   "answers": { "<sessionId>": { "<turn>": { "active": "native", "items": [] } } },
   "hidden": { "<sessionId>": { "turns": [1, 4], "answers": [2] } },
-  "translations": { "<sessionId>": { "<eventSeq>": { "<lang>": { "text": "...", "at": 0 } } } } }
+  "translations": { "<sessionId>": { "<eventSeq|turn:n>": { "<lang>": { "text": "...", "at": 0 } } } },
+  "shown": { "<sessionId>": { "<turn>": "<lang>" } } }
 ```
 
 `answers` holds the in-session answer variants — answers that deliberately never enter the
@@ -141,8 +144,7 @@ Registrations (`slots.inject(name, () => slots.register(descriptor, Component))`
 | --- | --- | --- |
 | `conversation.chat.node` | `key: 'user', priority: -1` | `UserMessageView` — bubble + copy/edit/regenerate/delete controls, inline editor (textarea, ⌘/Ctrl+Enter to send) |
 | `conversation.chat.assistant-actions` | `id: message-toolbar, order: 30, inject: sessionId => ({ sessionId })` | `AssistantToolbar` — copy, regenerate (in place), model switch (in place), edit answer, translate, delete. Rendered inside the turn-tail action row, next to DSH's built-in copy/branch buttons |
-| `conversation.chat.turnTail` | `id: message-toolbar-answers, order: -10` | `AnswerCard` — the active answer variant of a turn, drawn where the answer sits (negative order: the deliverables card, i.e. the files-changed block, registers at 0, so the answer stays above it) |
-| `conversation.chat.turnTail` | `id: message-toolbar-translations, order: -5` | `TranslationTail` — bilingual panels under the answer, still above the file changes |
+| `conversation.chat.turnTail` | `id: message-toolbar-answers, order: -10` | `AnswerCard` — the answer on screen: a variant, an edit, a translation, or the failed-turn toolbar. Above the file changes (deliverables registers at order 0) |
 | `conversation.view` | `id: message-toolbar, order` | `VersionsView` — turn-level branching tree with flip/restore/delete |
 
 There is **no settings section**: the translate button opens the language dropdown at the moment it is
@@ -295,9 +297,13 @@ conversation stays visible while the rest remain one click away in the version r
 is still current makes the workspace UI clear the main view. A member with a running turn
 (`WorkspaceActiveSessionError`) is left visible rather than force-stopped.
 
-Translation is bilingual by design: the original message is untouched, the translation is
-appended in the turn tail as a collapsible panel per language, so both texts stay readable
-and copyable side by side.
+Translation replaces the answer in place: `translate` stores the translated text keyed by the event seq
+the client handed over (or `turn:<n>` when the text on screen is a variant, which never lives in the log),
+and also records `shown[sessionId][turn] = lang`. `AnswerCard` then draws `translation.text` through the
+same `AnswerBody` → `MarkdownText` path as any other answer, and registers the `answer` mark, so the logged
+row makes way for it. `translate-off` deletes only the `shown` entry: the translation stays cached, the
+turn goes back to what it showed before, and the language menu's first row is that call. There is no
+second surface — no panel under the answer, no popover above the action row.
 
 ## Compatibility notes
 

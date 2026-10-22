@@ -119,10 +119,8 @@ const markup = `
     </div>
   </div>
 
-  <div class="mtt-trans-card">
-    <div class="mtt-trans-head"><span class="mtt-trans-badge">Translation</span><span class="mtt-trans-lang">zh</span>
-      <span class="mtt-trans-model">deepseek-chat</span><button class="mtt-trans-toggle">hide</button></div>
-    <div class="mtt-trans-body">这是译文，双语排版时原文保留在上方。</div>
+  <div class="mtt-answer">
+    <div class="mtt-answer-body">这段回答被翻译成了中文，而它仍然占据着回答本该在的位置——用的还是同一套 Markdown 渲染，所以段落、列表、代码块的样子都没有变。</div>
   </div>
 
   <div class="mtt-pop mtt-pop-confirm mock-static">

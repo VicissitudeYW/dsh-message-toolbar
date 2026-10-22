@@ -293,6 +293,38 @@ test('POST translate calls the model once and caches the answer', async () => {
   const tree = await call(services.handler, 'GET', undefined, '?sessionId=A');
   assert.equal(tree.json.translations['8'].zh.text, 'TRANSLATED');
   assert.equal(tree.json.translations['8'].zh.turn, 2);
+  // Choosing a language is also choosing what the turn shows: the translation
+  // replaces the answer in place, so the payload names the language on screen.
+  assert.equal(tree.json.shown['2'], 'zh');
+});
+
+test('a translation travels with the text on screen and can be turned off', async () => {
+  const { ctx, services } = makeContext();
+  apply(ctx);
+  resetPluginState();
+
+  // A variant is not in the log, so the client hands over the text it shows.
+  const byText = await call(services.handler, 'POST', {
+    action: 'translate', sessionId: 'A', turn: 2, lang: 'en', text: 'a variant answer',
+  });
+  assert.equal(byText.status, 200);
+  assert.equal(byText.json.lang, 'en');
+  assert.equal(byText.json.seq, 'turn:2');
+  assert.equal(byText.json.shown, 'en');
+  assert.ok(services.lastStream.messages[0].content[0].text.includes('a variant answer'));
+
+  const shown = await call(services.handler, 'GET', undefined, '?sessionId=A');
+  assert.equal(shown.json.shown['2'], 'en');
+  assert.equal(shown.json.translations['turn:2'].en.text, 'TRANSLATED');
+
+  const off = await call(services.handler, 'POST', { action: 'translate-off', sessionId: 'A', turn: 2 });
+  assert.equal(off.status, 200);
+  assert.equal(off.json.shown, null);
+
+  const after = await call(services.handler, 'GET', undefined, '?sessionId=A');
+  assert.deepEqual(after.json.shown, {});
+  // The translation stays cached — turning it off is a view decision.
+  assert.equal(after.json.translations['turn:2'].en.text, 'TRANSLATED');
 });
 
 test('POST answer-generate keeps the answer in-session and builds a plain transcript', async () => {
