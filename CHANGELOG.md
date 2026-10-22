@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.7.2
+
+- **Deleting an answer now deletes the whole answer side.** It used to hide only the message body, so a
+  deleted answer left its action row (and its file-change card) floating on the transcript, and a deleted
+  *failed* answer left the error banner behind. The `answer` scope now hides every row kind an answer can
+  own — `assistant-step`, `turn-process`, `tool`, `turn-error`, `turn-max-tokens`, `model-retry`,
+  `turn-tail` — through a new `deleted` hide mode. The prompt keeps its row and its own toolbar, so the turn
+  can be answered again.
+- **Deleting a failed answer no longer deletes the question with it.** The failed branch used the `turn`
+  scope, which is why "delete" sometimes took the user message along and sometimes did not.
+- Switching model or translating an answer keeps the file-change card: those use the `answer` /
+  `translate` modes, which never touch the tail row.
+
 ## 0.7.1
 
 - **The delete confirmation works again.** Since the confirm boxes moved into a portal (0.6.1) they live in

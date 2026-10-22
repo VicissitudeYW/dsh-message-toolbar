@@ -642,6 +642,29 @@ test('a switched-in answer replaces the logged one entirely', () => {
   assert.match(source, /reasoning: \(live\.reasoning \|\| ''\) \+ text/);
 });
 
+// "Delete this answer" must leave nothing of that answer behind — including the
+// tail row, which is where the action row and the file-change card live. The
+// prompt is a different thing: it keeps its own row and its own toolbar.
+test('a deleted answer takes its whole answer side with it', () => {
+  const source = SOURCE;
+  assert.match(source, /const DELETED_ANSWER_KINDS = \[/);
+  for (const kind of ['assistant-step', 'turn-process', 'tool', 'turn-error', 'turn-tail']) {
+    assert.ok(
+      source.includes("'" + kind + "'"),
+      'a deleted answer must hide the ' + kind + ' row too',
+    );
+  }
+  assert.match(source, /mark\.mode === 'deleted'/);
+  assert.match(source, /: hidden\.answer\s*\n\s*\? 'deleted'/);
+  // A switched-in or translated answer keeps the tail row (file changes belong to
+  // the turn, not to the answer that was replaced).
+  assert.match(source, /hiddenRows\.turn \? 'turn' : \(hiddenRows\.answer \? 'deleted' : null\)/);
+  // Only the user row deletes a whole turn; every answer-side delete (including
+  // a failed one) stays on the answer scope, so the prompt survives.
+  assert.equal((source.match(/scope: 'turn', hidden: true/g) || []).length, 1);
+  assert.match(source, /scope: 'answer', hidden: true/);
+});
+
 // Text must never be painted with a literal colour: every value has to come
 // from a theme alias, otherwise dark mode keeps light-mode ink. `CanvasText`
 // and friends are system colours, so they follow the app's colour scheme too.

@@ -240,17 +240,22 @@ records it and the same generated stylesheet applies it:
 
 | scope | rule | note |
 | --- | --- | --- |
-| `turn` | `[data-chat-turn="N"]{display:none}` | the turn's own tail row goes too: a deleted turn leaves no placeholder behind |
-| `answer` | `[data-chat-flow-kind="assistant-step"][data-chat-turn="N"]{display:none}` | the user message and tool cards stay, and so does the action row |
+| `turn` | `[data-chat-turn="N"]{display:none}` | the turn's user row, its answer and its tail row all go: a deleted prompt leaves no orphan answer behind, and no placeholder either |
+| `answer` | one rule per kind in `DELETED_ANSWER_KINDS` (`assistant-step`, `turn-process`, `tool`, `turn-error`, `turn-max-tokens`, `model-retry`, `turn-tail`), each scoped to `[data-chat-turn="N"]` | everything the answer owns goes, including the tail row (which carries the action row and the file-change card); the user row stays, with its own toolbar, so the turn can be answered again |
+
+A failed turn has no `assistant-step` row at all — only an error banner and the action row — which is why
+the answer scope hides by *kind list* rather than by "the assistant row": deleting a failed answer removes
+the error banner and its action row, and still leaves the prompt alone.
 
 Several components want the same turn hidden (the answer card for an active variant, the assistant
-toolbar for a deleted answer, the tail row for a deleted turn), so `nativeHideStyle` keeps a
-`marks` map keyed by owner (`tail:<turn>`, `bar:<turn>`, …) plus the mark's rail rank and rebuilds
-the sheet from all marks, with a whole-turn mark winning over an answer-only mark. An `answer` mark
-that stands for a *variant* carries the extra `turn-process` / `tool` rules, and — through the rail
-rank — `nav button[data-index="<rank>"]{display:none}` for the matching mark in the right-hand rail.
-`useHideRule(owner, turn, mode, rank)` is the hook that registers and clears one mark, which makes
-unmounting self-cleaning.
+toolbar for a deleted answer, the tail row for a deleted turn), so `nativeHideStyle` keeps a `marks` map
+keyed by owner (`tail:<turn>`, `bar:<turn>`, …) and rebuilds the sheet from all marks, with a whole-turn
+mark winning over an answer-side mark. The modes are `turn` (everything), `deleted` (the whole answer
+side, tail row included), `answer` (body + process + tool cards only — what a switched-in variant needs,
+because file changes belong to the turn) and `translate` (the logged body only — the paired view redraws
+the original itself). `useHideRule(owner, turn, mode)` registers and clears one mark, which makes
+unmounting self-cleaning; the rail hides its own marks through the navigation patch, not through this
+sheet.
 
 The model keeps reading the full log: a deleted answer is still in the context of later turns.
 Erasing it for the model would require a rewritten session (a child seeded without that turn),

@@ -24,7 +24,7 @@ Cherry Studio.
 | **Edit answer** | assistant messages & answer card | The pencil turns the answer into an editor *where the answer stands*: a bordered box holding the markdown source of its text (tool and file-change blocks are not part of it, so they stay on screen), labelled `Editing` with a ✕ to leave and a save button on the right. Esc closes, ⌘/Ctrl+Enter saves. **Saving overwrites what was on screen** — the ring does not grow a second answer — and the result is rendered by the same markdown body as a generated answer, so it looks unchanged. A logged answer that no API can rewrite takes an override instead, with one muted line (Edited by you · Restore the original) to give the model's text back. |
 | **Translate** | assistant answers | Pressing translate opens a dropdown of target languages (the same native menu as the model picker) — pick one and the answer is redrawn **bilingual, block by block**: original paragraph, its translation, next paragraph, all by the same markdown renderer, so the layout does not move and nothing is covered. It is a reading mode, not a second panel, and the language list ticks nothing (picking a language is a command, not a setting); the menu's first row then reads "Hide the translation". Cached per session + turn + language, so switching languages is instant and reloading does not re-bill. |
 | **Delete** | version cards | Soft-deletes a version: the card is hidden from the ring and the version tree but the session log is untouched and it can be restored. The root conversation can never be deleted. |
-| **Delete message / answer** | user bubbles & assistant answers | Removes one turn (message, answer, tool cards) or just one answer from the transcript, e.g. to clear a pile of "continue" prompts left by a stalled turn. It is gone: no placeholder row is left behind, and a toast confirms what happened. |
+| **Delete message / answer** | user bubbles & assistant answers | Two different scopes, and the toolbar follows them. On a user bubble it removes the whole turn — prompt, answer, tool cards, action row — because an answer without its question is not a turn. On an answer it removes only that answer's side: body, process card, tool cards, error banner and the action row that belonged to it, while the prompt keeps its own row and toolbar so the turn can be asked again. Either way nothing is left behind (no placeholder, no "restore" row) and a toast confirms it. |
 | **Version ring** | `‹ 2/3 ›` chip | Walks the answer variants of a turn (`1` is always the model's logged answer) and the sibling versions of a turn, without leaving the conversation. |
 | **Turn rail** | the outline on the right | Follows what is on screen instead of the log: a deleted turn leaves the ladder, and a turn showing another model's answer (or your own edit) previews that text — including an answer still being written. |
 | **Version tree** | conversation view | A turn-level branching tree of the whole conversation family, with the active path highlighted, model labels, timestamps, and restore/delete controls. |
@@ -140,8 +140,13 @@ message cannot rewrite the conversation** — no DSH API removes events from a l
 plugin does instead:
 
 - `hidden.turns` and `hidden.answers` in `~/.dsh/message-toolbar/state.json` record what you deleted;
-- a generated stylesheet hides exactly those rows (`[data-chat-turn="N"]{display:none}`, with the
-  turn-tail row included, or only the `assistant-step` row for an answer);
+- a generated stylesheet hides exactly those rows, and the two scopes delete different things:
+  - on a user bubble → the whole turn (`[data-chat-turn="N"]{display:none}`): prompt, answer, tool
+    cards and action row go together, because an answer without its question is not a turn;
+  - on an answer → only that answer's side, by row kind (`assistant-step`, `turn-process`, `tool`,
+    `turn-error`, `turn-max-tokens`, `model-retry`, `turn-tail`): body, thinking/time card, tool cards,
+    error banner and the action row that belonged to it (with its file-change card) all go, while the
+    prompt keeps its row and its own toolbar, so the turn can be answered again;
 - nothing is drawn where the row was — deletion is not a tombstone, and the confirmation is a toast;
 - the log is untouched, so **later turns still carry the deleted text in the model's context**.
 
@@ -314,8 +319,13 @@ DSH 的会话日志是 append-only 的：`assistant/message` 只能追加到还�
 任何 API 能从活着的会话里抹掉事件。本插件实际做的是：
 
 - 在 `~/.dsh/message-toolbar/state.json` 里记下 `hidden.turns` 与 `hidden.answers`；
-- 用动态样式表只隐藏那几行（整轮用 `[data-chat-turn="N"]{display:none}`，连这一轮自己的 tail 行
-  一起隐藏；只删回答时只隐藏 `assistant-step` 那行）；
+- 用动态样式表隐藏那几行，而且**两个作用域删的东西不一样**：
+  - 删用户消息 = 删整轮 → `[data-chat-turn="N"]{display:none}`，提示、回答、工具卡、动作行一起走
+    （没有问题的回答不再是一轮对话）；
+  - 删回答 = 只删这条回答那一侧 → 按行类型逐条隐藏（`assistant-step`、`turn-process`、`tool`、
+    `turn-error`、`turn-max-tokens`、`model-retry`、`turn-tail`），所以正文、思考/用时卡、工具卡、
+    失败横幅、以及属于这条回答的动作行（和文件改动卡）全都消失，而用户那条消息保留、并保留它自己的
+    工具栏——可以重新回答；
 - 删除的位置什么都不留——删除不是立碑，结果由顶部提示条告知；
 - 日志没有变，所以**后续轮次的模型上下文里仍然带着这段被删掉的内容**。
 
