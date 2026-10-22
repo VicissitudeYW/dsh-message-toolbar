@@ -2078,12 +2078,18 @@ function railNavigation(navigation, items) {
 function railLadder(sessionId, state) {
   const outline = railOutline(sessionId);
   const turns = [];
+  // The union of both folds of the log: the projection is pushed by the host and
+  // can lag a frame behind a turn that was just created (a replayed prompt, for
+  // one), while `state.turns` comes from the log we just read. Taking both keeps
+  // the ladder — and therefore every hidden position — aligned with what the rail
+  // actually draws.
   if (outline !== null) {
     for (let i = 0; i < outline.length; i++) {
       const entry = outline[i];
       if (entry && typeof entry.turn === 'number') turns.push(entry.turn);
     }
-  } else if (state && Array.isArray(state.turns)) {
+  }
+  if (state && Array.isArray(state.turns)) {
     for (let i = 0; i < state.turns.length; i++) {
       const entry = state.turns[i];
       if (entry && typeof entry.turn === 'number') turns.push(entry.turn);

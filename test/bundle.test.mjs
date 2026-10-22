@@ -657,6 +657,10 @@ test('regenerating a deleted answer runs a real turn in the same session', () =>
   // Its rail mark is hidden by ladder position, not by dropping the entry (that
   // would shift every index after it).
   assert.match(source, /gonePrompts\.length === 0 \? goneTurns : goneTurns\.concat\(gonePrompts\)/);
+  // The ladder is the union of the projection and the log's own turn list, so a
+  // turn created a moment ago is still counted before the projection catches up.
+  assert.match(source, /const outline = railOutline\(sessionId\);/);
+  assert.match(source, /if \(state && Array\.isArray\(state\.turns\)\) {/);
   // The local cache keeps the new list too, or the prompt would flash back.
   assert.match(source, /prompts: Array\.isArray\(hidden\.prompts\) \? hidden\.prompts : \[\]/);
   // A turn that still has an answer keeps the in-place variant path.
