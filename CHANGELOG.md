@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.1
+
+- **A deleted turn no longer keeps its mark in the right-hand rail.** The rail merges the host's
+  `turnOutline` projection (one entry per turn, loaded or not) with the view's loaded items, and the
+  projection half cannot be dropped from the client — so a deleted turn survived as an unloaded mark
+  whose jump scrolled into a row this plugin had hidden, i.e. somewhere else. Those marks are now
+  hidden by their position in the turn ladder, rebuilt from the projection read-only; the sheet is
+  rewritten per snapshot so switching sessions does not carry one session's rules into another.
+
 ## 0.5.0
 
 - **The turn rail on the right follows the transcript.** The rail is folded from the session log — a log

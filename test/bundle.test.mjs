@@ -90,6 +90,13 @@ function applyToSlots(options = {}) {
         getSnapshot() { return { byId: {} }; },
         subscribe() { return function () {}; },
       },
+      // The session controller keeps the projection values the rail folds; tests
+      // hand in a `turnOutline` (one entry per turn) the same way the host does.
+      projectionStore() {
+        return {
+          values() { return options.projections === undefined ? {} : { turnOutline: options.projections }; },
+        };
+      },
     },
     locale: {
       register() { return function () {}; },
@@ -504,8 +511,6 @@ test('the turn rail follows the transcript', async () => {
   const target = { getSnapshot: () => snapshot, subscribe: () => function () {} };
   const conversation = { binding: () => ({ target: () => target }) };
 
-  applyToSlots({ conversation });
-
   // Populate the plugin's own cache the way the real client does: one GET.
   const state = {
     sessionId: 'sess-1',
@@ -518,7 +523,10 @@ test('the turn rail follows the transcript', async () => {
     hidden: { turns: [2], answers: [] },
   };
   const fetch = async () => ({ ok: true, json: async () => state });
-  const { registrations } = applyToSlots({ conversation, fetch });
+  // The host's `turnOutline` keeps one entry per turn — including the deleted
+  // one, which is exactly why its mark has to be hidden by position.
+  const projections = [{ turn: 1 }, { turn: 2 }, { turn: 3 }];
+  const { registrations } = applyToSlots({ conversation, fetch, projections });
   const registration = registrations.find((r) => r.descriptor.name === 'conversation.chat.assistant-actions');
   const injected = registration.descriptor.inject('sess-1');
   expand(registration.component(Object.assign({ sessionId: 'sess-1', messageId: 'msg-1' }, injected)));
@@ -531,6 +539,9 @@ test('the turn rail follows the transcript', async () => {
   assert.equal(patched[0].response, '另一个模型写的回答', 'the rail previews the answer on screen');
   assert.equal(patched[1], railItems[2], 'an untouched entry keeps its identity');
   assert.equal(conversation.binding('sess-1').target('chat').getSnapshot().navigation.items(), patched, 'the patched list is memoized');
+  const railSheet = styleTags.find((tag) => tag.dataset.plugin === 'dsh-message-toolbar-rail');
+  assert.ok(railSheet, 'the rail sheet is injected');
+  assert.equal(railSheet.textContent, 'nav button[data-index="1"]{display:none}', 'the deleted turn keeps its projection entry, so its mark is hidden by ladder position');
 });
 
 // Text must never be painted with a literal colour: every value has to come

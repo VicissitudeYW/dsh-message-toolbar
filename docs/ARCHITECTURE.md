@@ -258,6 +258,15 @@ the `chat` target's snapshot:
   `notify()` bumps, so a switch or a delete repaints the rail without waiting for a host frame — and
   re-reading the same snapshot still returns the same array.
 
+Dropping an item is not enough to remove a deleted turn's mark: the `turnOutline` half still carries
+one entry per `turn/start`, and an entry there has no loaded twin to suppress, so it renders as an
+`unloaded` mark that scrolls to a row this plugin has hidden — a click that lands somewhere else. The
+projection cannot be rewritten (see above), so `railHideStyle` hides those marks by ladder position:
+the ladder is rebuilt from the projection itself (`sessions.projectionStore(sessionId).values()
+.turnOutline`, read-only, falling back to the host's `turns` list) and the mark's `data-index` is the
+index in that same ascending list. The sheet is rewritten on every snapshot, empty included, so
+switching to a session with nothing hidden drops the previous session's rules.
+
 No projection is written: registrants sharing the `turnOutline` key share one unit, so a second
 writer would fight the host's own frames. Nothing is written to the log either, so switching back
 restores the original preview.
