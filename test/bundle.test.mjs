@@ -520,6 +520,17 @@ test('the answer stream is NDJSON and the empty state uses the native shimmer', 
   assert.doesNotMatch(sheet, /\.mtt-live-caret/);
 });
 
+// A confirm box is portalled to `document.body`, so it lives outside the row
+// that opened it. The dismiss-on-outside-pointer listener has to know that, or
+// the pointerdown on "delete" unmounts the box before its click is dispatched
+// and the button appears to do nothing.
+test('a click inside a portalled confirmation does not dismiss it', () => {
+  const source = SOURCE;
+  assert.match(source, /const OWN_SURFACE = '\.mtt-menu-wrap, \.mtt-pop, \.mtt-pop-float';/);
+  assert.match(source, /target\.closest\(OWN_SURFACE\)/);
+  assert.doesNotMatch(source, /target\.closest\('\.mtt-menu-wrap'\)/);
+});
+
 // Deleting is confirmed with a question and reported with a banner: the action
 // row stays a row of icons, so nothing may write status text into it, and the
 // banner is the app's own Toast when the primitives package is around.

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.1
+
+- **The delete confirmation works again.** Since the confirm boxes moved into a portal (0.6.1) they live in
+  `document.body`, outside the row that opened them — but the dismiss-on-outside-pointer listener only recognised
+  the inline `.mtt-menu-wrap`. The pointerdown on "delete" therefore counted as an outside click: the box was
+  unmounted, and the following click had nowhere to land, so the button did nothing at all. The listener now
+  ignores every surface of our own (`.mtt-menu-wrap`, `.mtt-pop`, `.mtt-pop-float`), so confirming a message
+  delete, an answer delete, a variant delete or a card delete reaches its handler.
+
 ## 0.7.0
 
 - **A translation is read against its original, not instead of it.** Picking a language used to repaint the answer
