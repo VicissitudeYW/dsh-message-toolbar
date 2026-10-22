@@ -136,6 +136,16 @@ function makeContext(options = {}) {
       listModels: (provider) => [{ id: provider === 'q' ? 'm2' : 'm', name: provider === 'q' ? 'Model M2' : 'Model M' }],
       stream: async function* (call) {
         services.lastStream = call;
+        if (options.echoTranslate === true) {
+          // Hand the masked text straight back, the way a translator that respects
+          // placeholders would — so whatever comes out is what the round trip
+          // restored, and the request itself can be inspected.
+          const prompt = call.messages[0].content[0].text;
+          const masked = prompt.slice(prompt.indexOf('<<<TEXT\n') + 8, prompt.lastIndexOf('\nTEXT>>>'));
+          yield { type: 'text-delta', index: 0, text: masked };
+          yield { type: 'finish', reason: 'stop' };
+          return;
+        }
         yield { type: 'block-start', index: 0, blockType: 'reasoning' };
         yield { type: 'reasoning-delta', index: 0, text: 'THINK' };
         yield { type: 'block-start', index: 1, blockType: 'text' };
@@ -321,6 +331,38 @@ test('POST translate reports a translation the model could not finish', async ()
   resetPluginState();
 });
 
+// Code and formulas are lifted out of the request and put back afterwards: the
+// only way to keep `console.log` and \frac{a}{b} byte-identical is to never hand
+// them to the model.
+test('POST translate keeps code and formulas out of the model hands', async () => {
+  const { ctx, services } = makeContext({ echoTranslate: true });
+  apply(ctx);
+  resetPluginState();
+
+  const text = [
+    'Run `npm run build` before anything else.',
+    '',
+    '```js',
+    'const x = console.log(1);',
+    '```',
+    '',
+    'The identity $$E=mc^2$$ holds, and \(\frac{a}{b}\) too.',
+  ].join('\n');
+  const { status, json } = await call(services.handler, 'POST', {
+    action: 'translate', sessionId: 'A', turn: 2, lang: 'zh', text,
+  });
+  assert.equal(status, 200);
+  // What the reader gets back is the source, untouched, plus whatever the model
+  // wrote around the placeholders.
+  assert.equal(json.text, text);
+
+  const prompt = services.lastStream.messages[0].content[0].text;
+  assert.doesNotMatch(prompt, /console\.log/);
+  assert.doesNotMatch(prompt, /E=mc\^2/);
+  assert.doesNotMatch(prompt, /frac\{a\}\{b\}/);
+  assert.match(prompt, /⟦1⟧/);
+  resetPluginState();
+});
 // The translation arrives the way an answer does — one frame per token batch — so
 // the card can draw it as it is written instead of after the round trip.
 test('POST translate streams the translation frame by frame', async () => {

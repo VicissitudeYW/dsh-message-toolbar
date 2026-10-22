@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.9.1
+
+- **Code and formulas are never translated.** Fenced blocks, inline code, display math and inline math are
+  lifted out of the request and replaced with `⟦n⟧` placeholders, then restored byte for byte, so a
+  translation can no longer reformat `console.log(x)`, rename an identifier or break `\frac{a}{b}`. A block
+  that already stood on its own keeps its own paragraph (a fence restored mid-sentence would render as plain
+  text); display math written inside a sentence stays inline. Placeholders are restored as the stream
+  arrives, and a half-arrived placeholder is held back so `⟦1` never flashes on screen.
+- **Pairs read as pairs.** The gap between an original and its translation stays tight (2px), the gap before
+  the next original grows to 18px, so the eye follows one paragraph at a time instead of running the two
+  languages together. The rule before a translation is 2px instead of 0.5px.
+
 ## 0.9.0
 
 - **A translation is streamed, not awaited.** `translate` now answers in the same NDJSON frames an answer

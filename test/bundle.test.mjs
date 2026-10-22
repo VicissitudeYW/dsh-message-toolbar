@@ -348,8 +348,11 @@ test('a translation is drawn beside the original, block by block', () => {
   const { css } = applyToSlots();
   const sheet = css.join('\n');
   const source = SOURCE;
-  assert.match(sheet, /\.mtt-pair\{display:flex;flex-direction:column/);
-  assert.match(sheet, /\.mtt-pair-tr\{padding-left:10px;border-left:\.5px solid var\(--mtt-line-strong\)/);
+  assert.match(sheet, /\.mtt-pair\{display:flex;flex-direction:column;gap:18px/);
+  // The two halves of one paragraph stay tight together; the next paragraph gets
+  // air, so the eye follows original → translation and then breaks.
+  assert.match(sheet, /\.mtt-pair-block\{display:flex;flex-direction:column;gap:2px/);
+  assert.match(sheet, /\.mtt-pair-tr\{padding-left:10px;border-left:2px solid var\(--mtt-line-strong\)/);
   assert.match(source, /function textBlocks\(text\)/);
   assert.match(source, /function pairParagraphs\(source, translated\)/);
   assert.match(source, /className: 'mtt-pair-tr'/);

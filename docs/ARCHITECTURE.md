@@ -355,6 +355,19 @@ Two consequences worth writing down, because both were bugs once:
 
 ### Streaming a translation
 
+### Code and formulas are not translated
+
+Handing code to a translator is asking for it to be rewritten: an identifier gets translated, a fence gets
+re-indented, a LaTeX macro gets "corrected". So `translate` never sends it. `protectText()` walks the text with
+two pattern lists — `BLOCK_PATTERNS` (fences, `~~~`, `$$…$$`, `\[…\]`) and `INLINE_PATTERNS` (`` `…` ``, `$…$`,
+`\(…\)`) — and replaces every match with `⟦n⟧`, keeping the original in `kept[n-1]`. A block that already stood
+on its own (`/(^|\n)[ \t]*$/` right before it) is replaced by its own paragraph, because a fence that comes back
+mid-sentence renders as plain text instead of a code block; display math written inside a sentence is replaced
+inline, where it was. The system prompt tells the model to copy placeholders unchanged and in order, and
+`restoreText()` puts the originals back by number. Streaming restores as it goes, but holds back a placeholder
+that has only partly arrived (`settledLength()`), so `⟦1` never appears on screen. The finished translation
+collapses any padding blank lines (`/\n{3,}/g` → `\n\n`).
+
 `translate` accepts `stream: true` and answers with the same NDJSON frames `answer-generate` does — `start`
 (with `seq`, `turn`, `lang`, `provider`, `model`), one `delta` per token batch, then `done` carrying the same
 payload a plain POST would return (cached translations answer with a single `done`). Host side both writers
