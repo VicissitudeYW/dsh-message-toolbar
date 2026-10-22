@@ -696,6 +696,35 @@ test('a deleted answer takes its whole answer side with it', () => {
   assert.match(source, /scope: 'answer', hidden: true/);
 });
 
+// A translation is drawn by this card as a paired page, so the card has to keep
+// painting the answer area while it is on. When it did not, the logged body was
+// hidden by the `translate` mark and the card returned null: a blank answer.
+test('a translated answer paints the paired page instead of a blank area', async () => {
+  const state = {
+    sessionId: 'sess-1',
+    versions: [], messages: {}, model: null,
+    turns: [{ turn: 1, answered: true }],
+    translations: { 18: { zh: { text: '**中文标题**\n\n第二段译文', provider: 'p', model: 'm', turn: 1, role: 'assistant', at: 1 } } },
+    origins: { 1: '**German title**\n\nZweiter Absatz' },
+    shown: { 1: 'zh' },
+    answers: {},
+    hidden: { turns: [], answers: [], prompts: [] },
+  };
+  const fetch = async () => ({ ok: true, json: async () => state });
+  const { registrations } = applyToSlots({ fetch });
+  const card = registrations.find((r) => r.descriptor.name === 'conversation.chat.turnTail');
+  const injected = card.descriptor.inject('sess-1');
+  const props = Object.assign({ sessionId: 'sess-1', turn: 1, seq: 20, openFile() {} }, injected);
+  // The card loads its payload on mount; render again once the store has it.
+  card.component(props);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const nodes = expand(card.component(props));
+  const classes = nodes.map((n) => n.props && n.props.className).filter(Boolean);
+  assert.ok(classes.indexOf('mtt-pair') !== -1, 'the paired page is drawn: ' + classes.join(' | '));
+  assert.ok(classes.indexOf('mtt-pair-src') !== -1, 'the original paragraph stays on screen');
+  assert.ok(classes.indexOf('mtt-pair-tr') !== -1, 'and its translation follows it');
+});
 // Text must never be painted with a literal colour: every value has to come
 // from a theme alias, otherwise dark mode keeps light-mode ink. `CanvasText`
 // and friends are system colours, so they follow the app's colour scheme too.

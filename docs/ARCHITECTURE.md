@@ -341,6 +341,17 @@ way, while the turn's own process card and tool cards stay, since they are still
 to what it showed before, and the language menu's first row is that call. There is no second surface — no
 panel under the answer, no popover above the action row.
 
+Two consequences worth writing down, because both were bugs once:
+
+- **The card decides from `drawing`, not `showingVariant`.** A translated turn hides the logged answer and
+  draws its own page; if the early return still keyed on `showingVariant` (which a translation is not), the
+  answer area would be hidden *and* empty. `drawing = showingVariant || translation !== null` is what both the
+  early return and the failed-turn branch ask.
+- **Translation gets the same token room as the answer** (`maxTokens: 8192` — 4096 cut a 700-word article
+  mid-sentence). When the stream still ends with `finish.reason` of `length`/`max_tokens`, the stored entry
+  and the response carry `truncated: true`, and the paired page draws one quiet line saying the rest is
+  untranslated. Silence would look like a complete translation that stopped early.
+
 ## Compatibility notes
 
 - Peer: `@deepseek-ai/dsh >=0.2.0-rc.2 <0.3.0-0`.

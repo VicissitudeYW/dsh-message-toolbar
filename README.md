@@ -110,6 +110,8 @@ how many blocks they have (models merge and split paragraphs), the whole transla
 whole original rather than pairing the wrong halves. Nothing is appended below the answer and nothing
 floats above the action row. `Hide the translation` in the same menu drops only that record
 (`translate-off`), and the cached translation stays, so flipping back and forth costs nothing.
+A translation is allowed as many tokens as the answer it translates (8192), and if the model still stops on
+its length limit the page says the rest is untranslated instead of ending mid-sentence in silence.
 
 Consequences, stated plainly:
 
@@ -289,7 +291,8 @@ dsh plugin --profile web add file:./dsh-message-toolbar-0.4.0.tgz
 把原文换掉。两侧都走同一个 `AnswerBody` → `MarkdownText`，字号、行高、代码块、边距完全一致，译文只是内缩
 一点、颜色轻一点，方便眼睛区分。当两侧的段数对不上时（模型会合并或拆分段落），整段译文跟在整段原文下面，
 而不是硬配错段落。正文下面不再追加任何东西，动作行上方也不再浮出任何东西。同一个菜单里的「隐藏译文」只抹掉
-这条记录（`translate-off`），译文仍然缓存着，来回切不花钱。
+这条记录（`translate-off`），译文仍然缓存着，来回切不花钱。译文按被译正文的长度给预算（8192 tokens），
+万一模型还是撞到长度上限，页面上会明说后半段没有翻译，而不是悄悄停在半句话上。
 
 需要说清的三点后果：
 

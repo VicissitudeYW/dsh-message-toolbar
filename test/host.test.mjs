@@ -134,14 +134,15 @@ function makeContext(options = {}) {
     llm: {
       listProviders: () => [{ id: 'p', name: 'Provider P' }, { id: 'q', name: 'Provider Q' }],
       listModels: (provider) => [{ id: provider === 'q' ? 'm2' : 'm', name: provider === 'q' ? 'Model M2' : 'Model M' }],
-      stream: async function* (options) {
-        services.lastStream = options;
+      stream: async function* (call) {
+        services.lastStream = call;
         yield { type: 'block-start', index: 0, blockType: 'reasoning' };
         yield { type: 'reasoning-delta', index: 0, text: 'THINK' };
         yield { type: 'block-start', index: 1, blockType: 'text' };
         yield { type: 'text-delta', index: 1, text: 'TRANS' };
         yield { type: 'text-delta', index: 1, text: 'LATED' };
-        yield { type: 'finish', reason: 'stop' };
+        // options here is makeContext's fixture knobs, not the call's arguments.
+        yield { type: 'finish', reason: options.finishReason || 'stop' };
       },
     },
   };
@@ -297,6 +298,25 @@ test('POST answer-run replays the prompt as a new turn of the same session', asy
   assert.equal(followups[0].content[0].text, 'second question');
 });
 
+// A long answer needs a long translation. When the model still runs out of room,
+// the payload says so instead of passing half a page off as the whole thing.
+test('POST translate reports a translation the model could not finish', async () => {
+  const { ctx, services } = makeContext({ finishReason: 'length' });
+  apply(ctx);
+  resetPluginState();
+
+  const { status, json } = await call(services.handler, 'POST', {
+    action: 'translate', sessionId: 'A', eventSeq: 8, lang: 'ja',
+  });
+  assert.equal(status, 200);
+  assert.equal(json.truncated, true);
+  assert.equal(json.text, 'TRANSLATED');
+  // Room for a full page, not half a page.
+  assert.equal(services.lastStream.maxTokens, 8192);
+  const tree = await call(services.handler, 'GET', undefined, '?sessionId=A');
+  assert.equal(tree.json.translations['8'].ja.truncated, true);
+  resetPluginState();
+});
 test('POST translate calls the model once and caches the answer', async () => {
   const { ctx, services } = makeContext();
   apply(ctx);

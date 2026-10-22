@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.3
+
+- **A translated answer can no longer paint an empty area.** Since 0.7.0 the paired page replaced the plain
+  answer, but the card still decided "do I draw anything?" from `showingVariant` — which no longer counted a
+  translation. So a turn that was only translated hid the logged answer (translate mode) *and* drew nothing
+  (early return): a blank answer area. The card now asks `drawing = showingVariant || translation !== null`.
+- **A truncated translation says so.** Translation used a 4096-token budget, which cut a 700-word article
+  mid-sentence — and the reader had no way to know the rest was missing. The budget is now 8192, and when the
+  model still stops on its length limit the response and the cached entry carry `truncated: true`, which draws
+  one small line under the paired page.
+
 ## 0.8.2
 
 - **The translate button turns into a spinner while it waits.** A translation takes a round trip, and the
