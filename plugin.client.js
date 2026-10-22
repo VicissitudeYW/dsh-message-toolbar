@@ -2455,48 +2455,17 @@ function UserMessageView(props) {
     setBusy(false);
   }
 
-  // "Regenerate" from a user bubble answers the same turn again **in place**,
-  // exactly like the assistant toolbar's button: the new answer becomes a
-  // variant of this turn, so no second conversation appears. Editing the prompt
-  // is the branch path — the logged prompt itself cannot be rewritten.
+  // "Regenerate" from a user bubble is the same action as the one on the answer
+  // row: it adds another answer to this turn, in place, so a second conversation
+  // never appears and the ring shows `1/2` with the earlier answer still reachable.
+  // Editing the prompt is the branch path — the logged prompt itself cannot be
+  // rewritten.
   //
-  // The one exception is a turn whose answer is gone (deleted, or never produced
-  // because it failed): there the answer area holds nothing to replace, and an
-  // in-place text answer would be a poor stand-in — the reader asked a question
-  // that has no answer, and expects the app to answer it for real, with the
-  // thinking chain and tool cards it shows for any new message.
-  //
-  // A closed turn cannot take a second assistant message (the log forbids it), so
-  // the only way to get that live page is a fresh turn. We replay this prompt as
-  // a new user message in the same session and mark that turn's prompt as hidden:
-  // the question stays where it is, and under it DSH runs an ordinary turn —
-  // thinking, tools, streaming, all native. The cost is one extra turn in the
-  // log (invisible, and hidden from the rail too), which is the price of a real
-  // answer rather than a text-only stand-in.
+  // That holds whether or not an answer is on screen: a deleted answer is simply
+  // the first entry of the ring that the new one is added to, which is why both
+  // rows behave alike.
   async function retry() {
     if (typeof turn !== 'number') return;
-    const info = turnInfo(state, turn);
-    const rows = hiddenOf(state, turn);
-    const gone = rows.answer || (info !== undefined && info.answered === false);
-    if (gone) {
-      setBusy(true);
-      setError(null);
-      try {
-        const result = await mutate({
-          action: 'answer-run', sessionId: sessionId, turn: turn, stopPrevious: prefs.stopPrevious,
-        });
-        if (result && typeof result.turn === 'number' && result.turn !== turn) {
-          await mutate({
-            action: 'hide', sessionId: sessionId, turn: result.turn, scope: 'prompt', hidden: true,
-          });
-        }
-        store.invalidate();
-      } catch (e) {
-        showToast(failureText(e), 'error');
-      }
-      setBusy(false);
-      return;
-    }
     setBusy(true);
     setError(null);
     try {

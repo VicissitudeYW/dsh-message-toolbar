@@ -655,12 +655,20 @@ test('a switched-in answer replaces the logged one entirely', () => {
 // in-place text variant. A closed turn cannot take a second answer, so the prompt
 // is replayed as a new turn in the same session and that turn's prompt is hidden —
 // the question stays put, and DSH's own live page streams under it.
-test('regenerating a deleted answer runs a real turn in the same session', () => {
+// Regenerating from the question and regenerating from the answer are one action:
+// both add another answer to the turn, so the ring appears with two entries and
+// the earlier answer stays reachable. Neither creates a second conversation.
+test('regenerating from the question adds another answer, like the answer row', () => {
   const source = SOURCE;
-  assert.match(source, /const gone = rows\.answer \|\| \(info !== undefined && info\.answered === false\);/);
-  assert.match(source, /action: 'answer-run', sessionId: sessionId, turn: turn, stopPrevious: prefs\.stopPrevious/);
-  assert.match(source, /action: 'hide', sessionId: sessionId, turn: result\.turn, scope: 'prompt', hidden: true/);
-  // The replayed prompt never shows up as a second question of its own.
+  // One writer for both rows...
+  assert.match(source, /await generateInto\(sessionId, turn, undefined\);/);
+  assert.match(source, /await generateInto\(sessionId, turn, info === null \? undefined : info\);/);
+  // ...and no branch and no second turn from the question's button. Branching
+  // still exists, but only as the last row of the model menu, where it is asked for.
+  assert.doesNotMatch(source, /action: 'answer-run'/);
+  assert.match(source, /async function branchVersion\(\)/);
+  // The native in-place path is still there for API clients, and the replayed
+  // prompt of such a turn never shows up as a second question of its own.
   assert.match(source, /if \(rows\.prompt\) return null;/);
   // Its rail mark is hidden by ladder position, not by dropping the entry (that
   // would shift every index after it).
@@ -671,8 +679,6 @@ test('regenerating a deleted answer runs a real turn in the same session', () =>
   assert.match(source, /if \(state && Array\.isArray\(state\.turns\)\) {/);
   // The local cache keeps the new list too, or the prompt would flash back.
   assert.match(source, /prompts: Array\.isArray\(hidden\.prompts\) \? hidden\.prompts : \[\]/);
-  // A turn that still has an answer keeps the in-place variant path.
-  assert.match(source, /await generateInto\(sessionId, turn, undefined\);/);
 });
 
 // "Delete this answer" must leave nothing of that answer behind — including the

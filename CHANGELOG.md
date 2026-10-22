@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.9.3
+
+- **Regenerating from the question is the same action as regenerating from the answer.** Both add another
+  answer to that turn, so `‹ 1/2 ›` appears and the earlier answer stays reachable; neither opens a second
+  conversation. This also covers a turn whose answer was deleted: the deleted answer is simply the first entry
+  of the ring, instead of that button switching to a different mechanism (a replayed prompt in a new turn).
+  `answer-run` stays available as an API for clients that want the native agent page, and the prompt-hiding
+  path stays wired for them.
+
 ## 0.9.2
 
 - **Text already in the target language is not translated again.** Sentences are checked for the target
