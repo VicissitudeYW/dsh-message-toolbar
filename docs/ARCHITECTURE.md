@@ -99,7 +99,8 @@ from `llm.listProviders()` + `llm.listModels(provider)`.
 | `answer-select` | `sessionId, turn, answerId` | flips the visible variant (`'native'` is legal) |
 | `answer-delete` | `sessionId, turn, answerId` | drops a variant; if it was visible, the one before it in the ring (`native` first) takes over |
 | `answer-restore` | `sessionId, turn` | drops the `override`, so the model's logged answer shows again |
-| `hide` | `sessionId, turn, scope: "turn"\|"answer", hidden: bool` | hides/restores one turn or one answer in the transcript view; returns the new lists |
+| `answer-run` | `sessionId, turn, stopPrevious?` | answers a turn again **in the same session**: replays its prompt as a new turn and returns `{sessionId, turn, replayedFrom, inPlace: true}` so the client can hide the replayed prompt |
+| `hide` | `sessionId, turn, scope: "turn"\|"answer"\|"prompt", hidden: bool` | hides/restores one turn, one answer, or the replayed prompt of a turn in the transcript view; returns the new lists |
 | `models` | — | same catalog as `?models=1` |
 
 Errors: `TypeError` → `400 {error}`, anything else → `409 {error}`.
@@ -241,6 +242,7 @@ records it and the same generated stylesheet applies it:
 | scope | rule | note |
 | --- | --- | --- |
 | `turn` | `[data-chat-turn="N"]{display:none}` | the turn's user row, its answer and its tail row all go: a deleted prompt leaves no orphan answer behind, and no placeholder either |
+| `prompt` | that turn's user row renders `null` (our shadow node) | a prompt replayed by `answer-run`: the question it re-asks must not appear twice; its rail entry is dropped too |
 | `answer` | one rule per kind in `DELETED_ANSWER_KINDS` (`assistant-step`, `turn-process`, `tool`, `turn-error`, `turn-max-tokens`, `model-retry`, `turn-tail`), each scoped to `[data-chat-turn="N"]` | everything the answer owns goes, including the tail row (which carries the action row and the file-change card); the user row stays, with its own toolbar, so the turn can be answered again |
 
 A failed turn has no `assistant-step` row at all — only an error banner and the action row — which is why
@@ -252,11 +254,14 @@ The `deleted` mark is not absolute: it is applied only while nothing of ours sta
 is saved, the card switches to the `answer` mark, which keeps the tail row — the row the card itself is
 rendered in. Without that, a fresh answer to a just-deleted turn would be hidden by the hole it is filling.
 
-Answering a turn whose answer is gone takes the **branch** path, not the in-place one: a question without an
-answer deserves a real agent run (thinking, tool cards, streaming), and a closed turn cannot accept a second
-`assistant/message`, so `UserMessageView.retry()` sends `retry` (seed before the turn + `followup` of the same
-prompt) and then walks the reader to the child through `switchToVersion`, which also focuses the family. The
-child's transcript holds the prompt once, so it does not read as "sent again".
+Answering a turn whose answer is gone stays **in the same session**: a question without an answer deserves a
+real agent run (thinking, tool cards, streaming), and a closed turn cannot accept a second
+`assistant/message`. So `answer-run` replays the prompt on the session's own agent — a fresh turn with the
+same text — and hands back the turn it opened. The client marks that turn's prompt with scope `prompt`,
+which renders that user row as `null` (it is our own shadowed node, so no stylesheet is needed), and its
+rail entry is dropped with it. Reading order stays "one question, one answer", while the answer under it is
+an ordinary turn: DSH renders it live, tools and all. The cost is one replayed prompt in the log — visible
+to the model on later turns, which is the price of a real answer rather than a text-only stand-in.
 
 Several components want the same turn hidden (the answer card for an active variant, the assistant
 toolbar for a deleted answer, the tail row for a deleted turn), so `nativeHideStyle` keeps a `marks` map

@@ -102,6 +102,9 @@ function makeContext(options = {}) {
       runMaintenance: async (fn) => fn(agents.get(id)),
       cancel: () => {},
       whenIdle: async () => {},
+      // In-place answering replays the prompt on the session's own agent, so the
+      // live agent has to accept a follow-up just like a freshly created one.
+      followup: (message) => { followups.push(message); },
     } : undefined,
     create: async (options) => {
       created.push(options);
@@ -270,6 +273,28 @@ test('POST retry with a model overrides routing and records it on the card', asy
   assert.equal(options.agentOptions.model, 'm2');
   const marker = options.seed[options.seed.length - 1];
   assert.deepEqual(marker.data.effect.model, { provider: 'q', model: 'm2', name: 'Model M2' });
+});
+
+// A closed turn cannot take a second answer, so "answer this again" replays the
+// prompt as a fresh turn in the same session and reports which turn it opened, so
+// the client can hide the replayed prompt and stream DSH's own live page under it.
+test('POST answer-run replays the prompt as a new turn of the same session', async () => {
+  const { ctx, services, created, followups } = makeContext();
+  apply(ctx);
+
+  const { status, json } = await call(services.handler, 'POST', {
+    action: 'answer-run', sessionId: 'A', turn: 2, stopPrevious: false,
+  });
+  assert.equal(status, 200);
+  // No child session: the answer has to land in this transcript.
+  assert.equal(created.length, 0);
+  assert.equal(json.sessionId, 'A');
+  assert.equal(json.inPlace, true);
+  assert.equal(json.replayedFrom, 2);
+  assert.equal(json.turn, 3);
+  assert.equal(followups.length, 1);
+  assert.equal(followups[0].role, 'user');
+  assert.equal(followups[0].content[0].text, 'second question');
 });
 
 test('POST translate calls the model once and caches the answer', async () => {
@@ -511,20 +536,20 @@ test('POST hide removes a turn or an answer from the view and restores it', asyn
     action: 'hide', sessionId: 'A', turn: 1, scope: 'turn', hidden: true,
   });
   assert.equal(hiddenTurn.status, 200);
-  assert.deepEqual(hiddenTurn.json.hidden, { turns: [1], answers: [] });
+  assert.deepEqual(hiddenTurn.json.hidden, { turns: [1], answers: [], prompts: [] });
 
   const payload = await call(services.handler, 'GET', undefined, '?sessionId=A');
-  assert.deepEqual(payload.json.hidden, { turns: [1], answers: [] });
+  assert.deepEqual(payload.json.hidden, { turns: [1], answers: [], prompts: [] });
 
   const hiddenAnswer = await call(services.handler, 'POST', {
     action: 'hide', sessionId: 'A', turn: 2, scope: 'answer', hidden: true,
   });
-  assert.deepEqual(hiddenAnswer.json.hidden, { turns: [1], answers: [2] });
+  assert.deepEqual(hiddenAnswer.json.hidden, { turns: [1], answers: [2], prompts: [] });
 
   const restored = await call(services.handler, 'POST', {
     action: 'hide', sessionId: 'A', turn: 2, scope: 'answer', hidden: false,
   });
-  assert.deepEqual(restored.json.hidden, { turns: [1], answers: [] });
+  assert.deepEqual(restored.json.hidden, { turns: [1], answers: [], prompts: [] });
 
   const badScope = await call(services.handler, 'POST', {
     action: 'hide', sessionId: 'A', turn: 1, scope: 'everything', hidden: true,

@@ -644,14 +644,19 @@ test('a switched-in answer replaces the logged one entirely', () => {
 
 // A turn whose answer is gone is a question without an answer: regenerating it
 // has to produce a real agent run (thinking, tool cards, streaming) rather than an
-// in-place text variant, and such a run needs its own session — the log refuses a
-// second answer to a closed turn.
-test('regenerating a deleted answer runs a real agent turn in a branch', () => {
+// in-place text variant. A closed turn cannot take a second answer, so the prompt
+// is replayed as a new turn in the same session and that turn's prompt is hidden —
+// the question stays put, and DSH's own live page streams under it.
+test('regenerating a deleted answer runs a real turn in the same session', () => {
   const source = SOURCE;
   assert.match(source, /const gone = rows\.answer \|\| \(info !== undefined && info\.answered === false\);/);
-  assert.match(source, /action: 'retry', sessionId: sessionId, turn: turn, stopPrevious: prefs\.stopPrevious/);
-  assert.match(source, /switchToVersion\(navigation, \{ sessionId: result\.sessionId \}, sessionId\);/);
-  // A turn that still has an answer keeps the in-place path, with no new session.
+  assert.match(source, /action: 'answer-run', sessionId: sessionId, turn: turn, stopPrevious: prefs\.stopPrevious/);
+  assert.match(source, /action: 'hide', sessionId: sessionId, turn: result\.turn, scope: 'prompt', hidden: true/);
+  // The replayed prompt never shows up as a second question of its own.
+  assert.match(source, /if \(rows\.prompt\) return null;/);
+  // The local cache keeps the new list too, or the prompt would flash back.
+  assert.match(source, /prompts: Array\.isArray\(hidden\.prompts\) \? hidden\.prompts : \[\]/);
+  // A turn that still has an answer keeps the in-place variant path.
   assert.match(source, /await generateInto\(sessionId, turn, undefined\);/);
 });
 
