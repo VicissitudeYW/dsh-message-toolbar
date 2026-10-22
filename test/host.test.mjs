@@ -346,7 +346,9 @@ test('POST translate keeps code and formulas out of the model hands', async () =
     'const x = console.log(1);',
     '```',
     '',
-    'The identity $$E=mc^2$$ holds, and \(\frac{a}{b}\) too.',
+    'The identity $$\\sum_i x_i$$ holds, and \\(\\frac{a}{b}\\) too.',
+    '',
+    'It costs $5 and $10, which is prose rather than math.',
   ].join('\n');
   const { status, json } = await call(services.handler, 'POST', {
     action: 'translate', sessionId: 'A', turn: 2, lang: 'zh', text,
@@ -358,9 +360,11 @@ test('POST translate keeps code and formulas out of the model hands', async () =
 
   const prompt = services.lastStream.messages[0].content[0].text;
   assert.doesNotMatch(prompt, /console\.log/);
-  assert.doesNotMatch(prompt, /E=mc\^2/);
+  assert.doesNotMatch(prompt, /sum_i x_i/);
   assert.doesNotMatch(prompt, /frac\{a\}\{b\}/);
   assert.match(prompt, /⟦1⟧/);
+  // Money is prose, not math: `$5 and $10` has to reach the model untouched.
+  assert.match(prompt, /\$5 and \$10/);
   resetPluginState();
 });
 // The translation arrives the way an answer does — one frame per token batch — so
