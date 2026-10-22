@@ -367,6 +367,39 @@ test('POST translate keeps code and formulas out of the model hands', async () =
   assert.match(prompt, /\$5 and \$10/);
   resetPluginState();
 });
+// A mixed answer is common: half of it already in the language the reader picked.
+// Sending that half to a translator buys a second copy of it, so it is lifted out
+// along with the code.
+test('POST translate leaves text already in the target language alone', async () => {
+  const { ctx, services } = makeContext({ echoTranslate: true });
+  apply(ctx);
+  resetPluginState();
+
+  const text = [
+    '这段话已经是我要的简体中文，不用再翻译。',
+    '',
+    'This paragraph is English and has to be translated.',
+  ].join('\n');
+  const { status, json } = await call(services.handler, 'POST', {
+    action: 'translate', sessionId: 'A', turn: 2, lang: 'zh', text,
+  });
+  assert.equal(status, 200);
+  assert.equal(json.text, text);
+
+  const prompt = services.lastStream.messages[0].content[0].text;
+  assert.doesNotMatch(prompt, /这段话已经是我要的简体中文/);
+  assert.match(prompt, /This paragraph is English/);
+  assert.match(prompt, /⟦1⟧/);
+
+  // For a Latin-script target the script cannot tell the languages apart, so
+  // nothing is lifted on a guess.
+  const en = await call(services.handler, 'POST', {
+    action: 'translate', sessionId: 'A', turn: 3, lang: 'en', text, force: true,
+  });
+  assert.equal(en.status, 200);
+  assert.match(services.lastStream.messages[0].content[0].text, /这段话已经是我要的简体中文/);
+  resetPluginState();
+});
 // The translation arrives the way an answer does — one frame per token batch — so
 // the card can draw it as it is written instead of after the round trip.
 test('POST translate streams the translation frame by frame', async () => {

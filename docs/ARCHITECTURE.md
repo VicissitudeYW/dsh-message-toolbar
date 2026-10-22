@@ -355,6 +355,17 @@ Two consequences worth writing down, because both were bugs once:
 
 ### Streaming a translation
 
+`translate` accepts `stream: true` and answers with the same NDJSON frames `answer-generate` does — `start`
+(with `seq`, `turn`, `lang`, `provider`, `model`), one `delta` per token batch, then `done` carrying the same
+payload a plain POST would return (cached translations answer with a single `done`). Host side both writers
+share `respondStream(response, run)`; client side both share `streamOperation(operation, handlers)`, so there
+is one reader to trust. The translation has its own live cell (`store.liveTranslations`, keyed
+`${sessionId}|${turn}`) because nothing else about the turn is changing while it arrives: `AnswerCard` draws
+the paired page on the first delta, and while the text is still empty it draws three bobbing dots (`.mtt-dots`)
+in the translation column. During the stream the card keeps the whole original in one block and grows the
+translation beneath it, so blocks never re-pair mid-sentence; paragraph pairing happens once, when the
+translation is complete.
+
 ### Code and formulas are not translated
 
 Handing code to a translator is asking for it to be rewritten: an identifier gets translated, a fence gets
@@ -368,16 +379,15 @@ inline, where it was. The system prompt tells the model to copy placeholders unc
 that has only partly arrived (`settledLength()`), so `⟦1` never appears on screen. The finished translation
 collapses any padding blank lines (`/\n{3,}/g` → `\n\n`).
 
-`translate` accepts `stream: true` and answers with the same NDJSON frames `answer-generate` does — `start`
-(with `seq`, `turn`, `lang`, `provider`, `model`), one `delta` per token batch, then `done` carrying the same
-payload a plain POST would return (cached translations answer with a single `done`). Host side both writers
-share `respondStream(response, run)`; client side both share `streamOperation(operation, handlers)`, so there
-is one reader to trust. The translation has its own live cell (`store.liveTranslations`, keyed
-`${sessionId}|${turn}`) because nothing else about the turn is changing while it arrives: `AnswerCard` draws
-the paired page on the first delta, and while the text is still empty it draws three bobbing dots (`.mtt-dots`)
-in the translation column. During the stream the card keeps the whole original in one block and grows the
-translation beneath it, so blocks never re-pair mid-sentence; paragraph pairing happens once, when the
-translation is complete.
+Text already written in the target language is lifted by the same mechanism, and lifted *first*:
+`liftTargetLanguage()` rewrites sentence by sentence (`/[^\n。！？；!?;]+[。！？；!?;]?/g`) and replaces any piece
+whose share of the target script is at least half with a placeholder. `TARGET_SCRIPTS` only covers languages a
+script can identify — Chinese (han), Japanese (kana + han), Korean (hangul), Russian (cyrillic); Latin-script
+targets are absent on purpose, because "English" and "German" are indistinguishable letter for letter and a
+wrong guess would leave a paragraph untranslated. Lifting runs before the code patterns so that
+`先运行 \`npm run build\` 再继续。` is kept whole, code included. On the client, a pair whose two sides are the
+same text after whitespace normalisation (`sameText()`) is drawn once: a sentence that needed no translating
+should not appear twice.
 
 ## Compatibility notes
 

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.9.2
+
+- **Text already in the target language is not translated again.** Sentences are checked for the target
+  script (`TARGET_SCRIPTS`: han for Chinese, kana + han for Japanese, hangul, cyrillic) and lifted out before
+  the request, so translating a half-Chinese answer into Chinese no longer produces a second copy of the
+  Chinese half — it is neither sent to the model nor billed. Latin-script targets are deliberately excluded:
+  a script cannot tell English from German, and a wrong guess would leave a paragraph untranslated.
+- **A pair that matches is drawn once.** On screen, a paragraph whose translation came back identical to the
+  original is rendered as one block instead of two.
+- **No rule beside a translation.** `.mtt-pair-tr` loses its left border and inset; the two halves are told
+  apart by colour alone, and the sizing stays: 2px original → translation, 18px before the next original.
+
 ## 0.9.1
 
 - **Code and formulas are never translated.** Fenced blocks, inline code, display math and inline math are

@@ -352,7 +352,12 @@ test('a translation is drawn beside the original, block by block', () => {
   // The two halves of one paragraph stay tight together; the next paragraph gets
   // air, so the eye follows original → translation and then breaks.
   assert.match(sheet, /\.mtt-pair-block\{display:flex;flex-direction:column;gap:2px/);
-  assert.match(sheet, /\.mtt-pair-tr\{padding-left:10px;border-left:2px solid var\(--mtt-line-strong\)/);
+  // No rule beside a translation: the two halves are told apart by ink, not by a bar.
+  assert.match(sheet, /\.mtt-pair-tr\{color:var\(--mtt-fg\);min-width:0\}/);
+  assert.doesNotMatch(sheet, /\.mtt-pair-tr\{[^}]*border-left/);
+  // A sentence already in the target language comes back verbatim and is drawn once.
+  assert.match(source, /function sameText\(left, right\)/);
+  assert.match(source, /const unchanged = !streaming && sameText\(pair\.source, pair\.translation\);/);
   assert.match(source, /function textBlocks\(text\)/);
   assert.match(source, /function pairParagraphs\(source, translated\)/);
   assert.match(source, /className: 'mtt-pair-tr'/);
