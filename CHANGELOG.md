@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.0
+
+- **The turn rail on the right follows the transcript.** The rail is folded from the session log — a log
+  this plugin deliberately never rewrites — so it used to keep showing an answer you had switched away
+  from, and kept a mark for a turn you had deleted. The client now wraps the chat target's snapshot and
+  rewrites its navigation previews on the way past: a deleted turn leaves the ladder, and a turn showing a
+  variant (or your own edit) previews what is on screen, including an answer that is still being written.
+  Nothing is written to the log, so switching back restores the original preview.
+
 ## 0.4.8
 
 - **One trash per row.** A version card (any session with a parent — a branch answer, or a sub-agent's

@@ -238,6 +238,30 @@ The model keeps reading the full log: a deleted answer is still in the context o
 Erasing it for the model would require a rewritten session (a child seeded without that turn),
 which is a separate, much larger operation.
 
+### The turn rail follows the transcript
+
+The rail on the right is fed from two places, both folded from the log: the host's `turnOutline`
+session projection (every turn, loaded or not) and the chat view's own navigation items, which win
+for a turn that is loaded (`dsh-client-ui-chat`, `mergeTurnRailItems`). Neither knows about a variant,
+an edit, or a delete — those live in this plugin's state, not in the log.
+
+The seam is the loaded half. `ChatView` asks `ctx.uiConversation.binding(session).target('chat')` for
+a snapshot whose `navigation.items()` is the list it merges, so `installRailSync` wraps
+`binding` (once, in `ctx.inject(['uiConversation'], …)`) and hands back a proxy that only rewrites
+the `chat` target's snapshot:
+
+- items for a deleted turn are dropped, so its mark leaves the ladder;
+- for every other item, `response` is replaced with what is on screen when this plugin knows better
+  (`live` stream text → the active variant's text → an override), and left alone otherwise, keeping
+  the item's identity so nothing re-renders for nothing;
+- the patched snapshot is memoized per host snapshot and keyed by the store's `railVersion`, which
+  `notify()` bumps, so a switch or a delete repaints the rail without waiting for a host frame — and
+  re-reading the same snapshot still returns the same array.
+
+No projection is written: registrants sharing the `turnOutline` key share one unit, so a second
+writer would fight the host's own frames. Nothing is written to the log either, so switching back
+restores the original preview.
+
 ### Why a turn cannot gain a second answer
 
 

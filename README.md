@@ -26,6 +26,7 @@ Cherry Studio.
 | **Delete** | version cards | Soft-deletes a version: the card is hidden from the ring and the version tree but the session log is untouched and it can be restored. The root conversation can never be deleted. |
 | **Delete message / answer** | user bubbles & assistant answers | Removes one turn (message, answer, tool cards) or just one answer from the transcript, e.g. to clear a pile of "continue" prompts left by a stalled turn. It is gone: no placeholder row is left behind, and a toast confirms what happened. |
 | **Version ring** | `‹ 2/3 ›` chip | Walks the answer variants of a turn (`1` is always the model's logged answer) and the sibling versions of a turn, without leaving the conversation. |
+| **Turn rail** | the outline on the right | Follows what is on screen instead of the log: a deleted turn leaves the ladder, and a turn showing another model's answer (or your own edit) previews that text — including an answer still being written. |
 | **Version tree** | conversation view | A turn-level branching tree of the whole conversation family, with the active path highlighted, model labels, timestamps, and restore/delete controls. |
 
 ### Requirements
@@ -187,6 +188,7 @@ MIT
 | **删除** | 版本卡片 | 软删除：从版本徽标和版本树里隐藏，但会话日志不动，可随时恢复。根对话永远不可删除。 |
 | **删除消息 / 回答** | 用户气泡 / 助手回答 | 把某一轮（消息、回答、工具卡片）或单独一条回答从对话里删掉，比如清掉某一轮卡住后连发的一串「继续」。删掉就真的没了，原位不留任何东西（结果用顶部提示条告诉你）。 |
 | **版本左右翻** | `‹ 2/3 ›` 徽标 | 在不离开当前对话的情况下翻看这一轮的回答备选（第 1 位永远是模型原始回答）以及同轮的不同版本。 |
+| **右侧大纲** | 右侧的目录 | 跟着屏幕上的内容走，而不是跟着日志：删掉的轮次从大纲里消失，换成别的模型回答（或你自己改过）的轮次显示的是屏上那段文字——连正在生成的那份也会同步。 |
 | **版本树** | 会话视图 | 整个会话家族的逐轮分支树，高亮当前路径，带模型标签、时间以及恢复/删除按钮。 |
 
 ### 环境要求

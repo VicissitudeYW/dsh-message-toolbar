@@ -33,7 +33,10 @@ globalThis.document = {
 function loadBundle(options = {}) {
   let entry;
   const withPrimitives = options.primitives !== false;
+  // The bundle reaches the network through `realGlobal()`, so the harness window
+  // doubles as the global: give it whatever this test wants it to have.
   const window = { __ModuleLoader__: { load(value) { entry = value; } } };
+  if (options.fetch !== undefined) window.fetch = options.fetch;
   const React = {
     createElement(type, props, ...kids) {
       const merged = Object.assign({}, props);
@@ -43,7 +46,10 @@ function loadBundle(options = {}) {
     },
     useState(init) { return [typeof init === 'function' ? init() : init, function () {}]; },
     useReducer(reducer, init) { return [init, function () {}]; },
-    useEffect() {},
+    // Effects run once, immediately: a mount in this harness is a single render,
+    // and the ones that matter here (style insertion, the first cache load) are
+    // exactly the side effects a real mount would perform.
+    useEffect(fn) { try { fn(); } catch (e) { /* a stub render tolerates a broken effect */ } },
   };
   // A stand-in for the shell seed package: only `Menu` is used, and the fake
   // records the data rows it was handed so tests can read them.
@@ -91,6 +97,7 @@ function applyToSlots(options = {}) {
     },
     uiWorkspace: { openSession() {} },
   };
+  if (options.conversation !== undefined) services.uiConversation = options.conversation;
   const ctx = {
     get(name) { return services[name]; },
     effect(fn) { return fn(); },
@@ -484,6 +491,48 @@ test('a deleted row leaves no placeholder behind', () => {
   assert.doesNotMatch(source, /display:revert/, 'a deleted turn hides its own tail row too');
 });
 
+// The rail on the right folds the log like everything else, so an answer variant
+// (never logged) and a deleted turn (never logged either) are invisible to it.
+// Its loaded entries come from the chat target, which is the seam we patch.
+test('the turn rail follows the transcript', async () => {
+  const railItems = [
+    { turn: 1, prompt: '第一个问题', response: '模型原本的回答', anchorKey: 'a' },
+    { turn: 2, prompt: '第二个问题', response: '要被删掉的一轮', anchorKey: 'b' },
+    { turn: 3, prompt: '第三个问题', response: '原样保留', anchorKey: 'c' },
+  ];
+  const snapshot = { order: [], nodes: {}, navigation: { items: () => railItems } };
+  const target = { getSnapshot: () => snapshot, subscribe: () => function () {} };
+  const conversation = { binding: () => ({ target: () => target }) };
+
+  applyToSlots({ conversation });
+
+  // Populate the plugin's own cache the way the real client does: one GET.
+  const state = {
+    sessionId: 'sess-1',
+    versions: [],
+    messages: {},
+    model: null,
+    translations: {},
+    turns: [{ turn: 1 }, { turn: 2 }, { turn: 3 }],
+    answers: { 1: { active: 'v2', items: [{ id: 'v2', kind: 'model', text: '另一个模型写的回答' }], override: null } },
+    hidden: { turns: [2], answers: [] },
+  };
+  const fetch = async () => ({ ok: true, json: async () => state });
+  const { registrations } = applyToSlots({ conversation, fetch });
+  const registration = registrations.find((r) => r.descriptor.name === 'conversation.chat.assistant-actions');
+  const injected = registration.descriptor.inject('sess-1');
+  expand(registration.component(Object.assign({ sessionId: 'sess-1', messageId: 'msg-1' }, injected)));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const patched = conversation.binding('sess-1').target('chat').getSnapshot().navigation.items();
+  assert.equal(patched.length, 2, 'the deleted turn is gone from the rail');
+  assert.deepEqual(patched.map((item) => item.turn), [1, 3]);
+  assert.equal(patched[0].response, '另一个模型写的回答', 'the rail previews the answer on screen');
+  assert.equal(patched[1], railItems[2], 'an untouched entry keeps its identity');
+  assert.equal(conversation.binding('sess-1').target('chat').getSnapshot().navigation.items(), patched, 'the patched list is memoized');
+});
+
 // Text must never be painted with a literal colour: every value has to come
 // from a theme alias, otherwise dark mode keeps light-mode ink. `CanvasText`
 // and friends are system colours, so they follow the app's colour scheme too.
@@ -500,4 +549,5 @@ test('every colour in the sheet resolves through a theme alias', () => {
   }
   assert.deepEqual(literals, [], 'these rules paint a hard-coded colour');
 });
+
 
