@@ -127,7 +127,7 @@ const markup = `
       </div>
       <div class="mtt-pair-block">
         <div class="mtt-pair-src">段落一段对一段，所以读的时候不需要来回找。</div>
-        <div class="mtt-pair-tr">Paragraph sits beside paragraph, so nothing has to be hunted for.</div>
+        <div class="mtt-pair-tr">Paragraph sits beside paragraph, so nothing has to be hunted for.<span class="mtt-dots" aria-hidden="true"><i></i><i></i><i></i></span></div>
       </div>
     </div>
   </div>
