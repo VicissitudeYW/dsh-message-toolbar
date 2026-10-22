@@ -120,7 +120,16 @@ const markup = `
   </div>
 
   <div class="mtt-answer">
-    <div class="mtt-answer-body">这段回答被翻译成了中文，而它仍然占据着回答本该在的位置——用的还是同一套 Markdown 渲染，所以段落、列表、代码块的样子都没有变。</div>
+    <div class="mtt-pair">
+      <div class="mtt-pair-block">
+        <div class="mtt-pair-src">这段回答被翻译成中文之后，原文并没有被换掉——它留在这里，译文跟在下面。</div>
+        <div class="mtt-pair-tr">The original is not replaced once it has been translated — it stays here, and the translation follows it.</div>
+      </div>
+      <div class="mtt-pair-block">
+        <div class="mtt-pair-src">段落一段对一段，所以读的时候不需要来回找。</div>
+        <div class="mtt-pair-tr">Paragraph sits beside paragraph, so nothing has to be hunted for.</div>
+      </div>
+    </div>
   </div>
 
   <div class="mtt-pop mtt-pop-confirm mock-static">
