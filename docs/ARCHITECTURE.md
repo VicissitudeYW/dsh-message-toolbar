@@ -247,6 +247,17 @@ A failed turn has no `assistant-step` row at all — only an error banner and th
 the answer scope hides by *kind list* rather than by "the assistant row": deleting a failed answer removes
 the error banner and its action row, and still leaves the prompt alone.
 
+The `deleted` mark is not absolute: it is applied only while nothing of ours stands in the answer's place
+(`answerGone = hidden.answer && !showingVariant`). The moment a variant is chosen, a stream starts or an edit
+is saved, the card switches to the `answer` mark, which keeps the tail row — the row the card itself is
+rendered in. Without that, a fresh answer to a just-deleted turn would be hidden by the hole it is filling.
+
+Answering a turn whose answer is gone takes the **branch** path, not the in-place one: a question without an
+answer deserves a real agent run (thinking, tool cards, streaming), and a closed turn cannot accept a second
+`assistant/message`, so `UserMessageView.retry()` sends `retry` (seed before the turn + `followup` of the same
+prompt) and then walks the reader to the child through `switchToVersion`, which also focuses the family. The
+child's transcript holds the prompt once, so it does not read as "sent again".
+
 Several components want the same turn hidden (the answer card for an active variant, the assistant
 toolbar for a deleted answer, the tail row for a deleted turn), so `nativeHideStyle` keeps a `marks` map
 keyed by owner (`tail:<turn>`, `bar:<turn>`, …) and rebuilds the sheet from all marks, with a whole-turn

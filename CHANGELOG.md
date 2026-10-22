@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.7.3
+
+- **Regenerating a deleted answer runs a real agent turn again.** After deleting an answer, pressing regenerate
+  on the prompt used to start an in-place text variant — and nothing appeared at all, because the deletion mark
+  hid the very tail row the new answer would be drawn in. A question without an answer now gets a real run: the
+  prompt is re-sent in a seeded branch (the transcript still holds it once), so the thinking chain, the tool
+  cards and the streaming arrive the way they do for any newly sent message, and the plugin walks you to that
+  branch. A turn that still has an answer keeps the in-place variant path.
+- **A fresh answer is never hidden by the deletion that came before it.** The `deleted` mark now applies only
+  while nothing of ours occupies the answer's place; as soon as a variant, a stream or an edit exists, the card
+  switches to the `answer` mark and the tail row stays.
+- **One owner per turn for hiding rows.** The action-row toolbar no longer registers its own hide mark (the
+  answer card owns the turn), which removes the last way two marks could disagree about the same turn.
+
 ## 0.7.2
 
 - **Deleting an answer now deletes the whole answer side.** It used to hide only the message body, so a

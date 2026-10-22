@@ -642,6 +642,19 @@ test('a switched-in answer replaces the logged one entirely', () => {
   assert.match(source, /reasoning: \(live\.reasoning \|\| ''\) \+ text/);
 });
 
+// A turn whose answer is gone is a question without an answer: regenerating it
+// has to produce a real agent run (thinking, tool cards, streaming) rather than an
+// in-place text variant, and such a run needs its own session — the log refuses a
+// second answer to a closed turn.
+test('regenerating a deleted answer runs a real agent turn in a branch', () => {
+  const source = SOURCE;
+  assert.match(source, /const gone = rows\.answer \|\| \(info !== undefined && info\.answered === false\);/);
+  assert.match(source, /action: 'retry', sessionId: sessionId, turn: turn, stopPrevious: prefs\.stopPrevious/);
+  assert.match(source, /switchToVersion\(navigation, \{ sessionId: result\.sessionId \}, sessionId\);/);
+  // A turn that still has an answer keeps the in-place path, with no new session.
+  assert.match(source, /await generateInto\(sessionId, turn, undefined\);/);
+});
+
 // "Delete this answer" must leave nothing of that answer behind — including the
 // tail row, which is where the action row and the file-change card live. The
 // prompt is a different thing: it keeps its own row and its own toolbar.
@@ -655,10 +668,16 @@ test('a deleted answer takes its whole answer side with it', () => {
     );
   }
   assert.match(source, /mark\.mode === 'deleted'/);
-  assert.match(source, /: hidden\.answer\s*\n\s*\? 'deleted'/);
+  // ...but only while nothing of ours stands in its place: a fresh answer brings the
+  // answer area (and the tail row this card lives in) back.
+  assert.match(source, /const answerGone = hidden\.answer && !showingVariant;/);
+  assert.match(source, /: answerGone\s*\n\s*\? 'deleted'/);
   // A switched-in or translated answer keeps the tail row (file changes belong to
   // the turn, not to the answer that was replaced).
-  assert.match(source, /hiddenRows\.turn \? 'turn' : \(hiddenRows\.answer \? 'deleted' : null\)/);
+  // One owner per turn: the toolbar no longer registers a hide mark of its own,
+  // so a fresh answer can never be hidden by the mark left from its deletion.
+  assert.doesNotMatch(source, /hiddenRows\.turn \? 'turn'/);
+  assert.match(source, /Hiding the turn's rows is the answer card's job/);
   // Only the user row deletes a whole turn; every answer-side delete (including
   // a failed one) stays on the answer scope, so the prompt survives.
   assert.equal((source.match(/scope: 'turn', hidden: true/g) || []).length, 1);
