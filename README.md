@@ -148,6 +148,10 @@ its stylesheet otherwise — so the action row stays a row of icons and never gr
 Success and failure take the same route: a failure keeps the host's sentence (it names what broke),
 holds longer, and carries the warning glyph instead of the check.
 
+The confirm box itself is portalled to `document.body` and placed next to its button with fixed
+coordinates. It has to be: a chat row paints over absolutely positioned children and clips them at its
+own bounds, which is why the box used to come out half-covered by the row above it.
+
 Copy follows the reader, not a stored flag: the plugin speaks Chinese when the browser or the document
 does, English otherwise, and consults the app's locale service last — that value is provisional and can
 still read `en` while the page is Chinese, which is exactly how `Answer deleted` once showed up under a
@@ -319,6 +323,9 @@ primitives 就用 DSH 自己的 `Toast`，否则用一份照它的样式表画�
 文案跟着读者走，不看存储的开关：浏览器或文档是中文就说中文，否则说英文；应用自己的 locale 服务
 最后才参考——那个值是临时的、由浏览器推导，页面明明是中文它也可能还写着 `en`，之前工具栏里冒出
 一句英文 `Answer deleted` 就是这么来的。
+
+确认框本身用 portal 挂到 `document.body` 上、按按钮位置用固定坐标摆放。必须如此：对话行会盖住
+绝对定位的子元素、并在自己的边界处把它裁掉——之前那个框被上一行压住一半，就是这么来的。
 
 要让某条消息真正从模型记忆里消失，需要重写会话（用一个不带该轮的种子开子会话）。那是另一个大得
 多的操作，不在这个功能的范围内。

@@ -46,6 +46,9 @@ function loadBundle(options = {}) {
     },
     useState(init) { return [typeof init === 'function' ? init() : init, function () {}]; },
     useReducer(reducer, init) { return [init, function () {}]; },
+    // Refs are read by the portalled confirmation popovers (they measure the
+    // button they belong to); a plain box is enough for a single-pass mount.
+    useRef(init) { return { current: init === undefined ? null : init }; },
     // Effects run once, immediately: a mount in this harness is a single render,
     // and the ones that matter here (style insertion, the first cache load) are
     // exactly the side effects a real mount would perform.
@@ -336,6 +339,22 @@ test('the language menu offers the way back to the original', () => {
   assert.match(source, /const ORIGINAL_ROW = 'message-toolbar\/original';/);
   assert.match(source, /if \(id === ORIGINAL_ROW\) \{ props\.onOriginal\(\); return; \}/);
   assert.match(source, /original: shownLang !== null,/);
+});
+
+test('a confirmation is portalled instead of being painted inside the row', () => {
+  const source = SOURCE;
+  const { css } = applyToSlots();
+  const sheet = css.join('\n');
+  // DSH's flow rows paint over absolutely positioned children and clip them, so
+  // every confirm box goes through the portal helper, anchored to its button.
+  assert.equal((source.match(/h\(Popover, \{/g) || []).length, 4);
+  assert.match(source, /function Popover\(props\) \{/);
+  assert.match(source, /dom\.createPortal\(node, document\.body\)/);
+  assert.match(source, /position: 'fixed',/);
+  assert.equal((source.match(/className: 'mtt-anchor', ref:/g) || []).length, 4);
+  assert.doesNotMatch(source, /mtt-pop mtt-pop-confirm/);
+  assert.match(sheet, /\.mtt-pop-float\{position:fixed;right:auto;top:auto\}/);
+  assert.match(sheet, /\.mtt-anchor\{display:inline-flex\}/);
 });
 
 test('the plugin ships no settings panel', () => {

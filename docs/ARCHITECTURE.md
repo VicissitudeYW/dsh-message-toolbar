@@ -191,6 +191,13 @@ state instead:
    user texts of every turn up to the target, plus the last appended assistant text of each
    preceding turn. Tool calls, file reads and process cards are deliberately excluded — a variant
    is a model comparison, not an agent run.
+   A replayed answer is emitted as a **full message** — `{ id, role: 'assistant', content, source }`
+   carrying the logged message's `id` and `source` — because `MessageBase` (`dsh-llm/lib/types/message.d.ts`)
+   requires both, and an adapter silently drops entries that lack them: the request then reaches the
+   model with no assistant turn at all and comes back as a single `finish` chunk with no content,
+   which looks exactly like "the model returned nothing". When a reply is empty the handler says what
+   did arrive (`重答失败：…（收到 finish×1）`), and whole-block replies (`block-end` with a text block)
+   are collected for providers that do not stream token deltas.
 2. With `stream: true` the handler answers with NDJSON frames — `start` (turn, provider, model),
    one `reasoning` per reasoning batch, one `delta` per token batch, then `done` (the stored
    payload) or `error`. The client writes text deltas into a per-turn "live" slot in the bundle

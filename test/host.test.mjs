@@ -30,7 +30,10 @@ function resetPluginState() {
 /* ------------------------------------------------------------- fixtures -- */
 
 function textMessage(id, role, text) {
-  return { id, role, content: [{ type: 'text', text }], source: role === 'user' ? { kind: 'user' } : undefined };
+  // An assistant message always carries a model source; a replay needs it, and
+  // the log has it, so the fixture does too.
+  const source = role === 'user' ? { kind: 'user' } : { kind: 'model', provider: 'p', model: 'm' };
+  return { id, role, content: [{ type: 'text', text }], source };
 }
 
 function rootEvents() {
@@ -350,6 +353,15 @@ test('POST answer-generate keeps the answer in-session and builds a plain transc
   assert.deepEqual(services.lastStream.messages.map((m) => m.role), ['user', 'assistant', 'user']);
   assert.equal(services.lastStream.messages[2].content[0].text, 'second question');
   assert.equal(services.lastStream.system, undefined);
+  // A replayed answer must be a real message, not a bare role plus text: the
+  // adapters drop entries without `id`/`source`, and a request whose messages
+  // were dropped finishes with no content at all ("the model returned nothing").
+  const replay = services.lastStream.messages[1];
+  assert.equal(typeof replay.id, 'string');
+  assert.ok(replay.id.length > 0);
+  assert.equal(replay.source.kind, 'model');
+  assert.equal(replay.source.provider, 'p');
+  assert.equal(replay.source.model, 'm');
 
   const tree = await call(services.handler, 'GET', undefined, '?sessionId=A');
   assert.equal(tree.json.answers['2'].active, json.active);

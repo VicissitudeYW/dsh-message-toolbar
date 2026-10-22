@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.6.1
+
+- **The delete confirmation is no longer covered or clipped.** It used to be an absolutely positioned child of the
+  action row, so DSH's flow rows painted over it and cut it off at their bounds. Confirmations now render through
+  a portal on `document.body` (`Popover`, via `react-dom`'s `createPortal`) and are placed next to their button
+  with fixed coordinates, re-measured on scroll and resize. All four confirm boxes (delete message, delete answer,
+  delete variant, delete card) use it.
+- **"Regenerate" no longer fails with an empty answer.** The replayed transcript carried earlier assistant turns
+  as `{ role, content }`, but a replayed answer has to be a real message — `id` and `source` included — or the
+  adapters drop it and the request reaches the model with no assistant turn at all, which comes back as a single
+  `finish` chunk and nothing else. The transcript now reuses the logged message identity, and an empty reply
+  reports what did arrive (`收到 finish×1、text-delta×0…`) instead of a vague "no content". Whole-block replies
+  (`block-end` text blocks, for providers that do not stream token deltas) are collected too.
+- Client **and** host changed: restart `dsh web`.
+
 ## 0.6.0
 
 - **Translation replaces the answer in place.** Picking a language used to leave the answer alone, drop a
