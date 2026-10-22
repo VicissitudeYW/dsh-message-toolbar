@@ -341,6 +341,36 @@ test('the language menu offers the way back to the original', () => {
   assert.match(source, /original: shownLang !== null,/);
 });
 
+// A translation is read against its original, paragraph by paragraph, the way an
+// immersive translator lays a page out — so the answer stays where it was and the
+// other language is drawn under each block of it.
+test('a translation is drawn beside the original, block by block', () => {
+  const { css } = applyToSlots();
+  const sheet = css.join('\n');
+  const source = SOURCE;
+  assert.match(sheet, /\.mtt-pair\{display:flex;flex-direction:column/);
+  assert.match(sheet, /\.mtt-pair-tr\{padding-left:10px;border-left:\.5px solid var\(--mtt-line-strong\)/);
+  assert.match(source, /function textBlocks\(text\)/);
+  assert.match(source, /function pairParagraphs\(source, translated\)/);
+  assert.match(source, /className: 'mtt-pair-tr'/);
+  // Block counts disagree often enough that pairing them anyway would mislead;
+  // then the whole translation goes under the whole original.
+  assert.match(source, /if \(left\.length === 0 \|\| right\.length === 0 \|\| left\.length !== right\.length\) \{/);
+  // ...and being on screen is not a variant: only the logged body makes way.
+  assert.match(source, /: showingVariant \? 'answer' : translation !== null \? 'translate' : null,/);
+  assert.match(source, /\} else if \(mark\.mode === 'translate'\) \{/);
+});
+
+// Picking a language is a command, not a setting — nothing is "currently
+// selected", so the list carries no tick and no highlighted row.
+test('the language menu ticks nothing', () => {
+  const source = SOURCE;
+  assert.doesNotMatch(source, /selectedId: props\.current/);
+  assert.doesNotMatch(source, /mtt-pop-item-on/);
+  assert.match(source, /hideTranslation: 'Hide the translation'/);
+  assert.match(source, /hideTranslation: '隐藏译文'/);
+});
+
 test('a confirmation is portalled instead of being painted inside the row', () => {
   const source = SOURCE;
   const { css } = applyToSlots();

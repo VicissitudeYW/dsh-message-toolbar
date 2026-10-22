@@ -74,7 +74,8 @@ Route `/message-toolbar` (registered lazily inside `ctx.effect`).
   "answers": { "<turn>": { "active": "native|<id>",
                            "items": [{ "id","kind":"model|edit","provider","model","name","text","at","baseId" }] } },
   "translations": { "<eventSeq|turn:n>": { "<lang>": {"text","provider","model","turn","role"} } },
-  "shown": { "<turn>": "<lang>" } }
+  "shown": { "<turn>": "<lang>" },
+  "origins": { "<turn>": "<text>" } }
 ```
 
 `GET /message-toolbar?models=1` → `{ "providers": [{ "id","name","models":[{"id","name"}] }] }`
@@ -86,8 +87,8 @@ from `llm.listProviders()` + `llm.listModels(provider)`.
 | --- | --- | --- |
 | `edit` | `sessionId, eventSeq, blockIndex, text` | rewound child + followup |
 | `retry` | `sessionId, turn, model?` | rewound child + followup (model optional) |
-| `translate` | `sessionId, lang, eventSeq? , turn?, text?, model?` | auxiliary `llm.stream` call, cached under `eventSeq` or `turn:<n>`; also records `shown[turn] = lang` so the answer becomes the translation in place |
-| `translate-off` | `sessionId, turn` | drops `shown[turn]`, putting the original answer back (the cached translation stays) |
+| `translate` | `sessionId, lang, eventSeq? , turn?, text?, model?` | auxiliary `llm.stream` call, cached under `eventSeq` or `turn:<n>`; records `shown[turn] = lang` and `origins[turn] = <text>` so the answer is drawn bilingual, block by block |
+| `translate-off` | `sessionId, turn` | drops `shown[turn]` and `origins[turn]`, folding the translation away (the cached translation stays) |
 | `delete-version` | `sessionId` | flags the card deleted (root refused, 400) |
 | `restore-version` | `sessionId` | clears the flag |
 | `activate` | `sessionId` | un-archives (if needed) and attaches to the parent workspace |
@@ -113,7 +114,8 @@ Errors: `TypeError` → `400 {error}`, anything else → `409 {error}`.
   "answers": { "<sessionId>": { "<turn>": { "active": "native", "items": [] } } },
   "hidden": { "<sessionId>": { "turns": [1, 4], "answers": [2] } },
   "translations": { "<sessionId>": { "<eventSeq|turn:n>": { "<lang>": { "text": "...", "at": 0 } } } },
-  "shown": { "<sessionId>": { "<turn>": "<lang>" } } }
+  "shown": { "<sessionId>": { "<turn>": "<lang>" } },
+  "origins": { "<sessionId>": { "<turn>": "<text the reader saw>" } } }
 ```
 
 `answers` holds the in-session answer variants — answers that deliberately never enter the
@@ -304,13 +306,19 @@ conversation stays visible while the rest remain one click away in the version r
 is still current makes the workspace UI clear the main view. A member with a running turn
 (`WorkspaceActiveSessionError`) is left visible rather than force-stopped.
 
-Translation replaces the answer in place: `translate` stores the translated text keyed by the event seq
-the client handed over (or `turn:<n>` when the text on screen is a variant, which never lives in the log),
-and also records `shown[sessionId][turn] = lang`. `AnswerCard` then draws `translation.text` through the
-same `AnswerBody` → `MarkdownText` path as any other answer, and registers the `answer` mark, so the logged
-row makes way for it. `translate-off` deletes only the `shown` entry: the translation stays cached, the
-turn goes back to what it showed before, and the language menu's first row is that call. There is no
-second surface — no panel under the answer, no popover above the action row.
+Translation is drawn beside the answer, not instead of it: `translate` stores the translated text keyed by
+the event seq the client handed over (or `turn:<n>` when the text on screen is a variant, which never lives
+in the log), records `shown[sessionId][turn] = lang`, and remembers the original side in
+`origins[sessionId][turn]` — necessary because a variant or an edit is not in the log, so the log cannot
+tell us what the reader was looking at. `AnswerCard` then draws both sides through the same `AnswerBody` →
+`MarkdownText` path: `textBlocks()` splits each side on blank lines (fenced code stays whole) and
+`pairParagraphs()` interleaves them paragraph by paragraph, falling back to whole-text-above-whole-text when
+the two sides disagree on block count instead of pairing the wrong halves. Because the original is redrawn
+by us, the card registers the `translate` mark rather than the `answer` mark: only the logged body makes
+way, while the turn's own process card and tool cards stay, since they are still that turn's record.
+`translate-off` deletes only the `shown`/`origins` entries: the translation stays cached, the turn goes back
+to what it showed before, and the language menu's first row is that call. There is no second surface — no
+panel under the answer, no popover above the action row.
 
 ## Compatibility notes
 

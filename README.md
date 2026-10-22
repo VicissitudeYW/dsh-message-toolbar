@@ -22,7 +22,7 @@ Cherry Studio.
 | **Failed answers** | turns that ended in an error | DSH draws an action row only for a turn that has a closing message, so a failed answer would have none. The toolbar draws one itself for that turn: regenerate, regenerate with another model, delete. No edit or translate — there is no text to work on. |
 | **Switch model** | assistant messages | Same mechanism with another provider/model: every model's answer becomes a variant of the *same* turn, and `‹ 2/3 ›` walks them without leaving the conversation. The picker is DSH's own dropdown (the one under the composer), so it looks and keys exactly like the rest of the app; its last row instead opens a real branch when you want a full agent run with tools. |
 | **Edit answer** | assistant messages & answer card | The pencil turns the answer into an editor *where the answer stands*: a bordered box holding the markdown source of its text (tool and file-change blocks are not part of it, so they stay on screen), labelled `Editing` with a ✕ to leave and a save button on the right. Esc closes, ⌘/Ctrl+Enter saves. **Saving overwrites what was on screen** — the ring does not grow a second answer — and the result is rendered by the same markdown body as a generated answer, so it looks unchanged. A logged answer that no API can rewrite takes an override instead, with one muted line (Edited by you · Restore the original) to give the model's text back. |
-| **Translate** | assistant answers | Pressing translate opens a dropdown of target languages (the same native menu as the model picker) — pick one and the answer *becomes* the translation, in the same place, drawn by the same markdown renderer, so nothing about the layout changes. It is a toggle, not a second panel: the menu's first row then reads "Show the original". Cached per session + turn + language, so switching languages is instant and reloading does not re-bill. |
+| **Translate** | assistant answers | Pressing translate opens a dropdown of target languages (the same native menu as the model picker) — pick one and the answer is redrawn **bilingual, block by block**: original paragraph, its translation, next paragraph, all by the same markdown renderer, so the layout does not move and nothing is covered. It is a reading mode, not a second panel, and the language list ticks nothing (picking a language is a command, not a setting); the menu's first row then reads "Hide the translation". Cached per session + turn + language, so switching languages is instant and reloading does not re-bill. |
 | **Delete** | version cards | Soft-deletes a version: the card is hidden from the ring and the version tree but the session log is untouched and it can be restored. The root conversation can never be deleted. |
 | **Delete message / answer** | user bubbles & assistant answers | Removes one turn (message, answer, tool cards) or just one answer from the transcript, e.g. to clear a pile of "continue" prompts left by a stalled turn. It is gone: no placeholder row is left behind, and a toast confirms what happened. |
 | **Version ring** | `‹ 2/3 ›` chip | Walks the answer variants of a turn (`1` is always the model's logged answer) and the sibling versions of a turn, without leaving the conversation. |
@@ -100,13 +100,16 @@ Deleting the answer you are looking at moves you to the one before it in the rin
 `<1/2>` — and the ring disappears when a turn has only one answer left. The ring keeps the action row's
 metrics (a 28px box with a 17px glyph), because it sits in that row.
 
-**Translation is the same idea applied to language.** The language menu stores the translated text in
-plugin state and records which language the turn is showing, so the answer area draws the translation
-through the very same `AnswerBody` → `MarkdownText` path it uses for the original: same typography, same
-code blocks, same margins. Nothing is appended below the answer and nothing floats above the action row —
-a turn has one answer, in one of several languages. Picking a language also *is* the display switch;
-`Show the original` in the same menu drops only that record (`translate-off`), and the cached translation
-stays, so flipping back and forth costs nothing.
+**Translation is the same idea applied to language, the way an immersive translator reads a page.** The
+language menu stores the translated text in plugin state and records which language the turn is showing;
+the answer area then draws the original and its translation **side by side by block** — paragraph, its
+translation, next paragraph — instead of swapping one for the other. Both halves go through the same
+`AnswerBody` → `MarkdownText` path, so the typography, code blocks and margins are unchanged; the
+translation is only inset and quieter so the eye can tell the halves apart. When the two sides disagree on
+how many blocks they have (models merge and split paragraphs), the whole translation is drawn under the
+whole original rather than pairing the wrong halves. Nothing is appended below the answer and nothing
+floats above the action row. `Hide the translation` in the same menu drops only that record
+(`translate-off`), and the cached translation stays, so flipping back and forth costs nothing.
 
 Consequences, stated plainly:
 
@@ -202,7 +205,7 @@ MIT
 | **失败的回答** | 报错结束的轮次 | DSH 只为有收尾消息的轮次画动作行，所以失败的回答本来没有工具栏。插件给这种轮次自己补一行：重新生成、换个模型重答、删除。没有编辑和翻译——没有文本可编辑、也没有内容可翻译。 |
 | **切换模型** | 助手消息 | 同一机制换 provider/模型：每个模型的回答都是**同一轮**的备选，`‹ 2/3 ›` 就地来回切换，不离开当前对话。模型选择器直接复用输入框右下角那个原生下拉（外观与键盘操作完全一致），它的最后一行则走真正的分支，用于需要调用工具的完整重跑。 |
 | **编辑回答** | 助手消息 / 回答卡片 | 点铅笔就在**回答原来的位置**变成编辑器：带边框的框里放这条回答的 markdown 源码（工具调用、文件改动不属于它的文本，所以留在框外照常显示），左上角写「编辑中」，右上角是 ✕（退出）和保存。Esc 退出，⌘/Ctrl+Enter 保存。**保存是直接覆盖你正在看的那份**——环里不会多出一个回答——而且用同一个 markdown 正文渲染器显示，所以样式和模型生成的一模一样；只有模型原本那条（日志改不了）会改成一条覆盖文本存在这一轮的记录里，下方不再多任何一行。 |
-| **翻译** | 助手回答 | 点翻译直接弹出语言下拉（就是切换模型那个原生菜单），选一种语言，回答**就地变成**译文——同一个位置、同一个 Markdown 渲染器，排版一点没变。它是开关而不是第二块面板：翻译显示时，菜单第一行是「显示原文」。按 会话+轮次+语言 缓存，换语言即时、刷新不会重复计费。 |
+| **翻译** | 助手回答 | 点翻译直接弹出语言下拉（就是切换模型那个原生菜单），选一种语言，回答就**就地按段对照**重画——原文一段、译文一段、再下一段——还是同一个 Markdown 渲染器，排版不动、也没有东西被盖住。它是一种阅读模式而不是第二块面板；语言列表里不会打钩（选语言是命令，不是设置），译文显示时菜单第一行是「隐藏译文」。按 会话+轮次+语言 缓存，换语言即时、刷新不会重复计费。 |
 | **删除** | 版本卡片 | 软删除：从版本徽标和版本树里隐藏，但会话日志不动，可随时恢复。根对话永远不可删除。 |
 | **删除消息 / 回答** | 用户气泡 / 助手回答 | 把某一轮（消息、回答、工具卡片）或单独一条回答从对话里删掉，比如清掉某一轮卡住后连发的一串「继续」。删掉就真的没了，原位不留任何东西（结果用顶部提示条告诉你）。 |
 | **版本左右翻** | `‹ 2/3 ›` 徽标 | 在不离开当前对话的情况下翻看这一轮的回答备选（第 1 位永远是模型原始回答）以及同轮的不同版本。 |
@@ -276,10 +279,12 @@ dsh plugin --profile web add file:./dsh-message-toolbar-0.4.0.tgz
 会落到切换环里的前一份——`<2/3>` 变成 `<1/2>`；一轮只剩一份回答时，切换按钮就不显示了。切换按钮沿用
 动作行的规格（28px 的盒子、17px 的图标），因为它就长在这一行里。
 
-**翻译是同一套思路，只是换成了语言。** 语言菜单把译文存进插件状态，并记下这一轮当前显示哪种语言，
-于是回答区用**同一个** `AnswerBody` → `MarkdownText` 把译文画出来：字号、行高、代码块、边距全都一样。
-正文下面不再追加任何东西，动作行上方也不再浮出任何东西——一轮就是一份回答，只是语言不同。选语言本身
-就是显示开关；同一个菜单里的「显示原文」只抹掉这条记录（`translate-off`），译文仍然缓存着，来回切不花钱。
+**翻译是同一套思路，只是换成了语言，读起来像沉浸式翻译。** 语言菜单把译文存进插件状态，并记下这一轮
+当前显示哪种语言；回答区于是把原文和译文**按段对照**画出来——原文一段、它的译文一段、再下一段——而不是
+把原文换掉。两侧都走同一个 `AnswerBody` → `MarkdownText`，字号、行高、代码块、边距完全一致，译文只是内缩
+一点、颜色轻一点，方便眼睛区分。当两侧的段数对不上时（模型会合并或拆分段落），整段译文跟在整段原文下面，
+而不是硬配错段落。正文下面不再追加任何东西，动作行上方也不再浮出任何东西。同一个菜单里的「隐藏译文」只抹掉
+这条记录（`translate-off`），译文仍然缓存着，来回切不花钱。
 
 需要说清的三点后果：
 

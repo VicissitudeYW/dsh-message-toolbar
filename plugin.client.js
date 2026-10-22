@@ -443,6 +443,55 @@ function translationOf(state, turn) {
   return { lang: lang, text: best.text, model: best.model, provider: best.provider };
 }
 
+/**
+ * Markdown split into blank-line separated blocks, with fenced code kept whole:
+ * the unit of a side-by-side translation is the paragraph, not the line.
+ */
+function textBlocks(text) {
+  const out = [];
+  if (typeof text !== 'string' || text.length === 0) return out;
+  const lines = text.split('\n');
+  let buffer = [];
+  let fence = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^\s*(```|~~~)/.test(line)) fence = !fence;
+    if (!fence && line.trim().length === 0) {
+      if (buffer.length > 0) { out.push(buffer.join('\n')); buffer = []; }
+      continue;
+    }
+    buffer.push(line);
+  }
+  if (buffer.length > 0) out.push(buffer.join('\n'));
+  return out;
+}
+
+/**
+ * Immersive-translation layout: every paragraph of the original keeps its place
+ * and the translation follows it, so the reader never has to look elsewhere for
+ * the other language. When the two sides disagree on block count — models do
+ * merge and split paragraphs — the whole translation goes under the whole
+ * original rather than pairing the wrong halves.
+ */
+function pairParagraphs(source, translated) {
+  const left = textBlocks(source);
+  const right = textBlocks(translated);
+  if (left.length === 0 || right.length === 0 || left.length !== right.length) {
+    return [{ source: source, translation: translated }];
+  }
+  const pairs = [];
+  for (let i = 0; i < left.length; i++) pairs.push({ source: left[i], translation: right[i] });
+  return pairs;
+}
+
+/** The text this turn would show with the translation switched off. */
+function originOf(state, turn) {
+  const origins = state ? state.origins : null;
+  if (!origins || typeof turn !== 'number') return '';
+  const text = origins[String(turn)];
+  return typeof text === 'string' ? text : '';
+}
+
 function langLabel(id) {
   for (let i = 0; i < LANGS.length; i++) if (LANGS[i].id === id) return LANGS[i].label;
   return id;
@@ -679,6 +728,11 @@ const nativeHideStyle = {
         // only its position (`data-index`) in the ladder, so hiding by position
         // would hit the wrong turn as soon as one is removed.
         css.push('[data-chat-turn="' + turn + '"]{display:none}');
+      } else if (mark.mode === 'translate') {
+        // A translation is drawn beside the answer, so only the logged body makes
+        // way for it — the process card and the tool cards of that answer are
+        // still this turn's own record and stay visible.
+        css.push('[data-chat-flow-kind="assistant-step"][data-chat-turn="' + turn + '"]{display:none}');
       } else {
         // An answer of our own stands where the logged one stood, so the logged
         // one goes — and with it everything that answer produced: its process
@@ -700,7 +754,7 @@ const nativeHideStyle = {
     else {
       this.marks.set(owner, {
         turn: turn,
-        mode: mode === 'turn' ? 'turn' : 'answer',
+        mode: mode === 'turn' ? 'turn' : mode === 'translate' ? 'translate' : 'answer',
       });
     }
     this.render();
@@ -1323,7 +1377,7 @@ function LanguageMenu(props) {
     LANGS.map(function (lang) {
       return h('button', {
         key: lang.id, type: 'button',
-        className: 'mtt-pop-item' + (lang.id === props.current ? ' mtt-pop-item-on' : ''),
+        className: 'mtt-pop-item',
         onClick: function () { props.onPick(lang.id); },
       }, lang.label);
     }));
@@ -1367,12 +1421,13 @@ function LanguageMenuHost(props) {
     ? [{ id: ORIGINAL_ROW, label: props.originalLabel }]
     : []).concat(LANGS.map(function (lang) { return { id: lang.id, label: lang.label }; }));
 
+  // Picking a language is a command, not a setting: the reader is about to
+  // choose one, so nothing in this list is "currently selected" and nothing is
+  // ticked — the only stateful row is the way to hide the translation again.
   return h(primitives.Menu, {
     open: props.open,
     anchor: trigger,
     items: rows,
-    selectedId: props.current,
-    selection: 'check',
     align: 'end',
     side: props.up ? 'top' : 'bottom',
     portal: true,
@@ -1733,23 +1788,30 @@ function AnswerCard(props) {
   const edit = useAnswerEdit(sessionId, turn);
   const hidden = hiddenOf(state, turn);
   const override = answerOverride(state ? state.answers : null, turn);
-  // A translation is a third thing that can occupy the answer's place, drawn by
-  // the same body, so the turn keeps one answer area rather than a stack.
+  // A translation does not replace the answer: it is drawn beside it, paragraph
+  // by paragraph, the way an immersive translator lays a page out. So it is not a
+  // variant — nothing is hidden for it except the logged body, which our paired
+  // view re-draws itself.
   const translation = translationOf(state, turn);
   const isNative = ring === null || ring.active.id === 'native';
   // A live stream shows even before the first variant exists: that is the point
   // of switching — the old answer goes away at once, the new one starts empty.
   // An open editor occupies the same place, so it hides the logged answer too,
-  // and so does an edit of that logged answer (the override), and so does a
-  // translation, which is the answer in another language.
-  const showingVariant = live !== null || !isNative || edit !== null || override !== null || translation !== null;
+  // and so does an edit of that logged answer (the override).
+  const showingVariant = live !== null || !isNative || edit !== null || override !== null;
 
   // Registered under this card's own name: the toolbar may hide the same turn
-  // for another reason, and neither should clear the other's mark.
+  // for another reason, and neither should clear the other's mark. A translation
+  // only hides the logged body (our paired view draws the original itself); a
+  // variant hides the body and everything that answer produced.
   useHideRule(
     'tail:' + turn,
     turn,
-    hidden.turn ? 'turn' : (hidden.answer || showingVariant ? 'answer' : null),
+    hidden.turn
+      ? 'turn'
+      : hidden.answer
+        ? 'answer'
+        : showingVariant ? 'answer' : translation !== null ? 'translate' : null,
   );
 
   // Deleting leaves nothing behind — no placeholder, no "restore" row. A hidden
@@ -1790,6 +1852,24 @@ function AnswerCard(props) {
   const reasoning = live !== null
     ? (typeof live.reasoning === 'string' ? live.reasoning : '')
     : active !== null && typeof active.reasoning === 'string' ? active.reasoning : '';
+
+  // A translation on screen reads as one paired page: the original paragraph,
+  // then its translation, then the next paragraph — exactly where the answer
+  // already was, so the layout does not move and nothing is covered.
+  if (translation !== null && edit === null && live === null) {
+    const source = active !== null
+      ? active.text
+      : override !== null ? override.text : originOf(state, turn);
+    const pairs = pairParagraphs(source, translation.text);
+    return h('div', { className: 'mtt-answer' },
+      h('div', { className: 'mtt-pair' },
+        pairs.map(function (pair, index) {
+          return h('div', { key: index, className: 'mtt-pair-block' },
+            pair.source === undefined ? null
+              : h('div', { className: 'mtt-pair-src' }, h(AnswerBody, { text: pair.source })),
+            h('div', { className: 'mtt-pair-tr' }, h(AnswerBody, { text: pair.translation })));
+        })));
+  }
 
   // Nothing of our own on screen: while the answer is still empty the native
   // shimmer line stands in for it, and from the first token on this is the
@@ -2574,7 +2654,7 @@ function AssistantToolbar(props) {
     setBusy(false);
   }
 
-  /** Put the original answer back; the translation stays cached for next time. */
+  /** Fold the translation away; the original stays where it always was, and the translation stays cached. */
   async function showOriginal() {
     setMenu(null);
     if (typeof turn !== 'number') return;
@@ -2582,7 +2662,7 @@ function AssistantToolbar(props) {
     try {
       await mutate({ action: 'translate-off', sessionId: sessionId, turn: turn });
       store.patchShown(sessionId, turn, null);
-      showToast(t('originalShown'));
+      showToast(t('translationHidden'));
     } catch (e) {
       showToast(failureText(e), 'error');
     }
@@ -2673,7 +2753,7 @@ function AssistantToolbar(props) {
         active: shownLang !== null,
         current: shownLang !== null ? shownLang : prefs.lang,
         original: shownLang !== null,
-        originalLabel: t('showOriginal'),
+        originalLabel: t('hideTranslation'),
         onOriginal: showOriginal,
         onToggle: function (event) { toggleMenu('translate', event); },
         onPick: translate,
@@ -2887,6 +2967,14 @@ const CSS = [
   // rule has to opt back out to line up with the answer text above it.
   '.mtt-tail-actions{display:flex;justify-content:flex-start;margin:2px 0 4px}',
   '.mtt-answer-body{overflow-wrap:anywhere;min-width:0}',
+  // Paired translation: the original keeps its place and the translation follows
+  // it block by block, so both languages read in the same order and the page
+  // never swaps one for the other. The translated half is inset and quieter, so
+  // the eye separates the two without needing a label.
+  '.mtt-pair{display:flex;flex-direction:column;gap:10px;min-width:0}',
+  '.mtt-pair-block{display:flex;flex-direction:column;gap:2px;min-width:0}',
+  '.mtt-pair-src{color:var(--mtt-fg-2);min-width:0}',
+  '.mtt-pair-tr{padding-left:10px;border-left:.5px solid var(--mtt-line-strong);color:var(--mtt-fg);min-width:0}',
   // Editing an answer where it stands: a well holding the markdown source, the
   // "editing" label on the left, the way out and the way to keep it on the
   // right. Nothing else lives in the header, so the box reads as the answer
@@ -2976,7 +3064,6 @@ const CSS = [
   '.mtt-node-time{margin-left:auto;color:var(--mtt-fg-3);font-size:10px}',
   '.mtt-node-text{font-size:12px;color:var(--mtt-fg-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:600px}',
   '.mtt-empty{color:var(--mtt-fg-3);font-size:12px;padding:24px 0;text-align:center}',
-  '.mtt-pop-item-on{color:var(--mtt-fg);font-weight:600}',
 ].join('\n');
 
 /* ------------------------------------------------------------------ I18N -- */
@@ -3051,9 +3138,8 @@ const I18N = {
     deletedCard: 'Card deleted',
     translateTo: 'Translate into',
     translatedTo: 'Translated',
-    showOriginal: 'Show the original',
-    originalShown: 'Original answer shown',
-  },
+    hideTranslation: 'Hide the translation',
+    },
   zh: {
     view: '版本',
     viewHint: '当前对话的每条分支，按模型回答卡片展示。点击卡片打开；删除的卡片可以恢复。',
@@ -3123,8 +3209,8 @@ const I18N = {
     deletedCard: '卡片已删除',
     translateTo: '翻译成',
     translatedTo: '已翻译',
-    showOriginal: '显示原文',
-    originalShown: '已显示原文',
+    hideTranslation: '隐藏译文',
+    translationHidden: '已隐藏译文',
   },
 };
 

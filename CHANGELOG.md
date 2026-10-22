@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.7.0
+
+- **A translation is read against its original, not instead of it.** Picking a language used to repaint the answer
+  in the target language, which destroyed the thing the reader was comparing against. The answer area is now
+  bilingual, block by block: original paragraph, its translation, next paragraph, both through the same
+  `AnswerBody` → `MarkdownText` path so the typography is unchanged. `textBlocks()` splits each side on blank lines
+  with fenced code kept whole, and `pairParagraphs()` interleaves the two — when the sides disagree on block count
+  the whole translation follows the whole original instead of pairing the wrong halves. Only the logged body makes
+  way for our paired view (a new `translate` hide mark), so that turn's process card and tool cards stay visible.
+- **The language list ticks nothing.** Picking a language is a command, not a setting, so the dropdown no longer
+  highlights a "current" row; the only stateful row is "Hide the translation", which folds the pair back into the
+  original.
+- The host remembers the original side (`origins[sessionId][turn]`) because a variant or an edit never enters the
+  session log, so the log alone cannot say what the reader was looking at.
+
 ## 0.6.1
 
 - **The delete confirmation is no longer covered or clipped.** It used to be an absolutely positioned child of the

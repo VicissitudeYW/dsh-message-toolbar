@@ -319,6 +319,10 @@ test('a translation travels with the text on screen and can be turned off', asyn
   const shown = await call(services.handler, 'GET', undefined, '?sessionId=A');
   assert.equal(shown.json.shown['2'], 'en');
   assert.equal(shown.json.translations['turn:2'].en.text, 'TRANSLATED');
+  // The reader sees both languages, so the payload carries the side that is on
+  // screen: a translation never replaces it. Here that side is the text the
+  // client handed over, because a variant lives outside the log.
+  assert.equal(shown.json.origins['2'], 'a variant answer');
 
   const off = await call(services.handler, 'POST', { action: 'translate-off', sessionId: 'A', turn: 2 });
   assert.equal(off.status, 200);
