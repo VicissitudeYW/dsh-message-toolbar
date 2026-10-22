@@ -2038,11 +2038,11 @@ function railAnswerText(state, sessionId, turn) {
 /** Rewrite or drop the rail entries that no longer match the transcript. */
 function patchRailItems(items, state, sessionId) {
   const hidden = state && state.hidden ? state.hidden : {};
-  const dropped = Array.isArray(hidden.turns) ? hidden.turns : [];
-  // A replayed prompt opens a turn whose prompt is hidden; its rail entry would
-  // read as the same question asked twice, so it leaves the rail as well.
-  const prompts = Array.isArray(hidden.prompts) ? hidden.prompts : [];
-  const gone = prompts.length === 0 ? dropped : dropped.concat(prompts);
+  // Only whole-turn deletions drop entries here. A replayed prompt is a turn that
+  // exists in the projection from the moment it starts, so it is hidden by
+  // position in the ladder instead (removing it from this list would shift every
+  // later index).
+  const gone = Array.isArray(hidden.turns) ? hidden.turns : [];
   const out = [];
   let changed = false;
   for (let i = 0; i < items.length; i++) {

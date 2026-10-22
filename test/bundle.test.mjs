@@ -654,6 +654,9 @@ test('regenerating a deleted answer runs a real turn in the same session', () =>
   assert.match(source, /action: 'hide', sessionId: sessionId, turn: result\.turn, scope: 'prompt', hidden: true/);
   // The replayed prompt never shows up as a second question of its own.
   assert.match(source, /if \(rows\.prompt\) return null;/);
+  // Its rail mark is hidden by ladder position, not by dropping the entry (that
+  // would shift every index after it).
+  assert.match(source, /gonePrompts\.length === 0 \? goneTurns : goneTurns\.concat\(gonePrompts\)/);
   // The local cache keeps the new list too, or the prompt would flash back.
   assert.match(source, /prompts: Array\.isArray\(hidden\.prompts\) \? hidden\.prompts : \[\]/);
   // A turn that still has an answer keeps the in-place variant path.
