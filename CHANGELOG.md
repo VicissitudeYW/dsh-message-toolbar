@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.8.2
+
+- **The translate button turns into a spinner while it waits.** A translation takes a round trip, and the
+  button that started it is the only place that can say so: the glyph becomes the app's own loading arc
+  (`.mtt-spin`), the tooltip reads "translating", the menu cannot be opened meanwhile, and the glyph is back
+  the moment the answer lands — or fails. Reduced-motion users get the same arc at a slower pace.
+
+## 0.8.1
+
+- **A replayed prompt is counted before its projection arrives.** The rail ladder is now the union of the
+  `turnOutline` projection and the log's own turn list, so a turn created a moment ago cannot fall out of the
+  ladder — which matters because the rail hides marks by position, and a short ladder would hide the wrong
+  question instead of the replayed one.
+
+## 0.8.0
+
+- **A deleted answer is answered again in the same conversation.** A closed turn can never take a second
+  `assistant/message` — the log's invariant forbids it — so the answer is not written in that turn: the prompt
+  is replayed as a new turn of the *same* session and that turn's prompt row is hidden (`prompts` scope). What
+  you get is the question where it always was, and under it DSH's own live page: thinking chain, tool cards,
+  streaming, every bit of it native. No child session, no jump, no fourth copy of the conversation.
+- The replayed prompt is dropped from the turn rail as well, so the outline still reads one entry per question.
+- `answer-run` is the host action behind it; `hide` gained the `prompt` scope, and the client keeps the list in
+  its cache so the hidden prompt never flashes back.
 ## 0.7.3
 
 - **Regenerating a deleted answer runs a real agent turn again.** After deleting an answer, pressing regenerate
