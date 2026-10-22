@@ -451,6 +451,7 @@ test('a turn without an answer still gets a toolbar', () => {
   const { css } = applyToSlots();
   const sheet = css.join('\n');
   assert.match(sheet, /\.mtt-tail-actions/);
+  assert.match(sheet, /\.mtt-tail-actions\{display:flex;justify-content:flex-start/, 'an answer row starts at the left edge, like the native one');
 
   const source = fs.readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8');
   assert.match(source, /function turnInfo\(state, turn\)/, 'the host reports per-turn answered/open');

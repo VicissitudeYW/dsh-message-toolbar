@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.7
+
+- The failed-answer action row starts at the left edge of the content column instead of hugging the right
+  margin, so it lines up with the answer text above it, the way DSH's own assistant action row does.
+
 ## 0.4.6
 
 - **Deleting really deletes.** A hidden turn or answer no longer leaves a `deleted · restore` row behind:

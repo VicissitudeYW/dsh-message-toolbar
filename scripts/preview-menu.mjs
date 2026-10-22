@@ -136,6 +136,18 @@ const markup = `
   <div class="mtt-answer"><div class="mtt-answer-body">A plain answer body — this text has to follow the theme, never the browser's default ink.</div>
   </div>
 
+  <!-- A turn that ended without an answer: the row our plugin draws, which has to
+       start at the same x as the text above it rather than hug the right edge. -->
+  <div class="mtt-answer">
+    <div class="mtt-tail-actions">
+      <span class="mtt-toolbar">
+        <button class="mtt-act" title="Regenerate">&#8635;</button>
+        <button class="mtt-act" title="Switch model">&#8644;</button>
+        <button class="mtt-act" title="Delete">&#128465;</button>
+      </span>
+    </div>
+  </div>
+
   <div class="mtt-answer">
     <div class="mtt-answer-edit">
       <div class="mtt-answer-edit-head">

@@ -2420,7 +2420,10 @@ const CSS = [
   // The visible answer sits in the flow like a normal message: no card chrome,
   // no colour of our own — it inherits the answer typography of the app.
   '.mtt-answer{margin:6px 0 2px;width:100%;min-width:0}',
-  '.mtt-tail-actions{display:flex;justify-content:flex-end;margin:2px 0 4px}',
+  // An action row under an answer sits at the start of the content column, like
+  // DSH's own assistant row — `.mtt-row` right-aligns a user bubble, so this
+  // rule has to opt back out to line up with the answer text above it.
+  '.mtt-tail-actions{display:flex;justify-content:flex-start;margin:2px 0 4px}',
   '.mtt-answer-body{overflow-wrap:anywhere;min-width:0}',
   // Editing an answer where it stands: a well holding the markdown source, the
   // "editing" label on the left, the way out and the way to keep it on the
