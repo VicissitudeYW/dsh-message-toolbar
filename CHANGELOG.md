@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.8
+
+- **One trash per row.** A version card (any session with a parent — a branch answer, or a sub-agent's
+  reply) used to show both the row-level delete and the delete-the-version button, two identical trash
+  icons side by side. The row-level delete now steps aside on a version card and leaves that card only its
+  own delete-the-version action.
+
 ## 0.4.7
 
 - The failed-answer action row starts at the left edge of the content column instead of hugging the right

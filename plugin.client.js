@@ -1069,6 +1069,9 @@ function ActionButton(props) {
   return h('button', {
     type: 'button',
     className: 'mtt-act' + (props.active ? ' mtt-act-on' : ''),
+    // A stable hook for tests and for telling one delete from another: several
+    // rows carry a trash button and they do very different things.
+    'data-mtt': props.act,
     title: props.title,
     disabled: props.disabled,
     onClick: props.onClick,
@@ -1809,33 +1812,39 @@ function UserMessageView(props) {
         title: copied ? t('copied') : t('copy'),
         onClick: copy,
       }, copied ? h(CheckIcon) : h(CopyIcon)),
-      h(ActionButton, { title: t('edit'), disabled: !canEdit, onClick: beginEdit }, h(PencilIcon)),
-      h(ActionButton, { title: t('regenerate'), disabled: !canEdit || busy, onClick: retry }, h(RetryIcon)),
+      h(ActionButton, { title: t('edit'), disabled: !canEdit, onClick: beginEdit, act: 'edit' }, h(PencilIcon)),
+      h(ActionButton, { title: t('regenerate'), disabled: !canEdit || busy, onClick: retry, act: 'retry' }, h(RetryIcon)),
       // Delete this turn from the transcript view (the log keeps every event).
-      h('span', { className: 'mtt-menu-wrap' + (popUp ? ' mtt-up' : '') },
-        h(ActionButton, {
-          title: t('deleteMessage'),
-          disabled: busy || typeof turn !== 'number',
-          active: confirmHide,
-          onClick: function (event) {
-            setPopUp(popupOpensUp(event));
-            setConfirmHide(!confirmHide);
-          },
-        }, h(TrashIcon)),
-        confirmHide
-          ? h('div', { className: 'mtt-pop mtt-pop-confirm' },
-            h('div', { className: 'mtt-pop-title' }, t('deleteMessageConfirm')),
-            h('div', { className: 'mtt-pop-actions' },
-              h('button', { type: 'button', className: 'mtt-btn', onClick: function () { setConfirmHide(false); } }, t('cancel')),
-              h('button', { type: 'button', className: 'mtt-btn mtt-btn-danger', onClick: hideTurn }, t('delete'))))
-          : null),
+      // A version card is an entry of the version family rather than a row of
+      // this transcript, so it gets the card delete below instead of both: one
+      // trash per row, never two.
+      isVersion
+        ? null
+        : h('span', { className: 'mtt-menu-wrap' + (popUp ? ' mtt-up' : '') },
+          h(ActionButton, {
+            title: t('deleteMessage'),
+            disabled: busy || typeof turn !== 'number',
+            active: confirmHide,
+            act: 'delete-turn',
+            onClick: function (event) {
+              setPopUp(popupOpensUp(event));
+              setConfirmHide(!confirmHide);
+            },
+          }, h(TrashIcon)),
+          confirmHide
+            ? h('div', { className: 'mtt-pop mtt-pop-confirm' },
+              h('div', { className: 'mtt-pop-title' }, t('deleteMessageConfirm')),
+              h('div', { className: 'mtt-pop-actions' },
+                h('button', { type: 'button', className: 'mtt-btn', onClick: function () { setConfirmHide(false); } }, t('cancel')),
+                h('button', { type: 'button', className: 'mtt-btn mtt-btn-danger', onClick: hideTurn }, t('delete'))))
+            : null),
       // No translate action on user bubbles: the bubbled prompt is already the
       // language the user wrote in, and the useful direction to read is the
       // answer's. Translation lives on assistant cards only.
       isVersion
         ? h('span', { className: 'mtt-menu-wrap' + (popUp ? ' mtt-up' : '') },
           h(ActionButton, {
-            title: t('deleteCard'), disabled: busy, active: confirmDelete,
+            title: t('deleteCard'), disabled: busy, active: confirmDelete, act: 'delete-card',
             onClick: function (event) {
               setPopUp(popupOpensUp(event));
               setConfirmDelete(!confirmDelete);
@@ -2166,24 +2175,29 @@ function AssistantToolbar(props) {
         onPick: translate,
         onClose: function () { setMenu(null); },
       }),
-    h('span', { className: 'mtt-menu-wrap' + (popUp ? ' mtt-up' : '') },
-      h(ActionButton, {
-        title: failed ? t('deleteMessage') : (deletingVariant ? t('deleteVariant') : t('deleteAnswer')),
-        active: confirmAnswer,
-        disabled: working || typeof turn !== 'number',
-        onClick: function (event) {
-          setPopUp(popupOpensUp(event));
-          setConfirmAnswer(!confirmAnswer);
-        },
-      }, h(TrashIcon)),
-      confirmAnswer
-        ? h('div', { className: 'mtt-pop mtt-pop-confirm' },
-          h('div', { className: 'mtt-pop-title' },
-            failed ? t('deleteMessageConfirm') : (deletingVariant ? t('deleteVariantConfirm') : t('deleteAnswerConfirm'))),
-          h('div', { className: 'mtt-pop-actions' },
-            h('button', { type: 'button', className: 'mtt-btn', onClick: function () { setConfirmAnswer(false); } }, t('cancel')),
-            h('button', { type: 'button', className: 'mtt-btn mtt-btn-danger', onClick: deleteVisible }, t('delete'))))
-        : null),
+    // One trash per row. A version card deletes the whole version (below), so the
+    // row-level delete steps aside instead of sitting next to it.
+    isVersion
+      ? null
+      : h('span', { className: 'mtt-menu-wrap' + (popUp ? ' mtt-up' : '') },
+        h(ActionButton, {
+          title: failed ? t('deleteMessage') : (deletingVariant ? t('deleteVariant') : t('deleteAnswer')),
+          active: confirmAnswer,
+          disabled: working || typeof turn !== 'number',
+          act: failed ? 'delete-turn' : 'delete-answer',
+          onClick: function (event) {
+            setPopUp(popupOpensUp(event));
+            setConfirmAnswer(!confirmAnswer);
+          },
+        }, h(TrashIcon)),
+        confirmAnswer
+          ? h('div', { className: 'mtt-pop mtt-pop-confirm' },
+            h('div', { className: 'mtt-pop-title' },
+              failed ? t('deleteMessageConfirm') : (deletingVariant ? t('deleteVariantConfirm') : t('deleteAnswerConfirm'))),
+            h('div', { className: 'mtt-pop-actions' },
+              h('button', { type: 'button', className: 'mtt-btn', onClick: function () { setConfirmAnswer(false); } }, t('cancel')),
+              h('button', { type: 'button', className: 'mtt-btn mtt-btn-danger', onClick: deleteVisible }, t('delete'))))
+          : null),
     // The answer ring sits in this row — always at the bottom of the turn, next
     // to the other controls — and only when there is something to switch to.
     ringView !== null && ringView.count > 1

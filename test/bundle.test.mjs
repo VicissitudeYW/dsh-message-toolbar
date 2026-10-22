@@ -335,6 +335,19 @@ test('both rows offer a delete action and the sheet knows how to hide a turn', (
   assert.match(sheet, /\.mtt-pop-note/);
 });
 
+// A version card is an entry of the version family, so it carries the
+// delete-the-version action. The row-level delete has to step aside there: two
+// identical trash icons in one row (seen on sub-agent replies, which are version
+// cards) left the user guessing which one did what.
+test('a row never offers two delete buttons', () => {
+  const guarded = SOURCE.match(/isVersion\s*\n\s*\? null\s*\n\s*: h\('span', \{ className: 'mtt-menu-wrap'/g) || [];
+  assert.equal(guarded.length, 2, 'the user row and the assistant row both guard their delete');
+  assert.equal((SOURCE.match(/h\(TrashIcon\)/g) || []).length, 4, 'two row deletes and two card deletes, nothing more');
+  assert.match(SOURCE, /act: 'delete-card'/);
+  assert.match(SOURCE, /act: 'delete-turn'/);
+  assert.match(SOURCE, /act: failed \? 'delete-turn' : 'delete-answer'/);
+});
+
 // Copy follows the reader, not a stored preference: a Chinese document must
 // produce Chinese rows even when the locale service reports nothing, which is
 // how "Answer deleted" once showed up as English under a Chinese UI.
