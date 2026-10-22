@@ -84,7 +84,7 @@ const markup = `
       <button class="mtt-act" title="edit">✎</button>
       <button class="mtt-act mtt-act-on" title="model">⌥</button>
       <span class="mtt-menu-wrap">
-        <div class="mtt-pop mtt-pop-wide">
+        <div class="mtt-pop mtt-pop-wide mock-static">
           <div class="mtt-pop-title">Pick a model — its answer replaces this one in place</div>
           <div class="mtt-pop-group">DeepSeek</div>
           <button class="mtt-pop-item">deepseek-chat <span class="mtt-pop-item-sub">current</span></button>
@@ -171,8 +171,8 @@ const markup = `
     <button class="mtt-btn mtt-btn-small">Restore</button>
   </div>
 
-  <div class="mtt-toast mtt-toast-ok">Answer deleted</div>
-  <div class="mtt-toast mtt-toast-bad" style="top:96px">删除失败：正在运行的宿主插件还是旧版本。</div>
+  <div class="mtt-toast mtt-toast-ok mock-static">Answer deleted</div>
+  <div class="mtt-toast mtt-toast-bad mock-static">删除失败：正在运行的宿主插件还是旧版本。</div>
 
   <div class="mock-line"><span class="mtt-chip">deepseek-reasoner</span>
     <button class="mtt-btn">Neutral</button><button class="mtt-btn mtt-btn-primary">Save</button></div>
@@ -192,7 +192,7 @@ body{background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-primar
 .mock{display:flex;flex-direction:column;gap:10px}
 .mock-row{display:flex;justify-content:flex-end}
 .mock-line{display:flex;gap:8px;align-items:center}
-.mock-static{position:static;right:auto;top:auto;max-width:none}
+.mock-static{position:static!important;right:auto;top:auto;max-width:none;inset:auto}
 ${dark ? '' : ''}
 </style><style>${THEME}</style><style>${PLUGIN}</style></head>${body}${markup}</body></html>`;
 }
@@ -205,7 +205,7 @@ const html = `<!doctype html><html><head><meta charset="utf-8"><style>
 body{margin:0;display:flex;gap:0;background:#666;font:12px system-ui}
 section{flex:1;min-width:0}
 h2{margin:0;padding:6px 10px;background:#333;color:#fff;font:600 12px system-ui}
-iframe{border:0;width:100%;height:760px;display:block}
+iframe{border:0;width:100%;height:700px;display:block}
 </style></head><body>
 <section><h2>light</h2><iframe srcdoc="${frame(false).replace(/"/g, '&quot;')}"></iframe></section>
 <section><h2>dark</h2><iframe srcdoc="${frame(true).replace(/"/g, '&quot;')}"></iframe></section>
