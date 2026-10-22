@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.0
+
+- **A translation is streamed, not awaited.** `translate` now answers in the same NDJSON frames an answer
+  does (`start`, a `delta` per token batch, `done`), so the paired page appears at the first token and grows
+  in place. Until words arrive the translation column shows three dots bobbing in place of the text (slower
+  for reduced-motion users) — the page never sits blank while the round trip is out.
+- **Translation has no token cap.** A translation is exactly as long as the text it translates, so every cap
+  was a guess — and 4096 was the guess that cut a 700-word article mid-sentence. The request now leaves
+  `maxTokens` unset and lets the provider's window be the only limit; a model that still stops on its own
+  length limit is still reported as `truncated`.
+
 ## 0.8.3
 
 - **A translated answer can no longer paint an empty area.** Since 0.7.0 the paired page replaced the plain

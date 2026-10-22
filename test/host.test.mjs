@@ -174,7 +174,9 @@ async function callRaw(handler, method, body, search) {
     },
   };
   await handler(req, res);
-  return { status: res.statusCode, text: chunks.join('') };
+  const text = chunks.join('');
+  const frames = text.split('\n').filter((line) => line.trim().length > 0).map((line) => JSON.parse(line));
+  return { status: res.statusCode, text, frames };
 }
 
 async function call(handler, method, body, search) {
@@ -311,10 +313,33 @@ test('POST translate reports a translation the model could not finish', async ()
   assert.equal(status, 200);
   assert.equal(json.truncated, true);
   assert.equal(json.text, 'TRANSLATED');
-  // Room for a full page, not half a page.
-  assert.equal(services.lastStream.maxTokens, 8192);
+  // A translation is exactly as long as the text it translates: we cap nothing and
+  // let the provider's own window be the only limit.
+  assert.equal(services.lastStream.maxTokens, undefined);
   const tree = await call(services.handler, 'GET', undefined, '?sessionId=A');
   assert.equal(tree.json.translations['8'].ja.truncated, true);
+  resetPluginState();
+});
+
+// The translation arrives the way an answer does — one frame per token batch — so
+// the card can draw it as it is written instead of after the round trip.
+test('POST translate streams the translation frame by frame', async () => {
+  const { ctx, services } = makeContext();
+  apply(ctx);
+  resetPluginState();
+
+  const { status, json, frames } = await callRaw(services.handler, 'POST', {
+    action: 'translate', sessionId: 'A', eventSeq: 8, lang: 'ja', stream: true,
+  });
+  assert.equal(status, 200);
+  assert.deepEqual(frames.map((frame) => frame.type), ['start', 'delta', 'delta', 'done']);
+  assert.equal(frames[1].text, 'TRANS');
+  assert.equal(frames[3].payload.text, 'TRANSLATED');
+  // The finished stream leaves the same state a plain POST would, so a reload
+  // does not have to re-bill the translation.
+  const tree = await call(services.handler, 'GET', undefined, '?sessionId=A');
+  assert.equal(tree.json.translations['8'].ja.text, 'TRANSLATED');
+  assert.equal(json, undefined);
   resetPluginState();
 });
 test('POST translate calls the model once and caches the answer', async () => {

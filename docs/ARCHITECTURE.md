@@ -87,7 +87,7 @@ from `llm.listProviders()` + `llm.listModels(provider)`.
 | --- | --- | --- |
 | `edit` | `sessionId, eventSeq, blockIndex, text` | rewound child + followup |
 | `retry` | `sessionId, turn, model?` | rewound child + followup (model optional) |
-| `translate` | `sessionId, lang, eventSeq? , turn?, text?, model?` | auxiliary `llm.stream` call, cached under `eventSeq` or `turn:<n>`; records `shown[turn] = lang` and `origins[turn] = <text>` so the answer is drawn bilingual, block by block |
+| `translate` | `sessionId, lang, eventSeq? , turn?, text?, model?, stream?` | auxiliary `llm.stream` call (no `maxTokens`), cached under `eventSeq` or `turn:<n>`; records `shown[turn] = lang` and `origins[turn] = <text>` so the answer is drawn bilingual, block by block. With `stream: true` it answers in NDJSON frames (`start` → `delta`* → `done`) |
 | `translate-off` | `sessionId, turn` | drops `shown[turn]` and `origins[turn]`, folding the translation away (the cached translation stays) |
 | `delete-version` | `sessionId` | flags the card deleted (root refused, 400) |
 | `restore-version` | `sessionId` | clears the flag |
@@ -345,12 +345,26 @@ Two consequences worth writing down, because both were bugs once:
 
 - **The card decides from `drawing`, not `showingVariant`.** A translated turn hides the logged answer and
   draws its own page; if the early return still keyed on `showingVariant` (which a translation is not), the
-  answer area would be hidden *and* empty. `drawing = showingVariant || translation !== null` is what both the
-  early return and the failed-turn branch ask.
-- **Translation gets the same token room as the answer** (`maxTokens: 8192` — 4096 cut a 700-word article
-  mid-sentence). When the stream still ends with `finish.reason` of `length`/`max_tokens`, the stored entry
-  and the response carry `truncated: true`, and the paired page draws one quiet line saying the rest is
-  untranslated. Silence would look like a complete translation that stopped early.
+  answer area would be hidden *and* empty. `drawing = showingVariant || translation !== null ||
+  liveTranslation !== null` is what both the early return and the failed-turn branch ask.
+- **A translation carries no `maxTokens`.** It is exactly as long as the text it translates, so any cap is a
+  guess — and 4096 was the guess that cut a 700-word article mid-sentence. The provider's own window is the
+  only honest limit. If a model still stops on *its* length limit (`finish.reason` of `length`/`max_tokens`),
+  the stored entry and the response carry `truncated: true` and the paired page draws one quiet line saying
+  the rest is untranslated. Silence would look like a complete translation that stopped early.
+
+### Streaming a translation
+
+`translate` accepts `stream: true` and answers with the same NDJSON frames `answer-generate` does — `start`
+(with `seq`, `turn`, `lang`, `provider`, `model`), one `delta` per token batch, then `done` carrying the same
+payload a plain POST would return (cached translations answer with a single `done`). Host side both writers
+share `respondStream(response, run)`; client side both share `streamOperation(operation, handlers)`, so there
+is one reader to trust. The translation has its own live cell (`store.liveTranslations`, keyed
+`${sessionId}|${turn}`) because nothing else about the turn is changing while it arrives: `AnswerCard` draws
+the paired page on the first delta, and while the text is still empty it draws three bobbing dots (`.mtt-dots`)
+in the translation column. During the stream the card keeps the whole original in one block and grows the
+translation beneath it, so blocks never re-pair mid-sentence; paragraph pairing happens once, when the
+translation is complete.
 
 ## Compatibility notes
 

@@ -357,7 +357,7 @@ test('a translation is drawn beside the original, block by block', () => {
   // then the whole translation goes under the whole original.
   assert.match(source, /if \(left\.length === 0 \|\| right\.length === 0 \|\| left\.length !== right\.length\) \{/);
   // ...and being on screen is not a variant: only the logged body makes way.
-  assert.match(source, /: showingVariant \? 'answer' : translation !== null \? 'translate' : null,/);
+  assert.match(source, /: showingVariant \? 'answer' : \(translation !== null \|\| liveTranslation !== null\) \? 'translate' : null,/);
   assert.match(source, /\} else if \(mark\.mode === 'translate'\) \{/);
 });
 
@@ -724,6 +724,32 @@ test('a translated answer paints the paired page instead of a blank area', async
   assert.ok(classes.indexOf('mtt-pair') !== -1, 'the paired page is drawn: ' + classes.join(' | '));
   assert.ok(classes.indexOf('mtt-pair-src') !== -1, 'the original paragraph stays on screen');
   assert.ok(classes.indexOf('mtt-pair-tr') !== -1, 'and its translation follows it');
+});
+
+// A translation is as long as the answer it translates, so it is streamed: the
+// page appears at the first token and grows, with the waiting dots standing where
+// the words are not yet.
+test('a translation streams into the paired page', () => {
+  const source = SOURCE;
+  const { css } = applyToSlots();
+  const sheet = Array.isArray(css) ? css.join('\n') : css;
+  // One reader serves both writers, and the translation has its own live cell.
+  assert.match(source, /async function streamOperation\(operation, handlers\)/);
+  assert.match(source, /async function translateInto\(sessionId, turn, body\)/);
+  assert.match(source, /store\.setLiveTranslation\(sessionId, turn, seed\)/);
+  assert.match(source, /function useLiveTranslation\(sessionId, turn\)/);
+  // The card decides from the translation it is streaming as well...
+  assert.match(source, /const drawing = showingVariant \|\| translation !== null \|\| liveTranslation !== null;/);
+  // ...and draws the whole original in one block while the translation grows,
+  // so text does not jump between blocks mid-stream.
+  assert.match(source, /const pairs = streaming\s*\n\s*\? \[\{ source: source, translation: liveTranslation\.text \|\| '' \}\]/);
+  assert.match(source, /streaming && last \? h\(Dots, null\) : null/);
+  assert.match(sheet, /\.mtt-dots\{display:inline-flex/);
+  assert.match(sheet, /@keyframes mtt-dot\{/);
+  assert.match(sheet, /prefers-reduced-motion:reduce\)\{\.mtt-dots i\{animation-duration:2\.4s/);
+  // A translation is never given a token cap: any cap is a guess that cuts a long
+  // answer mid-sentence, so the provider's own window is the only limit.
+  assert.doesNotMatch(source, /maxTokens/);
 });
 // Text must never be painted with a literal colour: every value has to come
 // from a theme alias, otherwise dark mode keeps light-mode ink. `CanvasText`
