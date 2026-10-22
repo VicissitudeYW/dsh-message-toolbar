@@ -488,6 +488,8 @@ async function answerGenerateStream(operation, handlers) {
       if (callbacks.onStart) callbacks.onStart(value);
     } else if (value.type === 'delta') {
       if (callbacks.onDelta) callbacks.onDelta(value.text || '');
+    } else if (value.type === 'reasoning') {
+      if (callbacks.onReasoning) callbacks.onReasoning(value.text || '');
     } else if (value.type === 'done') {
       payload = value.payload || null;
     } else if (value.type === 'error') {
@@ -535,6 +537,7 @@ async function generateInto(sessionId, turn, model) {
   if (store.getLive(sessionId, turn) !== null) return null;
   const seed = {
     text: '',
+    reasoning: '',
     provider: model && model.provider,
     model: model && model.model,
     name: model && model.name,
@@ -558,6 +561,10 @@ async function generateInto(sessionId, turn, model) {
       onDelta: function (text) {
         const live = store.getLive(sessionId, turn) || seed;
         store.setLive(sessionId, turn, Object.assign({}, live, { text: (live.text || '') + text }));
+      },
+      onReasoning: function (text) {
+        const live = store.getLive(sessionId, turn) || seed;
+        store.setLive(sessionId, turn, Object.assign({}, live, { reasoning: (live.reasoning || '') + text }));
       },
     });
     store.setLive(sessionId, turn, null);
@@ -630,7 +637,15 @@ const nativeHideStyle = {
         // would hit the wrong turn as soon as one is removed.
         css.push('[data-chat-turn="' + turn + '"]{display:none}');
       } else {
+        // An answer of our own stands where the logged one stood, so the logged
+        // one goes — and with it everything that answer produced: its process
+        // card ("已完成 · Xs") and its tool-call cards. What is left reads as a
+        // turn that was never answered and is being answered now, which is what
+        // a switch means. File changes live in the tail row another plugin owns,
+        // so they stay where they were.
         css.push('[data-chat-flow-kind="assistant-step"][data-chat-turn="' + turn + '"]{display:none}');
+        css.push('[data-chat-flow-kind="turn-process"][data-chat-turn="' + turn + '"]{display:none}');
+        css.push('[data-chat-flow-kind="tool"][data-chat-turn="' + turn + '"]{display:none}');
       }
     }
     node.textContent = css.join('\n');
@@ -1633,6 +1648,13 @@ function AnswerCard(props) {
     : active !== null
       ? active.text
       : override !== null ? override.text : '';
+  // A thinking model narrates before it answers. That narration is this run's
+  // own process, so it is shown above the answer the way the app shows a logged
+  // turn's thinking — and the logged turn's own process card is hidden by the
+  // stylesheet rule, so nothing of the old answer is left around it.
+  const reasoning = live !== null
+    ? (typeof live.reasoning === 'string' ? live.reasoning : '')
+    : active !== null && typeof active.reasoning === 'string' ? active.reasoning : '';
 
   // Nothing of our own on screen: while the answer is still empty the native
   // shimmer line stands in for it, and from the first token on this is the
@@ -1642,10 +1664,41 @@ function AnswerCard(props) {
   return h('div', { className: 'mtt-answer' },
     edit !== null
       ? h(AnswerEditBox, { sessionId: sessionId, turn: turn, edit: edit })
-      : live !== null && streamingText.length === 0
-        ? h('div', { className: 'mtt-answer-wait' }, h(WaitLine, { label: t('generating') }))
-        : h('div', { className: 'mtt-answer-body' },
-          h(AnswerBody, { text: shownText, streaming: live !== null })));
+      : h(React.Fragment, null,
+        reasoning.length > 0 ? h(ThinkingBlock, { reasoning: reasoning, live: live !== null }) : null,
+        live !== null && streamingText.length === 0
+          ? h('div', { className: 'mtt-answer-wait' }, h(WaitLine, { label: t('generating') }))
+          : h('div', { className: 'mtt-answer-body' },
+            h(AnswerBody, { text: shownText, streaming: live !== null }))));
+}
+
+/**
+ * The run's own thinking, folded above the answer. Open while it streams, and
+ * the reader can fold it away afterwards — the same shape as the app's process
+ * card, drawn by us because a variant is generated outside any turn.
+ */
+function ThinkingBlock(props) {
+  const [open, setOpen] = React.useState(props.live === true);
+  const previous = React.useRef(props.live === true);
+  // Collapse once the stream ends, so a finished answer is not hidden behind a
+  // wall of thinking the way it is not for a logged turn either.
+  React.useEffect(function () {
+    if (previous.current !== props.live) {
+      previous.current = props.live;
+      setOpen(props.live === true);
+    }
+  }, [props.live]);
+  return h('div', { className: 'mtt-think' },
+    h('button', {
+      type: 'button',
+      className: 'mtt-think-head' + (open ? ' mtt-think-open' : ''),
+      onClick: function () { setOpen(!open); },
+      'aria-expanded': open ? 'true' : 'false',
+    }, h(ChevronRightIcon),
+    props.live === true
+      ? h(WaitLine, { label: t('thinking') })
+      : h('span', null, t('thought'))),
+    open ? h('div', { className: 'mtt-think-body' }, props.reasoning) : null);
 }
 
 /**
@@ -2700,12 +2753,14 @@ const CSS = [
   '.mtt-act:disabled:hover{background:0 0;color:var(--mtt-fg-3)}',
   '.mtt-act-on{color:var(--mtt-fg-2);background:var(--mtt-hover)}',
   '.mtt-dots{font-size:13px;letter-spacing:1px}',
-  '.mtt-ring{display:inline-flex;align-items:center;gap:1px;font-size:11px;color:var(--mtt-fg-3);margin-right:0}',
-  '.mtt-toolbar .mtt-ring{margin-left:2px}',
-  '.mtt-toolbar .mtt-ring-count{min-width:26px;text-align:center;font-variant-numeric:tabular-nums}',
-  '.mtt-ring-btn{background:none;border:0;cursor:pointer;padding:0 3px;font-size:13px;color:inherit;display:inline-flex;align-items:center}',
-  '.mtt-ring-btn svg{width:12px;height:12px;display:block}',
-  '.mtt-ring-btn:disabled{opacity:.3}',
+  // The ring is an action like any other: same 28px box, same icon size, same
+  // hover, so it reads as one more button in the row instead of a chip.
+  '.mtt-ring{display:inline-flex;align-items:center;gap:0;height:calc(28px + var(--dsh-content-font-delta,0px));color:var(--mtt-fg-3);font:inherit;margin:0 0 0 2px}',
+  '.mtt-ring-count{min-width:24px;text-align:center;font-size:calc(12px + var(--dsh-content-font-delta,0px));line-height:1;font-variant-numeric:tabular-nums}',
+  '.mtt-ring-btn{background:0 0;border:0;cursor:pointer;padding:6px;width:calc(28px + var(--dsh-content-font-delta,0px));height:calc(28px + var(--dsh-content-font-delta,0px));border-radius:var(--mtt-radius-sm);color:var(--mtt-fg-3);display:inline-flex;align-items:center;justify-content:center;font:inherit}',
+  '.mtt-ring-btn:hover:not(:disabled){background:var(--mtt-hover);color:var(--mtt-fg-2)}',
+  '.mtt-ring-btn svg{width:calc(17px + var(--dsh-content-font-delta,0px));height:calc(17px + var(--dsh-content-font-delta,0px));display:block}',
+  '.mtt-ring-btn:disabled{opacity:.4}',
   // The visible answer sits in the flow like a normal message: no card chrome,
   // no colour of our own — it inherits the answer typography of the app.
   '.mtt-answer{margin:6px 0 2px;width:100%;min-width:0}',
@@ -2726,6 +2781,12 @@ const CSS = [
   '.mtt-answer-edit-input::placeholder{color:var(--mtt-fg-3)}',
   '.mtt-answer-wait{font-size:var(--dsh-content-font-size-secondary,13px);color:var(--mtt-fg-3);padding:2px 0}',
   '.mtt-wait-text{opacity:.75}',
+  '.mtt-think{margin:2px 0 6px}',
+  '.mtt-think-head{display:inline-flex;align-items:center;gap:4px;background:0 0;border:0;padding:0;cursor:pointer;color:var(--mtt-fg-3);font:inherit;font-size:var(--dsh-content-font-size-secondary,13px);line-height:calc(18px + var(--dsh-content-font-delta-secondary,0px))}',
+  '.mtt-think-head:hover{color:var(--mtt-fg-2)}',
+  '.mtt-think-head svg{width:12px;height:12px;display:block;transition:transform 120ms}',
+  '.mtt-think-open svg{transform:rotate(90deg)}',
+  '.mtt-think-body{margin:4px 0 0;padding-left:10px;border-left:.5px solid var(--mtt-line);color:var(--mtt-fg-3);font-size:var(--dsh-content-font-size-secondary,13px);line-height:1.6;white-space:pre-wrap;word-break:break-word;max-height:240px;overflow:auto}',
   '.mtt-alt{margin:8px 0 2px;border:1px solid var(--mtt-line);background:var(--mtt-surface-2);border-radius:var(--mtt-radius-lg);padding:8px 10px;display:flex;flex-direction:column;gap:6px;width:100%;min-width:0;color:var(--mtt-fg)}',
   '.mtt-alt-native{border-color:var(--mtt-line-strong);background:transparent}',
   '.mtt-alt-head{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:11px;color:var(--mtt-fg-3)}',
@@ -2855,6 +2916,8 @@ const I18N = {
     deleteVariantConfirm: 'Delete this answer?',
     variantDeleted: 'Answer deleted',
     generating: 'Generating…',
+    thinking: 'Thinking…',
+    thought: 'Thinking',
     answerGenerated: 'New answer ready — switch with ‹ ›',
     answerGeneratedBy: 'Answer from {name} ready',
     answerEdited: 'Edit saved as a variant',
@@ -2927,6 +2990,8 @@ const I18N = {
     deleteVariantConfirm: '删除这条回答？',
     variantDeleted: '已删除这条回答',
     generating: '正在生成…',
+    thinking: '思考中…',
+    thought: '思考过程',
     answerGenerated: '新回答已生成——用 ‹ › 切换',
     answerGeneratedBy: '{name} 的回答已就绪',
     answerEdited: '编辑已保存为备选',

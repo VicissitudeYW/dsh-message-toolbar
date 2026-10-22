@@ -130,9 +130,11 @@ function makeContext(options = {}) {
       listModels: (provider) => [{ id: provider === 'q' ? 'm2' : 'm', name: provider === 'q' ? 'Model M2' : 'Model M' }],
       stream: async function* (options) {
         services.lastStream = options;
-        yield { type: 'block-start', index: 0, blockType: 'text' };
-        yield { type: 'text-delta', index: 0, text: 'TRANS' };
-        yield { type: 'text-delta', index: 0, text: 'LATED' };
+        yield { type: 'block-start', index: 0, blockType: 'reasoning' };
+        yield { type: 'reasoning-delta', index: 0, text: 'THINK' };
+        yield { type: 'block-start', index: 1, blockType: 'text' };
+        yield { type: 'text-delta', index: 1, text: 'TRANS' };
+        yield { type: 'text-delta', index: 1, text: 'LATED' };
         yield { type: 'finish', reason: 'stop' };
       },
     },
@@ -333,17 +335,21 @@ test('POST answer-generate stream=true writes start, delta and done frames', asy
   });
   assert.equal(status, 200);
   const frames = text.split('\n').filter((line) => line.trim().length > 0).map((line) => JSON.parse(line));
-  assert.deepEqual(frames.map((f) => f.type), ['start', 'delta', 'delta', 'done']);
+  assert.deepEqual(frames.map((f) => f.type), ['start', 'reasoning', 'delta', 'delta', 'done']);
   assert.equal(frames[0].turn, 2);
   assert.equal(frames[0].provider, 'q');
   assert.equal(frames[0].model, 'm2');
+  // A thinking model narrates first: that narration is a frame of its own, so the
+  // client can show the run's process above the answer.
+  assert.equal(frames[1].text, 'THINK');
   // One frame per token batch, so the client can paint as it arrives.
-  assert.equal(frames[1].text, 'TRANS');
-  assert.equal(frames[2].text, 'LATED');
-  assert.equal(frames[1].text + frames[2].text, 'TRANSLATED');
-  const done = frames[3].payload;
+  assert.equal(frames[2].text, 'TRANS');
+  assert.equal(frames[3].text, 'LATED');
+  assert.equal(frames[2].text + frames[3].text, 'TRANSLATED');
+  const done = frames[4].payload;
   assert.equal(done.items.length, 1);
   assert.equal(done.items[0].text, 'TRANSLATED');
+  assert.equal(done.items[0].reasoning, 'THINK');
   assert.equal(done.active, done.items[0].id);
 });
 

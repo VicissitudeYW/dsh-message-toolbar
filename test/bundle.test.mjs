@@ -544,6 +544,24 @@ test('the turn rail follows the transcript', async () => {
   assert.equal(railSheet.textContent, 'nav button[data-index="1"]{display:none}', 'the deleted turn keeps its projection entry, so its mark is hidden by ladder position');
 });
 
+// A switched-in answer has to read as a turn that was never answered and is
+// being answered now: the logged answer goes, and so does its process card
+// ("已完成 · Xs"). The run's own thinking is what stands above the text instead.
+test('a switched-in answer replaces the logged one entirely', () => {
+  const { css } = applyToSlots();
+  const sheet = css.join('\n');
+  assert.match(sheet, /\.mtt-think-body/, 'thinking has a body to fold into');
+  // The ring is one more action button, not a chip: same box, same icon size.
+  assert.match(sheet, /\.mtt-ring-btn\{[^}]*width:calc\(28px \+ var\(--dsh-content-font-delta,0px\)\)/);
+  assert.match(sheet, /\.mtt-ring-btn svg\{width:calc\(17px \+ var\(--dsh-content-font-delta,0px\)\)/);
+
+  const source = fs.readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8');
+  assert.match(source, /function ThinkingBlock\(/);
+  assert.match(source, /\[data-chat-flow-kind="turn-process"\]\[data-chat-turn="' \+ turn \+ '"\]\{display:none\}/, 'the old process card goes with the old answer');
+  assert.match(source, /value\.type === 'reasoning'/, 'reasoning frames reach the card while the answer is written');
+  assert.match(source, /reasoning: \(live\.reasoning \|\| ''\) \+ text/);
+});
+
 // Text must never be painted with a literal colour: every value has to come
 // from a theme alias, otherwise dark mode keeps light-mode ink. `CanvasText`
 // and friends are system colours, so they follow the app's colour scheme too.

@@ -190,14 +190,18 @@ state instead:
    preceding turn. Tool calls, file reads and process cards are deliberately excluded — a variant
    is a model comparison, not an agent run.
 2. With `stream: true` the handler answers with NDJSON frames — `start` (turn, provider, model),
-   one `delta` per token batch, then `done` (the stored payload) or `error`. The client writes
-   those deltas into a per-turn "live" slot in the bundle store, so picking a model hides the old
-   answer at once and fills the same place with the new one as it arrives. The finished text is
-   stored as an item of `answers[sessionId][turn]` and becomes `active`.
+   one `reasoning` per reasoning batch, one `delta` per token batch, then `done` (the stored
+   payload) or `error`. The client writes text deltas into a per-turn "live" slot in the bundle
+   store and reasoning into `live.reasoning`, so picking a model hides the old answer at once and
+   fills the same place with the new one as it arrives; reasoning streams into a collapsible
+   `ThinkingBlock` that folds itself away when the answer starts. The finished text is stored as an
+   item of `answers[sessionId][turn]` (with `reasoning` kept alongside it) and becomes `active`.
 3. `AnswerCard` (turn tail) renders the active variant **in place** and registers an `answer` mark
    through `useHideRule`, which rewrites a generated
-   `<style data-plugin="dsh-message-toolbar-dyn">` containing
-   `[data-chat-flow-kind="assistant-step"][data-chat-turn="N"]{display:none}` — the same node
+   `<style data-plugin="dsh-message-toolbar-dyn">` containing three rules —
+   `[data-chat-flow-kind="assistant-step"][data-chat-turn="N"]{display:none}` for the logged answer,
+   plus the same shape for `turn-process` (the "finished in *N*s" line) and `tool` (that answer's
+   tool cards), so a switched-in answer leaves no trace of the old one. These are the same node
    attributes the chat view itself emits (`data-chat-flow-kind` from `routedNode.kind`,
    `data-chat-turn` from `turnOf(node)`, which returns `location.turn.turn`).
 4. `‹ i/n ›` is drawn by the assistant action row (not by the card), next to the delete button, and
@@ -230,9 +234,12 @@ records it and the same generated stylesheet applies it:
 
 Several components want the same turn hidden (the answer card for an active variant, the assistant
 toolbar for a deleted answer, the tail row for a deleted turn), so `nativeHideStyle` keeps a
-`marks` map keyed by owner (`tail:<turn>`, `bar:<turn>`, …) and rebuilds the sheet from all marks,
-with a whole-turn mark winning over an answer-only mark. `useHideRule(owner, turn, mode)` is the
-hook that registers and clears one mark, which makes unmounting self-cleaning.
+`marks` map keyed by owner (`tail:<turn>`, `bar:<turn>`, …) plus the mark's rail rank and rebuilds
+the sheet from all marks, with a whole-turn mark winning over an answer-only mark. An `answer` mark
+that stands for a *variant* carries the extra `turn-process` / `tool` rules, and — through the rail
+rank — `nav button[data-index="<rank>"]{display:none}` for the matching mark in the right-hand rail.
+`useHideRule(owner, turn, mode, rank)` is the hook that registers and clears one mark, which makes
+unmounting self-cleaning.
 
 The model keeps reading the full log: a deleted answer is still in the context of later turns.
 Erasing it for the model would require a rewritten session (a child seeded without that turn),

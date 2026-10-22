@@ -89,10 +89,16 @@ belongs and hides the logged answer of that turn with a generated stylesheet
 `‹ 1/2 ›` ring is always the model's original answer, so nothing is lost.
 
 Switching is instant and it *looks* like answering: `answer-generate` is streamed as NDJSON frames
-(`start` → `delta`… → `done`), so the old answer is hidden the moment you pick a model and the new one
-is written into its place word by word by the app's own renderer (MarkdownText with streaming, and DSH's shimmer line until the first token), so a variant and a logged answer look the same.
+(`start` → `reasoning`… → `delta`… → `done`), so the old answer is hidden the moment you pick a model and
+the new one is written into its place word by word by the app's own renderer (MarkdownText with streaming,
+and DSH's shimmer line until the first token), so a variant and a logged answer look the same. Everything
+the old answer left behind goes too — the logged row, its tool cards and the "finished in *N*s" line are
+hidden, so the turn reads as if it had never been answered. When the model streams reasoning it appears in
+a collapsible *thinking* block above the answer and folds itself away once the answer starts; the reasoning
+is stored with the variant, so it comes back when you do.
 Deleting the answer you are looking at moves you to the one before it in the ring — `<2/3>` becomes
-`<1/2>` — and the ring disappears when a turn has only one answer left.
+`<1/2>` — and the ring disappears when a turn has only one answer left. The ring keeps the action row's
+metrics (a 28px box with a 17px glyph), because it sits in that row.
 
 Consequences, stated plainly:
 
@@ -249,16 +255,19 @@ dsh plugin --profile web add file:./dsh-message-toolbar-0.4.0.tgz
 永远是模型原始回答，所以什么都不丢。
 
 切换是即时的，而且看起来就像「在回答」：`answer-generate` 以 NDJSON 帧流式返回（`start` →
-若干 `delta` → `done`），所以你一选模型旧回答立刻消失，新回答逐字写进同一个位置，用的还是应用
-自带的那套渲染（`MarkdownText` + `streaming`，第一个字到达前显示 DSH 自己的 shimmer 行），所以
-备选和原生日志回答看起来一模一样，插件不额外加任何装饰。切换按钮本身会自动算上「正在生成的那一份」，
-所以点第二个模型时当场就是 `<2/2>`。删除你正在看的那一份，会落到切换环里的前一份——`<2/3>` 变成
-`<1/2>`；一轮只剩一份回答时，切换按钮就不显示了。
+若干 `reasoning` → 若干 `delta` → `done`），所以你一选模型旧回答立刻消失，新回答逐字写进同一个位置，
+用的还是应用自带的那套渲染（`MarkdownText` + `streaming`，第一个字到达前显示 DSH 自己的 shimmer 行），
+所以备选和原生日志回答看起来一模一样，插件不额外加任何装饰。旧回答留下的痕迹也一并消失：日志里那行、
+它的工具卡片、以及「已完成 · N 秒」那一行都藏起来，整轮读起来就像还没被回答过。模型如果流式吐思维链，
+它会在回答上方展开成可折叠的「思考过程」，正文开始后自动收起；思维链跟着备选一起存下来，切回来还在。
+切换按钮本身会自动算上「正在生成的那一份」，所以点第二个模型时当场就是 `<2/2>`。删除你正在看的那一份，
+会落到切换环里的前一份——`<2/3>` 变成 `<1/2>`；一轮只剩一份回答时，切换按钮就不显示了。切换按钮沿用
+动作行的规格（28px 的盒子、17px 的图标），因为它就长在这一行里。
 
 需要说清的三点后果：
 
-- 备选只是一次**纯文本生成**：不调工具、不读文件。它回答的是同一个问题、吃的是同一份纯对话转录
-  ——这正是「对比模型」该有的样子；
+- 备选只是一次**纯文本生成**：不调工具、不读文件（思维链会显示，但工具调用不会发生）。它回答的是同一个
+  问题、吃的是同一份纯对话转录——这正是「对比模型」该有的样子；
 - 日志没有被改动，所以**后续轮次的模型上下文里仍然是原始回答**。编辑回答改变的是你读到的内容，
   不是模型记住的内容；
 - 如果将来 DSH 改了这些 `data-chat-*` 属性，规则就不再命中，于是两份回答都显示出来——是可见的

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.5.2
+
+- **A switched-in answer now reads as if the turn had never been answered.** Replacing an answer used
+  to hide only the logged `assistant-step` row, so the old answer's "finished in *N*s" line and its
+  tool cards stayed above the new text, and the ring read `1/1` until the stream ended. The answer
+  mark now hides `turn-process` and `tool` rows for that turn too, and the ring counts the answer
+  being written, so picking a second model shows `‹ 2/2 ›` immediately.
+- **Reasoning is streamed and kept.** `answer-generate` forwards `reasoning-delta` chunks as
+  `reasoning` frames (`start` → `reasoning`… → `delta`… → `done`); the client streams them into a
+  collapsible "thinking" block that folds itself away when the answer starts, and stores the
+  reasoning on the variant, so it is still there when you switch back. Variants remain pure text
+  generations — no tools — so a real tool run still means the branch path.
+- **The `‹ i/n ›` ring keeps the action row's metrics** (28px box, 17px glyph, same hover) instead of
+  the smaller type it had when it lived in a card header.
+
 ## 0.5.1
 
 - **A deleted turn no longer keeps its mark in the right-hand rail.** The rail merges the host's

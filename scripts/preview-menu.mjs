@@ -74,7 +74,7 @@ const markup = `
     <div class="mtt-actions">
       <span class="mtt-toolbar">
         <button class="mtt-act">copy</button><button class="mtt-act">✎</button>
-        <span class="mtt-ring"><button class="mtt-ring-btn">‹</button>1/1<button class="mtt-ring-btn">›</button></span>
+        <span class="mtt-ring"><button class="mtt-ring-btn"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 4L6.70711 7.29289C6.31658 7.68342 6.31658 8.31658 6.70711 8.70711L10 12"></path></svg></button><span class="mtt-ring-count">1/1</span><button class="mtt-ring-btn"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12L9.29289 8.70711C9.68342 8.31658 9.68342 7.68342 9.29289 7.29289L6 4"></path></svg></button></span>
       </span>
     </div>
   </div>
@@ -98,25 +98,25 @@ const markup = `
       </span>
       <button class="mtt-act" title="translate">文A</button>
       <button class="mtt-act" title="delete">🗑</button>
+      <span class="mtt-ring"><button class="mtt-ring-btn"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 4L6.70711 7.29289C6.31658 7.68342 6.31658 8.31658 6.70711 8.70711L10 12"></path></svg></button><span class="mtt-ring-count">2/2</span><button class="mtt-ring-btn"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12L9.29289 8.70711C9.68342 8.31658 9.68342 7.68342 9.29289 7.29289L6 4"></path></svg></button></span>
     </span>
   </div>
 
-  <div class="mtt-alt">
-    <div class="mtt-alt-head">
-      <span class="mtt-alt-badge">Variants</span>
-      <span class="mtt-ring"><button class="mtt-ring-btn">‹</button>2/3<button class="mtt-ring-btn">›</button></span>
-      <span class="mtt-alt-tag">deepseek-reasoner</span>
-      <span class="mtt-alt-tag mtt-alt-tag-edit">edited</span>
-      <span class="mtt-alt-tools">
-        <button class="mtt-act">copy</button><button class="mtt-act">✎</button><button class="mtt-act">↻</button>
-      </span>
+  <div class="mtt-answer">
+    <div class="mtt-think">
+      <button class="mtt-think-head mtt-think-open">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4L9.5 8L6 12"></path></svg>
+        <span>思考过程</span>
+      </button>
+      <div class="mtt-think-body">用户要我把深度模式的对比度调好，先看现在用了哪些 token……</div>
     </div>
-    <div class="mtt-alt-body">The variant body sits here, on the same surface as the conversation.</div>
+    <div class="mtt-answer-body">The answer body sits here, rendered by the same Markdown component the chat view uses.</div>
   </div>
 
-  <div class="mtt-alt mtt-alt-native">
-    <div class="mtt-alt-head"><span class="mtt-alt-badge">Variants</span><span class="mtt-ring">1/3</span></div>
-    <div class="mtt-alt-note">Showing DSH's own answer for this turn.</div>
+  <div class="mtt-answer">
+    <div class="mtt-answer-wait">
+      <span class="mtt-wait-text">正在生成…</span>
+    </div>
   </div>
 
   <div class="mtt-trans-card">
