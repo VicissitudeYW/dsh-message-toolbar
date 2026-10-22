@@ -1099,8 +1099,27 @@ function TranslateIcon() {
   ]);
 }
 
-function TrashIcon() {
-  return glyph([
+/**
+ * The app's own loading arc, turning. Used wherever an action is running and the
+ * button has to say so without a second label: the icon becomes the progress bar.
+ */
+function LoadingIcon() {
+  return h('svg', {
+    width: ICON,
+    height: ICON,
+    viewBox: '0 0 16 16',
+    fill: 'none',
+    xmlns: 'http://www.w3.org/2000/svg',
+    strokeWidth: ICON_STROKE,
+    'aria-hidden': true,
+    className: 'mtt-spin',
+  }, h('path', {
+    stroke: 'currentColor',
+    d: 'M12.596 12.596C11.687 13.5049 10.5288 14.1239 9.26798 14.3747C8.00716 14.6255 6.70028 14.4968 5.51261 14.0048C4.32494 13.5129 3.30981 12.6798 2.59557 11.611C1.88134 10.5421 1.50008 9.2855 1.5 7.99998C1.50008 6.71446 1.88134 5.45783 2.59557 4.38898C3.30981 3.32013 4.32494 2.48707 5.51261 1.99513C6.70028 1.50319 8.00716 1.37447 9.26798 1.62524C10.5288 1.87602 11.687 2.49502 12.596 3.40398',
+  }));
+}
+
+function TrashIcon() {  return glyph([
     h('path', { key: 'lid', d: 'M1.28149 3.88831H14.7187', stroke: 'currentColor' }),
     h('path', {
       key: 'handle',
@@ -1428,12 +1447,15 @@ const ORIGINAL_ROW = 'message-toolbar/original';
  */
 function LanguageMenuHost(props) {
   const primitives = clientPrimitives();
+  // While a translation is on its way the button stops being a menu and becomes a
+  // progress indicator: the icon spins, the menu cannot be opened, and it turns
+  // back into the translate glyph the moment the answer arrives.
   const trigger = h(ActionButton, {
-    title: props.title,
+    title: props.busy === true ? props.busyTitle : props.title,
     active: props.open || props.active === true,
-    disabled: props.disabled,
+    disabled: props.disabled || props.busy === true,
     onClick: props.onToggle,
-  }, h(TranslateIcon));
+  }, props.busy === true ? h(LoadingIcon) : h(TranslateIcon));
 
   if (!primitives) {
     return h('span', { className: 'mtt-menu-wrap' + (props.up ? ' mtt-up' : '') },
@@ -2555,6 +2577,10 @@ function AssistantToolbar(props) {
 
   const [menu, setMenu] = React.useState(null);
   const [busy, setBusy] = React.useState(false);
+  // Translating has a button of its own to report on, so it keeps its own flag:
+  // the translate icon turns into a spinner while the answer is being fetched and
+  // becomes the glyph again once it lands (or fails).
+  const [translating, setTranslating] = React.useState(false);
   const [error, setError] = React.useState(null);
   const [toastNode, showToast] = useToast();
   const [catalog, setCatalog] = React.useState(null);
@@ -2732,6 +2758,7 @@ function AssistantToolbar(props) {
       return;
     }
     setBusy(true);
+    setTranslating(true);
     setError(null);
     try {
       const result = await mutate(body);
@@ -2743,6 +2770,7 @@ function AssistantToolbar(props) {
     } catch (e) {
       showToast(failureText(e), 'error');
     }
+    setTranslating(false);
     setBusy(false);
   }
 
@@ -2841,6 +2869,8 @@ function AssistantToolbar(props) {
       ? null
       : h(LanguageMenuHost, {
         title: shownLang === null ? t('translate') : t('translatedTo'),
+        busyTitle: t('translating'),
+        busy: translating,
         pickTitle: t('translateTo'),
         open: menu === 'translate',
         up: popUp,
@@ -3044,6 +3074,14 @@ const CSS = [
   '.mtt-act:hover{background:var(--mtt-hover);color:var(--mtt-fg-2)}',
   '.mtt-act:disabled{opacity:.4;cursor:default}',
   '.mtt-act:disabled:hover{background:0 0;color:var(--mtt-fg-3)}',
+  // A button that is waiting on the network says so with its own icon: the arc
+  // turns, the row keeps its size, and the tooltip explains what is happening.
+  '.mtt-spin{animation:mtt-spin 900ms linear infinite;transform-origin:50% 50%}',
+  // A waiting button is disabled (no second request), but the spinner has to stay
+  // legible: the dimmed look is for unavailable actions, not for work in flight.
+  '.mtt-act:disabled .mtt-spin{opacity:1}',
+  '@keyframes mtt-spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}',
+  '@media (prefers-reduced-motion:reduce){.mtt-spin{animation-duration:2.4s}}',
   '.mtt-act-on{color:var(--mtt-fg-2);background:var(--mtt-hover)}',
   '.mtt-dots{font-size:13px;letter-spacing:1px}',
   // The ring is an action like any other: same 28px box, same icon size, same
@@ -3184,6 +3222,7 @@ const I18N = {
     translate: 'Translate',
     translateTo: 'Translate into…',
     translated: 'Translated',
+    translating: 'Translating…',
     close: 'Close',
     imagesKept: '{count} image(s) kept as-is',
     cancel: 'Cancel',
@@ -3255,6 +3294,7 @@ const I18N = {
     translate: '翻译',
     translateTo: '翻译成…',
     translated: '已翻译',
+    translating: '正在翻译…',
     close: '关闭',
     imagesKept: '{count} 张图片原样保留',
     cancel: '取消',

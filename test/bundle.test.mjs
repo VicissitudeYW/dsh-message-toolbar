@@ -699,6 +699,22 @@ test('a deleted answer takes its whole answer side with it', () => {
 // Text must never be painted with a literal colour: every value has to come
 // from a theme alias, otherwise dark mode keeps light-mode ink. `CanvasText`
 // and friends are system colours, so they follow the app's colour scheme too.
+// A translation takes a moment, and the button that started it is the only place
+// that can say so: the glyph becomes the app's own loading arc while it waits, the
+// menu cannot open meanwhile, and the glyph comes back when the answer lands.
+test('the translate button spins while a translation is on its way', () => {
+  const source = SOURCE;
+  const { css } = applyToSlots();
+  const sheet = Array.isArray(css) ? css.join('\n') : css;
+  assert.match(source, /function LoadingIcon\(\)/);
+  assert.match(source, /props\.busy === true \? h\(LoadingIcon\) : h\(TranslateIcon\)/);
+  assert.match(source, /const \[translating, setTranslating\] = React\.useState\(false\);/);
+  assert.match(source, /setTranslating\(true\);/);
+  assert.match(source, /setTranslating\(false\);/);
+  assert.match(source, /busyTitle: t\('translating'\)/);
+  assert.match(sheet, /\.mtt-spin\{animation:mtt-spin 900ms linear infinite/);
+  assert.match(sheet, /@keyframes mtt-spin\{/);
+});
 test('every colour in the sheet resolves through a theme alias', () => {
   const { css } = applyToSlots();
   const literals = [];
