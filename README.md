@@ -189,6 +189,9 @@ the plugin stylesheet out of the bundle, then paints the menus, cards and button
 colour that ignores the theme shows up immediately. [docs/theme-preview.png](docs/theme-preview.png)
 is that screenshot (light on the left, dark on the right).
 
+Besides the unit tests, every feature was clicked through in a real window; the screenshots and what
+each one proves are in [docs/testing/README.md](docs/testing/README.md).
+
 ### License
 
 MIT
@@ -358,6 +361,9 @@ node --test test/logic.test.mjs    # 纯版本树逻辑
 
 `plugin.client.js` 是一段 IIFE 函数体（结尾是 `return { inject, apply }`），
 所以 `node --check` 只对构建产物 `lib/client.js` 有意义。
+
+除了单元测试，每个功能都在真实窗口里点过一遍，截图以及每张图能证明什么，见
+[docs/testing/README.md](docs/testing/README.md)。
 
 ### 许可
 

@@ -483,6 +483,30 @@ test('a translation travels with the text on screen and can be turned off', asyn
   assert.equal(after.json.translations['turn:2'].en.text, 'TRANSLATED');
 });
 
+test('changing the answer forgets the translation of the old one', async () => {
+  const { ctx, services } = makeContext();
+  apply(ctx);
+  resetPluginState();
+
+  await call(services.handler, 'POST', {
+    action: 'translate', sessionId: 'A', turn: 2, lang: 'en', text: 'the first answer',
+  });
+  const shown = await call(services.handler, 'GET', undefined, '?sessionId=A');
+  assert.equal(shown.json.shown['2'], 'en');
+  assert.equal(shown.json.translations['turn:2'].en.text, 'TRANSLATED');
+
+  // Another answer for the same turn means the translation no longer matches
+  // what is on screen, so both the flag and the cached text have to go.
+  const generated = await call(services.handler, 'POST', {
+    action: 'answer-generate', sessionId: 'A', turn: 2,
+  });
+  assert.equal(generated.status, 200);
+
+  const after = await call(services.handler, 'GET', undefined, '?sessionId=A');
+  assert.deepEqual(after.json.shown, {});
+  assert.equal(after.json.translations['turn:2'], undefined);
+});
+
 test('POST answer-generate keeps the answer in-session and builds a plain transcript', async () => {
   const { ctx, services, created } = makeContext();
   apply(ctx);

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.4
+
+- **Changing the answer forgets the translation of the previous one.** A translation describes the text it was
+  asked for, so it is now dropped when that turn gets another answer, a rewrite, a restored original, or a
+  deleted variant — otherwise the reader would be served prose about an answer that is no longer on screen.
+- Found while testing the plugin end to end in a real window (see `docs/testing/`).
+
 ## 0.9.3
 
 - **Regenerating from the question is the same action as regenerating from the answer.** Both add another

@@ -32,10 +32,15 @@ for (const file of fs.readdirSync(path.join(root, 'lib'))) {
   fs.copyFileSync(path.join(root, 'lib', file), path.join(target, 'lib', file));
 }
 for (const file of fs.readdirSync(path.join(root, 'docs'))) {
-  fs.copyFileSync(path.join(root, 'docs', file), path.join(target, 'docs', file));
+  // `docs/testing/` holds screenshots of the test run, not part of the package.
+  const from = path.join(root, 'docs', file);
+  if (!fs.statSync(from).isFile()) continue;
+  fs.copyFileSync(from, path.join(target, 'docs', file));
 }
 for (const file of fs.readdirSync(path.join(root, 'scripts'))) {
-  fs.copyFileSync(path.join(root, 'scripts', file), path.join(target, 'scripts', file));
+  const from = path.join(root, 'scripts', file);
+  if (!fs.statSync(from).isFile()) continue;
+  fs.copyFileSync(from, path.join(target, 'scripts', file));
 }
 
 console.log('synced dsh-message-toolbar -> ' + target);
