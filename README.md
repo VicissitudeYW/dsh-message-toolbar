@@ -1,5 +1,15 @@
 # dsh-message-toolbar
 
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![DSH 0.2.x](https://img.shields.io/badge/DSH-0.2.x-4d6bfe.svg)](https://github.com/deepseek-ai/dsh)
+[![tests](https://img.shields.io/badge/tests-71%20passing-brightgreen.svg)](test)
+
+A message toolbar for [DSH](https://github.com/deepseek-ai/dsh): copy, regenerate, switch model,
+edit answers, translate bilingually, delete — plus a version ring and a version tree, right in the
+action row of every message.
+
+![The toolbar under an answer, with the ‹ 2/2 › ring](./docs/showcase/01-toolbar.png)
+
 [English](#english) · [中文](#中文)
 
 ---
@@ -29,6 +39,15 @@ Cherry Studio.
 | **Turn rail** | the outline on the right | Follows what is on screen instead of the log: a deleted turn leaves the ladder, and a turn showing another model's answer (or your own edit) previews that text — including an answer still being written. |
 | **Version tree** | conversation view | A turn-level branching tree of the whole conversation family, with the active path highlighted, model labels, timestamps, and restore/delete controls. |
 
+### Screenshots
+
+| | |
+| --- | --- |
+| ![Pick a model](./docs/showcase/02-model-menu.png) | ![Bilingual translation](./docs/showcase/03-translation.png) |
+| **Switch model.** DSH's own picker — the one under the composer. Each model's answer becomes a variant of the *same* turn, so nothing is forked and `‹ 2/3 ›` walks them. | **Translate.** Original and translation, block by block, drawn by the same markdown renderer; code and formulas are lifted out and put back untouched. |
+| ![Edit an answer](./docs/showcase/04-edit-answer.png) | ![Delete a message](./docs/showcase/05-delete.png) |
+| **Edit an answer.** The pencil turns the answer into an editor where it stands, holding the markdown source; saving overwrites what was on screen. | **Delete.** One question, then a toast — the row is gone, with no placeholder left behind. |
+
 ### Requirements
 
 - DSH `0.2.0-rc.2` … `0.2.x`
@@ -39,6 +58,8 @@ Cherry Studio.
 From a checkout:
 
 ```bash
+git clone https://github.com/<you>/dsh-message-toolbar.git
+cd dsh-message-toolbar
 npm run build                 # regenerates lib/client.js from plugin.client.js
 dsh plugin --profile web add file:$(pwd)
 ```
@@ -47,7 +68,7 @@ Or from a packed tarball:
 
 ```bash
 npm pack
-dsh plugin --profile web add file:./dsh-message-toolbar-0.4.0.tgz
+dsh plugin --profile web add file:./dsh-message-toolbar-1.0.0.tgz
 ```
 
 Then add `dsh-message-toolbar` to `dsh.profile.bundles` in the profile `package.json`
@@ -226,6 +247,15 @@ MIT
 | **右侧大纲** | 右侧的目录 | 跟着屏幕上的内容走，而不是跟着日志：删掉的轮次从大纲里消失，换成别的模型回答（或你自己改过）的轮次显示的是屏上那段文字——连正在生成的那份也会同步。 |
 | **版本树** | 会话视图 | 整个会话家族的逐轮分支树，高亮当前路径，带模型标签、时间以及恢复/删除按钮。 |
 
+### 功能展示
+
+| | |
+| --- | --- |
+| ![切换模型](./docs/showcase/02-model-menu.png) | ![双语对照](./docs/showcase/03-translation.png) |
+| **切换模型。** 直接复用输入框右下角那个原生下拉。每个模型的回答都是**同一轮**的备选，不新开对话，`‹ 2/3 ›` 就地翻。 | **翻译。** 原文与译文按段对照，两侧都是同一个 Markdown 渲染器；代码与公式先抽出来，译完原样放回。 |
+| ![编辑回答](./docs/showcase/04-edit-answer.png) | ![删除消息](./docs/showcase/05-delete.png) |
+| **编辑回答。** 点铅笔，回答在**原来的位置**变成编辑器，里面是它的 markdown 源码；保存即覆盖你正在看的那份。 | **删除。** 只问一句，删完用顶部提示条告知；原位不留任何东西。 |
+
 ### 环境要求
 
 - DSH `0.2.0-rc.2` … `0.2.x`
@@ -236,6 +266,8 @@ MIT
 从源码目录安装：
 
 ```bash
+git clone https://github.com/<you>/dsh-message-toolbar.git
+cd dsh-message-toolbar
 npm run build                 # 由 plugin.client.js 重新生成 lib/client.js
 dsh plugin --profile web add file:$(pwd)
 ```
@@ -244,7 +276,7 @@ dsh plugin --profile web add file:$(pwd)
 
 ```bash
 npm pack
-dsh plugin --profile web add file:./dsh-message-toolbar-0.4.0.tgz
+dsh plugin --profile web add file:./dsh-message-toolbar-1.0.0.tgz
 ```
 
 如果插件管理器没有自动登记，请手动把 `dsh-message-toolbar` 加进 profile 的 `package.json`

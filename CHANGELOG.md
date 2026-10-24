@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.0.0
+
+First release, after building the plugin feature by feature on DSH 0.2.0-rc.2 and testing it in a
+real window (`docs/testing/`). What it does today:
+
+- **A toolbar on every message** — copy, edit, regenerate, switch model, translate, delete, in the
+  same geometry as DSH's own action row and in both themes.
+- **Answers are replaced in place** — regenerate / switch model / edit answer keep the
+  conversation, store the new answer as a variant of that turn, and `‹ 1/2 ›` walks them. The
+  logged answer never stops being reachable.
+- **Real branches only when asked** — editing a *prompt* forks the conversation (child session +
+  `message-toolbar/version` marker, version ring, version tree, archive-based focus), and the fork
+  keeps its parent's title.
+- **Bilingual translation** — original and translation block by block in the same renderer,
+  streamed, cached per language, with code, formulas and already-target-language sentences lifted
+  out of the request.
+- **Deleting without rewriting the log** — a deleted row leaves nothing behind, and the turn rail
+  follows the transcript rather than the log.
+- 71 tests (`npm test`) pinning the host routes, the state file, the family logic and the bundle
+  contracts, plus the screenshot pipeline used for this README.
+
 ## 0.9.5
 
 - **Editing a prompt no longer renames the conversation.** A fork is the same conversation, but it inherited no
