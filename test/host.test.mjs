@@ -161,6 +161,12 @@ function makeContext(options = {}) {
       renameCalls: [],
       rename(session, title) { services.sessionTitle.renameCalls.push({ sessionId: session.id, title }); },
     },
+    // DSH's own per-turn changed-file recorder. A test fills in the summary and
+    // the comparison the way `dsh-workspace-changes` would serve them.
+    workspaceChanges: options.workspaceChanges === false ? undefined : {
+      summary: () => services.workspaceSummary,
+      diff: async () => services.workspaceDiff,
+    },
   };
   const ctx = Object.assign({}, services, {
     get: (name) => services[name],
@@ -824,4 +830,65 @@ test('legacy message-tree/version markers are read as version cards', async () =
   const removed = await call(services.handler, 'POST', { action: 'delete-version', sessionId: 'B' });
   assert.equal(removed.status, 200);
   assert.equal(removed.json.parent, 'A');
+});
+/* ------------------------------------------------------- workspace files -- */
+
+function changesEvent() {
+  return { type: 'workspace/changes', seq: 10, time: 1010, data: { turn: 1 }, ignorable: false };
+}
+
+function fileFixture() {
+  const dir = fs.mkdtempSync(path.join(TMP, 'ws-'));
+  return {
+    dir,
+    file: path.join(dir, 'a.txt'),
+    summary: { turn: 1, cwd: dir, files: [{ path: 'a.txt', display: 'a.txt', added: 1, deleted: 1 }], total: 1, added: 1, deleted: 1 },
+    diff: {
+      kind: 'text', path: 'a.txt', display: 'a.txt', before: true, after: true, coarse: false,
+      hunks: [{ oldStart: 1, oldLines: 2, newStart: 1, newLines: 2, lines: [' alpha', '-beta', '+gamma'] }],
+    },
+  };
+}
+
+test('POST changes lists the files a turn touched, without the hunks', async () => {
+  const fixture = fileFixture();
+  const { ctx, services } = makeContext({ rootEvents: [...rootEvents(), changesEvent()] });
+  services.workspaceSummary = fixture.summary;
+  services.workspaceDiff = fixture.diff;
+  apply(ctx);
+  const { status, json } = await call(services.handler, 'POST', { action: 'changes', sessionId: 'A', turn: 1 });
+  assert.equal(status, 200);
+  assert.equal(json.supported, true);
+  assert.equal(json.files.length, 1);
+  assert.equal(json.files[0].path, 'a.txt');
+  assert.equal(json.files[0].revertable, true);
+  assert.equal(json.files[0].hunks, undefined, 'the hunks stay on the host');
+});
+
+test('POST changes says so when a turn left no record', async () => {
+  const { ctx, services } = makeContext();
+  apply(ctx);
+  const { json } = await call(services.handler, 'POST', { action: 'changes', sessionId: 'A', turn: 1 });
+  assert.equal(json.supported, false);
+  assert.equal(json.reason, 'not-recorded');
+});
+
+test('POST revert puts a file back, and refuses once it moved on', async () => {
+  const fixture = fileFixture();
+  fs.writeFileSync(fixture.file, 'alpha\ngamma\n', 'utf8');
+  const { ctx, services } = makeContext({ rootEvents: [...rootEvents(), changesEvent()] });
+  services.workspaceSummary = fixture.summary;
+  services.workspaceDiff = fixture.diff;
+  apply(ctx);
+
+  const first = await call(services.handler, 'POST', { action: 'revert', sessionId: 'A', turn: 1 });
+  assert.equal(first.status, 200);
+  assert.deepEqual(first.json.reverted.map((entry) => entry.action), ['restore']);
+  assert.equal(fs.readFileSync(fixture.file, 'utf8'), 'alpha\nbeta\n');
+
+  fs.writeFileSync(fixture.file, 'alpha\ndelta\n', 'utf8');
+  const second = await call(services.handler, 'POST', { action: 'revert', sessionId: 'A', turn: 1 });
+  assert.equal(second.status, 409);
+  assert.match(second.json.error, /a\.txt/);
+  assert.equal(fs.readFileSync(fixture.file, 'utf8'), 'alpha\ndelta\n', 'nothing may move on a conflict');
 });

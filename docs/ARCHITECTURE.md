@@ -116,7 +116,9 @@ from `llm.listProviders()` + `llm.listModels(provider)`.
 | `answer-select` | `sessionId, turn, answerId` | flips the visible variant (`'native'` is legal) |
 | `answer-delete` | `sessionId, turn, answerId` | drops a variant; if it was visible, the one before it in the ring (`native` first) takes over |
 | `answer-restore` | `sessionId, turn` | drops the `override`, so the model's logged answer shows again |
-| `answer-run` | `sessionId, turn, stopPrevious?` | answers a turn again **in the same session** with a real agent turn: replays its prompt as a new turn and returns `{sessionId, turn, replayedFrom, inPlace: true}` so the client can hide the replayed prompt. The UI does not call it — the buttons add a variant — but it stays as the native path |
+| `answer-run` | `sessionId, turn, stopPrevious?, hidePrompt?` | answers a turn again **in the same session** with a real agent turn: replays its prompt as a new turn and returns `{sessionId, turn, replayedFrom, inPlace: true}`. `hidePrompt` marks the replayed prompt hidden in the same call, because that turn is not in the log yet and a later `hide` would be rejected as "第 N 轮不存在" |
+| `changes` | `sessionId, turn` | `{ turn, supported, cwd?, files: [{path, display, added, deleted, kind, revertable, before, after}], total, added, deleted }` — what that turn changed on disk, read from `workspaceChanges`; `supported: false` carries `reason: "no-service" \| "not-recorded"` |
+| `revert` | `sessionId, turn` | undoes those changes; `{ turn, reverted: [{path, display, action}], skipped: [{path, reason}], cwd }`. All-or-nothing: one file whose current content no longer matches what the turn left behind means **nothing** is written, and the 409 names the conflicts |
 | `hide` | `sessionId, turn, scope: "turn"\|"answer"\|"prompt", hidden: bool` | hides/restores one turn, one answer, or the replayed prompt of a turn in the transcript view; returns the new lists |
 | `models` | — | same catalog as `?models=1` |
 
@@ -278,12 +280,35 @@ the first entry of the ring, and `answerGone` (see above) steps aside as soon as
 
 `answer-run` is the *native* alternative: a question without an answer deserves a real agent run (thinking,
 tool cards, streaming), and a closed turn cannot accept a second `assistant/message`. It replays the prompt
-on the session's own agent — a fresh turn with the same text — and hands back the turn it opened; the client
-would then mark that turn's prompt with scope `prompt`, which renders that user row as `null` (it is our own
-shadowed node, so no stylesheet is needed) and drops its rail entry. The UI no longer calls it, because two
-different outcomes for one button read as a bug; it stays as an API for clients that want the native page,
-and the prompt-hiding path stays wired for them. The cost, when used, is one replayed prompt in the log —
-visible to the model on later turns.
+on the session's own agent — a fresh turn with the same text — and hands back the turn it opened, with
+`hidePrompt` marking that prompt hidden in the same request (that turn is not in the log yet, so a later
+`hide` would be rejected). The prompt renders as `null` (it is our own shadowed node, so no stylesheet is
+needed) and its rail entry is dropped. Both buttons reach it only through `rerunAfterRevert` (below); the
+cost, when used, is one replayed prompt in the log — visible to the model on later turns.
+
+### Undoing what the answer did
+
+An answer that edited files cannot be replaced by a text-only variant: the edits are still on disk, the
+variant cannot run a tool, and the next model would build on top of work it never did. So a turn whose
+answer changed files takes a different route — `changes` → ask → `revert` → answer again:
+
+1. `changes` reads DSH's own record. `@deepseek-ai/dsh-workspace-changes` snapshots the whole work tree at
+   `turn/start` and `turn/end` (git tree ids in a private object directory), copies every file a file tool
+   is about to edit, and appends one `workspace/changes` event per top-level turn. Its service,
+   `ctx.workspaceChanges`, serves the summary for that event's sequence and each listed file's comparison
+   as hunks — three context lines, both sides. Without a repository or without git the summary falls back to
+   the file-tool copies alone, so shell edits outside a repository are not recorded. The summaries live only
+   as long as the host process that recorded them: after a restart the older turns answer `not-recorded`,
+   and the row behaves as it always did.
+2. `revert` applies those hunks **backwards**, per file, after checking that the file still contains exactly
+   what the turn left there (`+`/` ` side at `newStart`). A file that no longer matches is a conflict, and a
+   conflict means nothing is written at all — a half-reverted working tree is worse than an untouched one.
+   A file the turn created is deleted; a file the turn deleted is recreated; binary and oversized files are
+   skipped and reported (`skipped`), never guessed at.
+3. Answering again: **regenerate** calls `answer-run`, so the new answer is a real agent turn with tools and
+   DSH's own streaming page, and the answer being replaced is hidden (`hide` scope `answer`) — one question,
+   one answer, replaced. **Switching a model** instead keeps the comparison semantics: `answer-generate`
+   stores the new answer as a variant, so the ring grows to `‹ 1/3 ›` and the earlier answers stay reachable.
 
 Several components want the same turn hidden (the answer card for an active variant, the assistant
 toolbar for a deleted answer, the tail row for a deleted turn), so `nativeHideStyle` keeps a `marks` map

@@ -385,11 +385,11 @@ test('a confirmation is portalled instead of being painted inside the row', () =
   const sheet = css.join('\n');
   // DSH's flow rows paint over absolutely positioned children and clip them, so
   // every confirm box goes through the portal helper, anchored to its button.
-  assert.equal((source.match(/h\(Popover, \{/g) || []).length, 4);
+  // Four row confirmations plus the two revert confirmations.\n  assert.equal((source.match(/h\(Popover, \{/g) || []).length, 6);
   assert.match(source, /function Popover\(props\) \{/);
   assert.match(source, /dom\.createPortal\(node, document\.body\)/);
   assert.match(source, /position: 'fixed',/);
-  assert.equal((source.match(/className: 'mtt-anchor', ref:/g) || []).length, 4);
+  assert.equal((source.match(/className: 'mtt-anchor', ref:/g) || []).length, 6);
   assert.doesNotMatch(source, /mtt-pop mtt-pop-confirm/);
   assert.match(sheet, /\.mtt-pop-float\{position:fixed;right:auto;top:auto\}/);
   assert.match(sheet, /\.mtt-anchor\{display:inline-flex\}/);
@@ -665,8 +665,17 @@ test('regenerating from the question adds another answer, like the answer row', 
   assert.match(source, /await generateInto\(sessionId, turn, info === null \? undefined : info\);/);
   // ...and no branch and no second turn from the question's button. Branching
   // still exists, but only as the last row of the model menu, where it is asked for.
-  assert.doesNotMatch(source, /action: 'answer-run'/);
   assert.match(source, /async function branchVersion\(\)/);
+  // The one exception is a turn whose answer edited files: undoing those edits
+  // needs a real agent run, so `answer-run` lives inside that one helper.
+  assert.match(source, /async function rerunAfterRevert\(options\) \{/);
+  const afterRevert = source.slice(source.indexOf('async function rerunAfterRevert(options) {'));
+  assert.match(afterRevert.slice(0, afterRevert.indexOf('\n}\n')), /action: 'answer-run'/);
+  assert.equal(source.split("action: 'answer-run'").length - 1, 1, 'only the revert path replays a turn');
+  // Regenerate (both rows) and switch model all ask the host what the answer
+  // being replaced touched, and each confirms before anything is written back.
+  assert.equal(source.split('await turnChangePlan(sessionId, turn)').length - 1, 3);
+  assert.equal(source.split('h(RevertConfirm, {').length - 1, 2);
   // The native in-place path is still there for API clients, and the replayed
   // prompt of such a turn never shows up as a second question of its own.
   assert.match(source, /if \(rows\.prompt\) return null;/);
