@@ -132,7 +132,11 @@ That marker is what the version ring, the tree view and delete/restore are built
 - only one member of a family is visible at a time: switching archives the others. The hidden ones
   stay one click away in the version ring, and the workspace's archived filter always lists them;
 - deleting a card only flips a flag in the plugin's state file, it never destroys a session;
-- switching between versions is navigation, not mutation, so it is always reversible.
+- switching between versions is navigation, not mutation, so it is always reversible;
+- **the title stays the parent's**: a branch logs its parent's title as soon as it is created (a
+  user-sourced `session/title`, which pins it), so editing the first prompt and sending it does not
+  rename the conversation in the sidebar. Left alone, DSH names a session after its first human
+  message — which, for a fork, is exactly the text you just rewrote.
 
 ### Deleting a message
 
@@ -316,7 +320,10 @@ dsh plugin --profile web add file:./dsh-message-toolbar-0.4.0.tgz
   一个已结束的轮次存在两份回答（见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)）。
   被收起的版本在版本徽标里一点即到，侧边栏的「已归档」筛选里也始终找得到；
 - 删除卡片只是在插件状态文件里翻一个标志位，从不销毁会话；
-- 在版本之间切换属于导航而不是修改，随时可逆。
+- 在版本之间切换属于导航而不是修改，随时可逆；
+- **标题跟着父会话**：分支创建时就把父会话的标题写进自己的日志（一条 user 来源的
+  `session/title`，等于给标题上钉），所以改完第一条用户消息再发送，侧边栏里的会话名不会
+  变成你刚改的那句话。否则 DSH 会拿分支的第一条人类消息重新起名。
 
 ### 删除消息是怎么实现的
 

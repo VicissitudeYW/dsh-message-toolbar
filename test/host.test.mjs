@@ -155,6 +155,12 @@ function makeContext(options = {}) {
         yield { type: 'finish', reason: options.finishReason || 'stop' };
       },
     },
+    // The session-title service, recorded: a branch must ask for the parent's
+    // title instead of deriving one from its own edited wording.
+    sessionTitle: {
+      renameCalls: [],
+      rename(session, title) { services.sessionTitle.renameCalls.push({ sessionId: session.id, title }); },
+    },
   };
   const ctx = Object.assign({}, services, {
     get: (name) => services[name],
@@ -266,6 +272,30 @@ test('POST edit creates a rewound child with a durable marker', async () => {
 
   assert.equal(followups.length, 1);
   assert.equal(followups[0].content[0].text, 'edited second');
+});
+
+test('a branch keeps the title its parent had, however its prompt was edited', async () => {
+  const events = rootEvents();
+  // Logged after the fork boundary on purpose: an edited first prompt would
+  // otherwise leave the branch to name itself after the new wording.
+  events.push({
+    type: 'session/title',
+    seq: 10,
+    time: 1010,
+    data: { title: 'Walk through the parser', messageSeqs: [1], source: { kind: 'fallback' } },
+  });
+  const { ctx, services } = makeContext({ rootEvents: events });
+  apply(ctx);
+  resetPluginState();
+
+  const { status, json } = await call(services.handler, 'POST', {
+    action: 'edit', sessionId: 'A', eventSeq: 6, blockIndex: 0, text: 'a completely different question',
+  });
+
+  assert.equal(status, 200);
+  assert.deepEqual(services.sessionTitle.renameCalls, [
+    { sessionId: json.sessionId, title: 'Walk through the parser' },
+  ]);
 });
 
 test('POST retry with a model overrides routing and records it on the card', async () => {

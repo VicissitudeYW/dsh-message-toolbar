@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.5
+
+- **Editing a prompt no longer renames the conversation.** A fork is the same conversation, but it inherited no
+  title and let the session-title service name it after the edited wording — most visible when the edited message
+  was the first one. The branch now logs its parent's title (a user-sourced pin), so the title service leaves it
+  alone from then on.
+
 ## 0.9.4
 
 - **Changing the answer forgets the translation of the previous one.** A translation describes the text it was

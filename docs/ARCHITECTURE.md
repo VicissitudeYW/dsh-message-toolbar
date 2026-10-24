@@ -39,6 +39,23 @@ creation (the app cannot navigate to an archived session). They appear in the si
 can be continued independently, and are attached to the parent's workspace so their files
 resolve the same way.
 
+### A branch keeps its parent's title
+
+The fork is the same conversation, so its title must not change — but nothing made that
+true. The `title` projection folds only `session/title` events, and the session-title
+service pins a title only when it is user-sourced; for any other session it schedules a
+fallback named after the **first human message**. A fork seeded up to the boundary usually
+carries no `session/title` event (the parent's title is logged after its first answer, i.e.
+after the boundary), and an edited first prompt is a completely different text — so the
+branch renamed itself after what the reader had just typed.
+
+`createVersionAgent` therefore logs its parent's title into the child, using
+`ctx.sessionTitle.rename(session, title)` (falling back to appending the same
+`session/title` payload: `{ title, messageSeqs: [], source: { kind: 'user' } }`). That is a
+**pin**: the service's `onUserMessage` returns early for a user-sourced title, so no
+fallback generation follows. It happens before the branch's prompt is queued, because the
+pin has to exist when the child's first `user/message` arrives.
+
 ## Reading the family back
 
 To render `‹ 2/3 ›` and the version tree, the host must know every sibling of a conversation
