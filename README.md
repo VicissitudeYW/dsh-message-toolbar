@@ -4,9 +4,8 @@
   <strong>简体中文</strong> · <a href="README.en.md">English</a>
 </p>
 
-[![license: MIT]()](LICENSE)
-[![DSH 0.2.x]()](https://github.com/deepseek-ai/dsh)
-[![tests]()](test)
+---
+
 
 DSH（DeepSeek Harness）消息工具栏插件。
 
