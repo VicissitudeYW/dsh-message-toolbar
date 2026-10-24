@@ -180,6 +180,15 @@ const store = {
     this.notify();
   },
 
+  /** Replace the cached list of rewritten questions. */
+  patchPrompt(sessionId, prompts) {
+    const entry = this.bySession.get(sessionId);
+    if (!entry || !entry.state || !prompts || typeof prompts !== 'object') return;
+    entry.state.prompts = prompts;
+    entry.updatedAt = Date.now();
+    this.notify();
+  },
+
   /** Merge the hidden turn/answer lists into the cached payload. */
   patchHidden(sessionId, hidden) {
     const entry = this.bySession.get(sessionId);
@@ -370,14 +379,6 @@ function contentText(content) {
     }
   }
   return out;
-}
-
-function firstTextBlockIndex(content) {
-  if (!Array.isArray(content)) return -1;
-  for (let i = 0; i < content.length; i++) {
-    if (content[i] && content[i].type === 'text') return i;
-  }
-  return -1;
 }
 
 function imageParts(content) {
@@ -572,6 +573,17 @@ function answerOverride(answers, turn) {
   if (!answers || typeof turn !== 'number') return null;
   const entry = answers[String(turn)];
   return entry && entry.override && typeof entry.override.text === 'string' ? entry.override : null;
+}
+
+/**
+ * The question as the reader rewrote it, or `null` when the row still shows what
+ * was actually sent. A rewrite never regenerates anything by itself.
+ */
+function promptOverride(state, turn) {
+  const prompts = state ? state.prompts : null;
+  if (!prompts || typeof turn !== 'number') return null;
+  const entry = prompts[String(turn)];
+  return entry && typeof entry.text === 'string' ? entry : null;
 }
 
 /**
@@ -2488,6 +2500,9 @@ function UserMessageView(props) {
   const ring = typeof turn === 'number' ? ringFor(versions, sessionId, turn) : null;
   const self = versions && versions.find(function (v) { return v.sessionId === sessionId; });
   const isVersion = !!(self && self.parentSessionId);
+  // What the row reads: the question as logged, unless the reader rewrote it.
+  const override = promptOverride(state, turn);
+  const shownText = override !== null ? override.text : text;
 
   const [editing, setEditing] = React.useState(false);
   const [draft, setDraft] = React.useState('');
@@ -2512,32 +2527,26 @@ function UserMessageView(props) {
     setRevert(null);
   });
 
-  const canEdit = !running && sessionId !== undefined && typeof turn === 'number' && text !== '' && !editing;
+  const canEdit = !running && sessionId !== undefined && typeof turn === 'number' && shownText !== '' && !editing;
 
   function beginEdit() {
-    setDraft(text);
+    setDraft(shownText);
     setError(null);
     setEditing(true);
   }
 
+  // Saving a question rewrites nothing but the row's own text: the answer that
+  // is already there stays, the conversation does not move, and no model is
+  // called. Answering again is the toolbar's job.
   async function submit() {
-    const blockIndex = firstTextBlockIndex(data.content);
-    // An unchanged draft is still a resend: it branches and regenerates.
-    if (blockIndex === -1 || draft.trim() === '') { setEditing(false); return; }
+    if (draft.trim() === '' || typeof turn !== 'number') { setEditing(false); return; }
     setBusy(true);
     setError(null);
     try {
-      const result = await mutate({
-        action: 'edit',
-        sessionId: sessionId,
-        eventSeq: data.seq,
-        blockIndex: blockIndex,
-        text: draft,
-        stopPrevious: prefs.stopPrevious,
-      });
-      store.invalidate();
+      const result = await mutate({ action: 'prompt-save', sessionId: sessionId, turn: turn, text: draft });
+      store.patchPrompt(sessionId, result && result.prompts ? result.prompts : {});
       setEditing(false);
-      switchToVersion(navigation, { sessionId: result.sessionId }, sessionId);
+      if (draft !== shownText) showToast(t('promptEdited'));
     } catch (e) {
       setError(String((e && e.message) || e));
     }
@@ -2597,7 +2606,7 @@ function UserMessageView(props) {
   function copy() {
     const g = realGlobal();
     try {
-      if (g && g.navigator && g.navigator.clipboard) g.navigator.clipboard.writeText(text);
+      if (g && g.navigator && g.navigator.clipboard) g.navigator.clipboard.writeText(shownText);
     } catch (e) {}
     setCopied(true);
     setTimeout(function () { setCopied(false); }, 1200);
@@ -2657,8 +2666,8 @@ function UserMessageView(props) {
             type: 'button', className: 'mtt-btn mtt-btn-primary',
             disabled: busy || draft.trim() === '',
             onClick: submit,
-          }, busy ? t('sending') : t('send')),
-          h('span', { className: 'mtt-hint' }, t('shortcutHint')))));
+          }, busy ? t('saving') : t('save')),
+          h('span', { className: 'mtt-hint' }, t('editSaveHint')))));
   }
 
   // A prompt we replayed to get a real answer out of the agent stays in the log
@@ -2673,7 +2682,7 @@ function UserMessageView(props) {
       h('div', { className: 'mtt-bubble' },
         // The app's own text renderer, the same one an answer uses: a formula the
         // user typed between dollar signs comes out as a formula, not as source.
-        h('div', { className: 'mtt-text mtt-text-md' }, h(AnswerBody, { text: text })),
+        h('div', { className: 'mtt-text mtt-text-md' }, h(AnswerBody, { text: shownText })),
         imageBlocks.length > 0 && typeof props.renderMessageImages === 'function'
           ? props.renderMessageImages({ images: imageBlocks, align: 'end' })
           : (images > 0 ? h('div', { className: 'mtt-hint' }, t('imagesKept', { count: images })) : null))),
@@ -3513,6 +3522,9 @@ const I18N = {
     send: 'Send',
     sending: 'Sending…',
     shortcutHint: 'Ctrl/⌘+Enter to send · Esc to cancel',
+    saving: 'Saving…',
+    editSaveHint: 'Only the text changes — nothing is answered again; use regenerate in the toolbar for that.',
+    promptEdited: 'Question updated',
     prevVersion: 'Previous version',
     nextVersion: 'Next version',
     versionHint: 'This answer has other versions',
@@ -3590,6 +3602,9 @@ const I18N = {
     send: '发送',
     sending: '发送中…',
     shortcutHint: 'Ctrl/⌘+Enter 发送 · Esc 取消',
+    saving: '保存中…',
+    editSaveHint: '只改显示的文字，不会重新回答；要重答用工具栏的重新生成。',
+    promptEdited: '问题已更新',
     prevVersion: '上一个版本',
     nextVersion: '下一个版本',
     versionHint: '这条回答还有其它版本',

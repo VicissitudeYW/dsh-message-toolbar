@@ -799,9 +799,20 @@ test('a question is drawn by the same renderer as an answer', () => {
   const sheet = Array.isArray(css) ? css.join('\n') : css;
   // What the user typed is text like any other: a formula between dollar signs
   // must be painted, not printed as source.
-  assert.match(source, /className: 'mtt-text mtt-text-md' \}, h\(AnswerBody, \{ text: text \}\)/);
+  assert.match(source, /className: 'mtt-text mtt-text-md' \}, h\(AnswerBody, \{ text: shownText \}\)/);
+  assert.match(source, /const override = promptOverride\(state, turn\);/);
   assert.match(sheet, /\.mtt-text-md\{white-space:normal\}/);
   assert.match(sheet, /\.mtt-text-md p\{margin:0 0 4px\}/);
+});
+test('editing a question saves the text and answers nothing', () => {
+  const source = SOURCE;
+  // A rewrite of the row must not reach the branch action any more: answering
+  // again is the toolbar's job, exactly like the answer row.
+  assert.match(source, /action: 'prompt-save', sessionId: sessionId, turn: turn, text: draft/);
+  assert.match(source, /store\.patchPrompt\(sessionId, result && result\.prompts \? result\.prompts : \{\}\);/);
+  assert.match(source, /showToast\(t\('promptEdited'\)\);/);
+  assert.match(source, /t\('editSaveHint'\)/);
+  assert.doesNotMatch(source, /action: 'edit',\n\s+sessionId: sessionId,/);
 });
 test('every colour in the sheet resolves through a theme alias', () => {
   const { css } = applyToSlots();

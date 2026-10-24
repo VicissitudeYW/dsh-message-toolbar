@@ -678,6 +678,34 @@ test('editing the logged answer stores an override the reader can undo', async (
   assert.equal(after.json.text, 'second answer');
 });
 
+test('rewriting a question only changes the text, and the next answer is asked it', async () => {
+  const { ctx, services } = makeContext();
+  apply(ctx);
+  resetPluginState();
+
+  const saved = await call(services.handler, 'POST', {
+    action: 'prompt-save', sessionId: 'A', turn: 2, text: 'second question, rewritten',
+  });
+  assert.equal(saved.status, 200);
+  assert.equal(saved.json.prompts['2'].text, 'second question, rewritten');
+
+  const read = await call(services.handler, 'GET', null, '?sessionId=A');
+  assert.equal(read.json.prompts['2'].text, 'second question, rewritten');
+  assert.equal(read.json.turns.length, 2, 'no session branched, no turn added');
+
+  // Answering again asks the question as it now reads.
+  const again = await call(services.handler, 'POST', { action: 'answer-generate', sessionId: 'A', turn: 2 });
+  assert.equal(again.status, 200);
+  const asked = services.lastStream.messages.filter((message) => message.role === 'user');
+  assert.equal(asked.at(-1).content[0].text, 'second question, rewritten');
+
+  const restored = await call(services.handler, 'POST', {
+    action: 'prompt-restore', sessionId: 'A', turn: 2,
+  });
+  assert.equal(restored.status, 200);
+  assert.equal(restored.json.prompts['2'], undefined);
+});
+
 test('POST answer-source hands the editor the visible text and the logged text', async () => {
   const { ctx, services } = makeContext();
   apply(ctx);

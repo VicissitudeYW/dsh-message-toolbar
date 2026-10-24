@@ -18,8 +18,11 @@ test/*.test.mjs       node:test suites (host HTTP contract, pure tree logic)
 
 ## Why branches are sessions
 
-DSH session logs are append-only: a message cannot be rewritten in place. So none of
-edit / regenerate / model-switch mutates a transcript. Each one:
+DSH session logs are append-only: a message cannot be rewritten in place. So the answer-side
+buttons never mutate a transcript: regenerating or switching a model stores a variant in the
+plugin's own state (see *In-session answer variants*), and the two buttons that really need a
+new transcript — the version picker's branch row and the `edit` action below — create a
+**child session**:
 
 1. resolves the boundary — the `turn/start` seq of the turn being replaced, minus one;
 2. creates a **child session** seeded with the parent's events up to that boundary;
@@ -29,6 +32,11 @@ edit / regenerate / model-switch mutates a transcript. Each one:
 4. for `edit`/`retry`, submits the (possibly rewritten) user message so the child answers;
    for a model switch, the same, but with `agentOptions: { provider, model }` overridden and
    the model recorded on the marker (`effect.model`) so the card can be labelled.
+
+Editing a question is **not** one of them any more: saving an edit writes `prompt-save`, a
+display override (`prompts` in the state file) that changes the row and what the next
+regenerate asks, and nothing else — no branch, no turn, no model call. The `edit` action
+stays as an API for clients that want a re-answered branch.
 
 `ignorable: true` is mandatory — the core log reader rejects a whole log containing an
 unknown non-ignorable event type.
@@ -112,6 +120,8 @@ from `llm.listProviders()` + `llm.listModels(provider)`.
 | `focus` | `sessionId` | un-archives the target, archives every other family member (one visible conversation) |
 | `answer-generate` | `sessionId, turn, model?, stream?` | `llm.stream` over a plain-chat transcript, stored as an answer variant; with `stream: true` the reply is an NDJSON frame stream (`start` / `delta` / `done` / `error`) |
 | `answer-save` | `sessionId, turn, text, answerId?` | overwrites the visible answer in place: a variant's text is replaced (the ring keeps its size), the logged answer gets an `override` because the log cannot be rewritten |
+| `prompt-save` | `sessionId, turn, text` | rewrites the question **for display only**: no turn is added, no session is branched, no model is called. The next regenerate (variant or `answer-run`) sends this text instead of the logged one |
+| `prompt-restore` | `sessionId, turn` | drops that rewrite, so the text that was actually sent shows again (API only; the UI offers no button) |
 | `answer-source` | `sessionId, turn, answerId?` | `{ turn, active, items, override, native, text }` — baseline for the editor |
 | `answer-select` | `sessionId, turn, answerId` | flips the visible variant (`'native'` is legal) |
 | `answer-delete` | `sessionId, turn, answerId` | drops a variant; if it was visible, the one before it in the ring (`native` first) takes over |
@@ -134,6 +144,7 @@ Errors: `TypeError` → `400 {error}`, anything else → `409 {error}`.
   "answers": { "<sessionId>": { "<turn>": { "active": "native", "items": [] } } },
   "hidden": { "<sessionId>": { "turns": [1, 4], "answers": [2] } },
   "translations": { "<sessionId>": { "<eventSeq|turn:n>": { "<lang>": { "text": "...", "at": 0 } } } },
+  "prompts": { "<sessionId>": { "<turn>": { "text": "...", "at": 0 } } },
   "shown": { "<sessionId>": { "<turn>": "<lang>" } },
   "origins": { "<sessionId>": { "<turn>": "<text the reader saw>" } } }
 ```
