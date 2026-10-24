@@ -4,7 +4,7 @@
 
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![DSH 0.2.x](https://img.shields.io/badge/DSH-0.2.x-4d6bfe.svg)](https://github.com/deepseek-ai/dsh)
-[![tests](https://img.shields.io/badge/tests-71%20passing-brightgreen.svg)](test)
+[![tests](https://img.shields.io/badge/tests-75%20passing-brightgreen.svg)](test)
 
 A message toolbar plugin for DSH (DeepSeek Harness).
 
@@ -22,6 +22,7 @@ A message toolbar plugin for DSH (DeepSeek Harness).
 | **Undo file edits** | before regenerate / switch model | If the answer being replaced edited files, the row lists them and asks first. Confirming puts every file back the way it was before that answer and answers again — regenerate runs a real agent (tools, native streaming); switching a model instead adds the new answer to the `‹ 1/3 ›` ring. A single file that no longer matches leaves everything untouched, and tells you which ones moved on. |
 | **Edit answer** | assistant messages & answer card | The pencil turns the answer into an editor *where the answer stands*: a bordered box holding the markdown source of its text. |
 | **Translate** | assistant answers | Pressing translate opens a dropdown of target languages; pick one and the answer is redrawn bilingual, block by block. |
+| **Questions render as markdown** | your own messages | The same renderer an answer uses, so `$…$` formulas, inline code and bold come out drawn (stock DSH paints user text as plain text). |
 | **Delete** | version cards | Soft-deletes a version: the card is hidden from the ring and the version tree, but the session log is untouched and it can be restored. The root conversation can never be deleted. |
 | **Delete message / answer** | user bubbles & assistant answers | Removes a whole turn (message, answer, tool cards) or a single answer from the conversation — handy for clearing the string of "continue" prompts left behind by a stuck turn. |
 | **Version ring** | `‹ 2/3 ›` chip | Walks the answer variants of a turn (`1` is always the model's logged answer) and the sibling versions of a turn, without leaving the conversation. |
@@ -32,6 +33,28 @@ A message toolbar plugin for DSH (DeepSeek Harness).
 > file before the file tools touch it), so the plugin stores no history of its own. That
 > record lives as long as the host process that made it: after a restart the older turns
 > have none, and the button simply answers again without undoing anything.
+
+## How it relates to the other editing plugins
+
+`dsh-message-toolbar` folds two earlier ideas into one plugin: the branching and version tree of
+`SpookySandwich/dsh-plugin-message-edit`, and the "rewrite this turn in place" approach of
+`moton16/dsh-msg-edit` — plus the everyday Cherry Studio operations (copy, regenerate, switch model,
+bilingual translation, delete, edit an answer) and markdown rendering for the questions themselves.
+
+Both of those plugins shadow the same chat rows through `conversation.chat.node` (the user bubble and
+the assistant action row), so **do not run them next to this one**: remove them from the profile first.
+
+## Known limits
+
+- A variant answer is a plain completion (one `llm.stream`, no tool loop). A real run with tools only
+  happens through two doors: `answer-run` after confirming the undo of file edits, or the last row of
+  the model picker, "…or open a new branch".
+- The session log is append-only, so "delete" hides rows in the view; the plugin removes no events, and
+  the model still sees that message in later turns.
+- Variants and translations live in `~/.dsh/message-toolbar/state.json`, not in the session log, so they
+  do not travel with the conversation to another machine.
+- Undoing depends on the `workspace-changes` record: without a git repository it only covers file-tool
+  edits, and after a host restart older turns have no record at all.
 
 ## Screenshots
 
