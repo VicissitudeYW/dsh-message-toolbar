@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "DSH message toolbar: copy, regenerate and switch models in place, edit answers, bilingual translation, edit user turns, delete and a version tree",
   "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/VicissitudeYW/dsh-message-toolbar.git" },
   "type": "module",
   "main": "lib/index.js",
   "exports": {
