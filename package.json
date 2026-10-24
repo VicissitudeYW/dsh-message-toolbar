@@ -24,6 +24,7 @@
     "docs/showcase/*.png",
     "scripts/*.mjs",
     "README.md",
+    "README.en.md",
     "LICENSE"
   ],
   "keywords": [
