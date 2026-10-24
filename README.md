@@ -1,10 +1,12 @@
 # dsh-message-toolbar
 
-**简体中文** · [English](README.en.md)
+<p align="center">
+  <strong>简体中文</strong> · <a href="README.en.md">English</a>
+</p>
 
-[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![DSH 0.2.x](https://img.shields.io/badge/DSH-0.2.x-4d6bfe.svg)](https://github.com/deepseek-ai/dsh)
-[![tests](https://img.shields.io/badge/tests-77%20passing-brightgreen.svg)](test)
+[![license: MIT]()](LICENSE)
+[![DSH 0.2.x]()](https://github.com/deepseek-ai/dsh)
+[![tests]()](test)
 
 DSH（DeepSeek Harness）消息工具栏插件。
 
