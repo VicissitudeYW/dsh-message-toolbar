@@ -793,6 +793,16 @@ test('the translate button spins while a translation is on its way', () => {
   assert.match(sheet, /\.mtt-spin\{animation:mtt-spin 900ms linear infinite/);
   assert.match(sheet, /@keyframes mtt-spin\{/);
 });
+test('a question is drawn by the same renderer as an answer', () => {
+  const source = SOURCE;
+  const { css } = applyToSlots();
+  const sheet = Array.isArray(css) ? css.join('\n') : css;
+  // What the user typed is text like any other: a formula between dollar signs
+  // must be painted, not printed as source.
+  assert.match(source, /className: 'mtt-text mtt-text-md' \}, h\(AnswerBody, \{ text: text \}\)/);
+  assert.match(sheet, /\.mtt-text-md\{white-space:normal\}/);
+  assert.match(sheet, /\.mtt-text-md p\{margin:0 0 4px\}/);
+});
 test('every colour in the sheet resolves through a theme alias', () => {
   const { css } = applyToSlots();
   const literals = [];

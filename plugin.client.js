@@ -2671,7 +2671,9 @@ function UserMessageView(props) {
   return h('div', { className: 'mtt-row', 'data-turn': turn, 'data-session': sessionId },
     h('div', { className: 'mtt-line' },
       h('div', { className: 'mtt-bubble' },
-        h('div', { className: 'mtt-text' }, text),
+        // The app's own text renderer, the same one an answer uses: a formula the
+        // user typed between dollar signs comes out as a formula, not as source.
+        h('div', { className: 'mtt-text mtt-text-md' }, h(AnswerBody, { text: text })),
         imageBlocks.length > 0 && typeof props.renderMessageImages === 'function'
           ? props.renderMessageImages({ images: imageBlocks, align: 'end' })
           : (images > 0 ? h('div', { className: 'mtt-hint' }, t('imagesKept', { count: images })) : null))),
@@ -3328,6 +3330,11 @@ const CSS = [
   // version this rule used to paint over it was the tell that the token was made up.
   '.mtt-bubble{max-width:min(calc(var(--dsh-chat-content-width,748px) * .702),82%);background:var(--mtt-bubble);border-radius:var(--dsw-radius-xl,16px);padding:10px 16px;color:var(--dsw-alias-label-primary,CanvasText);font:inherit;font-size:var(--dsh-content-font-size,14px);line-height:calc(22px + var(--dsh-content-font-delta,0px));min-width:0;white-space:pre-wrap;word-break:break-word}',
   '.mtt-text{white-space:pre-wrap;word-break:break-word}',
+  '.mtt-text-md{white-space:normal}',
+  '.mtt-text-md p{margin:0 0 4px}',
+  '.mtt-text-md p:last-child{margin-bottom:0}',
+  '.mtt-text-md>div>:first-child{margin-top:0}',
+  '.mtt-text-md>div>:last-child{margin-bottom:0}',
   // Action rows mirror DSH's own MessageIconActions.module.css exactly:
   // 28px hit box (plus the user's content-font delta), 6px padding, 8px gap,
   // 17px glyphs in a clock="end" row, tertiary label colour.
