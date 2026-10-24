@@ -1,13 +1,10 @@
 # dsh-message-toolbar
 
-[简体中文](README.md) · **English**
 <p align="center">
   <strong>English</strong> · <a href="README.md">简体中文</a>
 </p>
 
-[![license: MIT]()](LICENSE)
-[![DSH 0.2.x]()](https://github.com/deepseek-ai/dsh)
-[![tests](https://img.shields.io/badge/tests-77%20passing-brightgreen.svg)](test)
+---
 
 A message toolbar plugin for DSH (DeepSeek Harness).
 
