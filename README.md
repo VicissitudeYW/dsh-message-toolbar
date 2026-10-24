@@ -8,7 +8,7 @@ A message toolbar for [DSH](https://github.com/deepseek-ai/dsh): copy, regenerat
 edit answers, translate bilingually, delete — plus a version ring and a version tree, right in the
 action row of every message.
 
-![The toolbar under an answer, with the ‹ 2/2 › ring](./docs/showcase/01-toolbar.png)
+![The toolbar under an answer, with the ‹ 3/3 › ring](./docs/showcase/01-toolbar.png)
 
 [English](#english) · [中文](#中文)
 
@@ -41,12 +41,19 @@ Cherry Studio.
 
 ### Screenshots
 
+Every figure here is rendered from the plugin's own stylesheet and icons (`scripts/showcase.mjs`)
+on DSH's theme variables — nothing is a screenshot of a real conversation.
+
 | | |
 | --- | --- |
-| ![Pick a model](./docs/showcase/02-model-menu.png) | ![Bilingual translation](./docs/showcase/03-translation.png) |
-| **Switch model.** DSH's own picker — the one under the composer. Each model's answer becomes a variant of the *same* turn, so nothing is forked and `‹ 2/3 ›` walks them. | **Translate.** Original and translation, block by block, drawn by the same markdown renderer; code and formulas are lifted out and put back untouched. |
-| ![Edit an answer](./docs/showcase/04-edit-answer.png) | ![Delete a message](./docs/showcase/05-delete.png) |
-| **Edit an answer.** The pencil turns the answer into an editor where it stands, holding the markdown source; saving overwrites what was on screen. | **Delete.** One question, then a toast — the row is gone, with no placeholder left behind. |
+| ![Bilingual translation](./docs/showcase/02-translation.png) | ![Editing an answer](./docs/showcase/03-edit-answer.png) |
+| **Translate.** Original and translation, block by block, drawn by the same markdown renderer; code and formulas are lifted out of the request and put back untouched. | **Edit an answer.** The pencil turns the answer into an editor where it stands, holding its markdown source; saving overwrites what was on screen. |
+| ![Deleting an answer](./docs/showcase/04-delete.png) | ![A failed answer](./docs/showcase/05-failed.png) |
+| **Delete.** One question — *Delete this answer?* — then a toast; the row is gone and nothing is left in its place. | **A failed answer** still gets a toolbar: regenerate, another model, delete. |
+
+Switching models has no figure of its own because it *is* the composer's picker: the same dropdown,
+the same groups, the same keys. Picking another model from it turns that model's answer into another
+variant of the same turn.
 
 ### Requirements
 
@@ -214,8 +221,9 @@ the plugin stylesheet out of the bundle, then paints the menus, cards and button
 colour that ignores the theme shows up immediately. [docs/theme-preview.png](docs/theme-preview.png)
 is that screenshot (light on the left, dark on the right).
 
-Besides the unit tests, every feature was clicked through in a real window; the screenshots and what
-each one proves are in [docs/testing/README.md](docs/testing/README.md).
+Besides the unit tests, every feature was clicked through in a real window. The figures in this
+README are generated from the shipped stylesheet: `node scripts/showcase.mjs` writes the scenes to
+`test/showcase/*.html`, which are rendered once with a headless browser and trimmed.
 
 ### License
 
@@ -249,12 +257,18 @@ MIT
 
 ### 功能展示
 
+下面的图都是用插件自己的样式表和图标（`scripts/showcase.mjs`）画在 DSH 主题变量上的，
+没有一张是真实会话的截图。
+
 | | |
 | --- | --- |
-| ![切换模型](./docs/showcase/02-model-menu.png) | ![双语对照](./docs/showcase/03-translation.png) |
-| **切换模型。** 直接复用输入框右下角那个原生下拉。每个模型的回答都是**同一轮**的备选，不新开对话，`‹ 2/3 ›` 就地翻。 | **翻译。** 原文与译文按段对照，两侧都是同一个 Markdown 渲染器；代码与公式先抽出来，译完原样放回。 |
-| ![编辑回答](./docs/showcase/04-edit-answer.png) | ![删除消息](./docs/showcase/05-delete.png) |
-| **编辑回答。** 点铅笔，回答在**原来的位置**变成编辑器，里面是它的 markdown 源码；保存即覆盖你正在看的那份。 | **删除。** 只问一句，删完用顶部提示条告知；原位不留任何东西。 |
+| ![双语对照](./docs/showcase/02-translation.png) | ![编辑回答](./docs/showcase/03-edit-answer.png) |
+| **翻译。** 原文与译文按段对照，两侧都是同一个 Markdown 渲染器；代码与公式先抽出来，译完原样放回。 | **编辑回答。** 点铅笔，回答在**原来的位置**变成编辑器，里面是它的 markdown 源码；保存即覆盖你正在看的那份。 |
+| ![删除回答](./docs/showcase/04-delete.png) | ![失败的回答](./docs/showcase/05-failed.png) |
+| **删除。** 只问一句「删除这条回答？」，删完用顶部提示条告知；原位不留任何东西。 | **失败的回答**也有工具栏：重新生成、换个模型、删除。 |
+
+切换模型没有单独的图，因为它**就是**输入框右下角那个下拉：同样的分组、同样的键盘操作。
+从它里面另选一个模型，那个模型的回答就成了同一轮的另一份备选。
 
 ### 环境要求
 
@@ -401,8 +415,8 @@ node --test test/logic.test.mjs    # 纯版本树逻辑
 `plugin.client.js` 是一段 IIFE 函数体（结尾是 `return { inject, apply }`），
 所以 `node --check` 只对构建产物 `lib/client.js` 有意义。
 
-除了单元测试，每个功能都在真实窗口里点过一遍，截图以及每张图能证明什么，见
-[docs/testing/README.md](docs/testing/README.md)。
+除了单元测试，每个功能都在真实窗口里点过一遍。README 里的图是从插件自己的样式表渲染出来的：
+`node scripts/showcase.mjs` 把场景写成 `test/showcase/*.html`，再用无头浏览器截一次、裁掉空白。
 
 ### 许可
 

@@ -24,7 +24,6 @@
     "docs/showcase/*.png",
     "scripts/*.mjs",
     "README.md",
-    "CHANGELOG.md",
     "LICENSE"
   ],
   "keywords": [
