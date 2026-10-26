@@ -17,8 +17,8 @@ A message toolbar plugin for DSH (DeepSeek Harness).
 | Action | Where | What happens |
 | --- | --- | --- |
 | **Edit** | user messages | Changes the text shown for that question. |
-| **Regenerate** | assistant messages | The fresh answer takes the answer's place; the one before it moves into `‹ 1/2 ›`, one click away. |
-| **Switch model** | assistant messages | Answers with the model you picked; the conversation keeps its own model, and `‹ 2/3 ›` walks the answers in place. |
+| **Regenerate** | assistant messages | The agent answers again, in this conversation: a file it read is read again, a command it ran is run again, and the thinking, the tool cards and the stream are the same as the first time — nothing to tell apart. The fresh answer takes the answer's place; the one before it moves into `‹ 1/2 ›`. |
+| **Switch model** | assistant messages | Also a real answer by the agent, pinned to the model you picked for that one answer; the conversation keeps its own model, and `‹ 2/3 ›` walks the answers without leaving the chat. |
 | **Undo file edits** | before regenerate / switch model | If the answer being replaced edited files, those files are listed first; confirming puts them back the way they were before that answer, and only then is the question answered again. |
 | **Edit answer** | assistant messages | The answer becomes an editor where it stands, holding the markdown source of its text. |
 | **Translate** | assistant messages | Pressing translate opens a dropdown of target languages; pick one and the answer is redrawn block by block, original and translation side by side. |
