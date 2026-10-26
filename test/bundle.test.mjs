@@ -660,18 +660,16 @@ test('a switched-in answer replaces the logged one entirely', () => {
 // the earlier answer stays reachable. Neither creates a second conversation.
 test('regenerating from the question adds another answer, like the answer row', () => {
   const source = SOURCE;
-  // One writer for both rows...
-  assert.match(source, /await generateInto\(sessionId, turn, undefined\);/);
-  assert.match(source, /await generateInto\(sessionId, turn, info === null \? undefined : info\);/);
-  // ...and no branch and no second turn from the question's button. Branching
-  // still exists, but only as the last row of the model menu, where it is asked for.
+  // One writer for both rows, and one writer only: answering again is a real
+  // agent turn of this session, whether it was asked for from the question or
+  // from the answer, with or without a model — there is no second, cheaper path
+  // that a reader could tell apart from this one.
+  assert.equal(source.split('await rerunTurnInPlace({').length - 1, 3, 'question, answer and model rows all go through it');
+  assert.doesNotMatch(source, /await generateInto\(sessionId, turn/);
+  // No branch and no second turn from either button. Branching still exists, but
+  // only as the last row of the model menu, where it is asked for.
   assert.match(source, /async function branchVersion\(\)/);
-  // The one exception is a turn whose answer edited files: undoing those edits
-  // needs a real agent run, so `answer-run` lives inside that one helper.
-  assert.match(source, /async function rerunAfterRevert\(options\) \{/);
-  const afterRevert = source.slice(source.indexOf('async function rerunAfterRevert(options) {'));
-  assert.match(afterRevert.slice(0, afterRevert.indexOf('\n}\n')), /action: 'answer-run'/);
-  assert.equal(source.split("action: 'answer-run'").length - 1, 1, 'only the revert path replays a turn');
+  assert.equal(source.split("action: 'answer-run'").length - 1, 1, 'one place queues the replay');
   // Regenerate (both rows) and switch model all ask the host what the answer
   // being replaced touched, and each confirms before anything is written back.
   assert.equal(source.split('await turnChangePlan(sessionId, turn)').length - 1, 3);
@@ -814,15 +812,21 @@ test('editing a question saves the text and answers nothing', () => {
   assert.match(source, /t\('editSaveHint'\)/);
   assert.doesNotMatch(source, /action: 'edit',\n\s+sessionId: sessionId,/);
 });
-test('a turn that used tools is answered again by the agent, not by a completion', () => {
+// Answering again appends a turn of its own, so the answers of one question are
+// turns, not copies of text: the ring walks real turns, only the one on screen
+// stays in the flow, and a model chosen for one answer is pinned to that answer
+// without changing the conversation's own model.
+test('answers of one question are turns, switched by the ring', () => {
   const source = SOURCE;
-  // Two regenerate paths, decided by the host's per-turn tool count: prose gets a
-  // variant (the ring), tool work gets a real turn (tools, process card, streaming).
-  assert.match(source, /const facts = turnInfo\(state, turn\);/);
-  assert.match(source, /facts !== undefined && facts\.tools > 0/);
-  assert.match(source, /function rerunTurnInPlace\(options\) \{/);
-  assert.match(source, /action: 'answer-run',\r?\n\s+sessionId: options\.sessionId,/);
-  assert.match(source, /return rerunTurnInPlace\(options\);/);
+  assert.match(source, /function runsOf\(runs, turn\) \{/);
+  assert.match(source, /function runPosition\(run\) \{/);
+  // A superseded answer leaves the flow by kind, so its question row stays.
+  assert.match(source, /run\.active === turn \? null : 'deleted'/);
+  // The ring prefers turns over stored text variants, and switching is a host call.
+  assert.match(source, /const ringView = run !== null/);
+  assert.match(source, /action: 'run-select', sessionId: sessionId, turn: run\.key, active: next/);
+  // Deleting the answer on screen falls back to the answer before it.
+  assert.match(source, /await mutate\(\{ action: 'run-select', sessionId: sessionId, turn: run\.key, active: previous \}\);/);
 });
 test('an attached file is drawn in the bubble', () => {
   const source = SOURCE;

@@ -167,6 +167,15 @@ function makeContext(options = {}) {
       summary: () => services.workspaceSummary,
       diff: async () => services.workspaceDiff,
     },
+    // The session controller owns the one-shot model selection a replayed turn
+    // asks for, in memory and in the log at once; a test records what was asked.
+    sessionController: {
+      agents: {
+        selectForNextRequest(_agent, selection) {
+          services.selections = (services.selections ?? []).concat([selection]);
+        },
+      },
+    },
   };
   const ctx = Object.assign({}, services, {
     get: (name) => services[name],
@@ -360,6 +369,56 @@ test('POST answer-run replays the prompt as a new turn of the same session', asy
   assert.equal(followups.length, 1);
   assert.equal(followups[0].role, 'user');
   assert.equal(followups[0].content[0].text, 'second question');
+  // The fresh answer is another turn of the same question: remembered as a group,
+  // so the client can walk it with ‹ 1/2 › over real turns instead of text.
+  assert.deepEqual(json.runs['2'].turns, [2, 3]);
+  assert.equal(json.runs['2'].active, 3);
+});
+
+// Choosing which of those turns is on screen is its own operation — the turns
+// are already in the log, so nothing is written but the mark.
+test('POST run-select walks the turns that answer one question', async () => {
+  const { ctx, services } = makeContext();
+  apply(ctx);
+  resetPluginState();
+
+  await call(services.handler, 'POST', { action: 'answer-run', sessionId: 'A', turn: 2, hidePrompt: true });
+  const back = await call(services.handler, 'POST', {
+    action: 'run-select', sessionId: 'A', turn: 2, active: 2,
+  });
+  assert.equal(back.status, 200);
+  assert.equal(back.json.runs.active, 2);
+  assert.deepEqual(back.json.runs.turns, [2, 3]);
+
+  // The transcript the client reads carries the same groups.
+  const state = await call(services.handler, 'GET', undefined, '?sessionId=A');
+  assert.equal(state.json.runs['2'].active, 2);
+
+  // A turn that never answered this question is not an alternative of it.
+  const wrong = await call(services.handler, 'POST', {
+    action: 'run-select', sessionId: 'A', turn: 2, active: 9,
+  });
+  assert.equal(wrong.status, 400);
+  assert.match(wrong.json.error, /找不到这个回答/);
+});
+
+// A model chosen for one answer is pinned to the request that answer assembles,
+// and only to that one: the conversation keeps its own model afterwards.
+test('POST answer-run pins the chosen model to that turn alone', async () => {
+  const { ctx, services } = makeContext();
+  apply(ctx);
+  resetPluginState();
+
+  const { status, json } = await call(services.handler, 'POST', {
+    action: 'answer-run',
+    sessionId: 'A',
+    turn: 2,
+    hidePrompt: true,
+    model: { provider: 'q', model: 'm2' },
+  });
+  assert.equal(status, 200);
+  assert.deepEqual(services.selections, [{ provider: 'q', model: 'm2' }]);
+  assert.deepEqual(json.runs['2'].models['3'], { provider: 'q', model: 'm2' });
 });
 
 // A long answer needs a long translation. When the model still runs out of room,

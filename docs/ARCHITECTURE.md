@@ -126,20 +126,37 @@ from `llm.listProviders()` + `llm.listModels(provider)`.
 | `answer-select` | `sessionId, turn, answerId` | flips the visible variant (`'native'` is legal) |
 | `answer-delete` | `sessionId, turn, answerId` | drops a variant; if it was visible, the one before it in the ring (`native` first) takes over |
 | `answer-restore` | `sessionId, turn` | drops the `override`, so the model's logged answer shows again |
-| `answer-run` | `sessionId, turn, stopPrevious?, hidePrompt?` | answers a turn again **in the same session** with a real agent turn: replays its prompt as a new turn and returns `{sessionId, turn, replayedFrom, inPlace: true}`. `hidePrompt` marks the replayed prompt hidden in the same call, because that turn is not in the log yet and a later `hide` would be rejected as "第 N 轮不存在" |
+| `run-select` | `sessionId, turn, active` | shows another turn of the same question: `{runs, all}` from `selectRun`. `turn` is the group key (the turn the question was asked in); a turn that never answered that question is a `TypeError` → 400 |
+| `answer-run` | `sessionId, turn, model?, stopPrevious?, hidePrompt?` | answers a turn again **in the same session** with a real agent turn: replays its prompt as a new turn and returns `{sessionId, turn, replayedFrom, inPlace: true}`. `hidePrompt` marks the replayed prompt hidden in the same call, because that turn is not in the log yet and a later `hide` would be rejected as "第 N 轮不存在" |
 | `changes` | `sessionId, turn` | `{ turn, supported, cwd?, files: [{path, display, added, deleted, kind, revertable, before, after}], total, added, deleted }` — what that turn changed on disk, read from `workspaceChanges`; `supported: false` carries `reason: "no-service" \| "not-recorded"` |
 | `revert` | `sessionId, turn` | undoes those changes; `{ turn, reverted: [{path, display, action}], skipped: [{path, reason}], cwd }`. All-or-nothing: one file whose current content no longer matches what the turn left behind means **nothing** is written, and the 409 names the conflicts |
 | `hide` | `sessionId, turn, scope: "turn"\|"answer"\|"prompt", hidden: bool` | hides/restores one turn, one answer, or the replayed prompt of a turn in the transcript view; returns the new lists |
 | `models` | — | same catalog as `?models=1` |
 
 
-### Regenerate answers with the agent when the turn used tools
+### Answering again is a turn of its own
 
-Regenerate reaches for a real agent turn when the turn has to *do* something: the GET payload's
-`turns` carries `tools` (a count of `tool/call` events), and the client routes a turn with
-`tools > 0` through `rerunTurnInPlace` (`answer-run` + `hide` scope `answer`) instead of
-`answer-generate`. A plain completion cannot read a file, and a model asked to will narrate the
-work rather than admit it — which is what it did before this rule existed.
+`regenerate` and `switch model` do not produce a stand-in: the host appends a real turn to the
+same session (`answer-run`), so the fresh answer has the agent's tools, its thinking, its process
+card and DSH's own streaming page. There is no second, cheaper path in the UI; `answer-generate`
+survives only for API callers and for text variants stored by older versions.
+
+Those turns are alternatives of one answer, and only the plugin knows it — the log cannot say so.
+`runs[sessionId][turn]` groups them:
+
+    { "turns": [2, 5, 7], "active": 7, "models": { "5": { "provider": "…", "model": "…" } } }
+
+`turn` is the turn the question was asked in (the group key), `turns` lists the turns that
+answered it in the order they were produced, `active` names the one on screen. The client hides
+every other member by kind (`assistant-step`, `turn-process`, `tool`, `turn-error`,
+`turn-max-tokens`, `model-retry`, `turn-tail`) rather than by `[data-chat-turn]`, so the
+question row of the original turn stays where the reader asked it. `run-select` walks the group;
+deleting the answer on screen also steps the group back.
+
+A model chosen for one answer is pinned through the session controller —
+`selectForNextRequest(agent, {provider, model})`, which appends `model/selection` and sets the
+pending selection in memory. The request the replayed turn assembles carries it, and that request's
+own header retires it, so the choice lasts exactly one turn and the conversation keeps its model.
 
 Errors: `TypeError` → `400 {error}`, anything else → `409 {error}`.
 
@@ -154,12 +171,15 @@ Errors: `TypeError` → `400 {error}`, anything else → `409 {error}`.
   "hidden": { "<sessionId>": { "turns": [1, 4], "answers": [2] } },
   "translations": { "<sessionId>": { "<eventSeq|turn:n>": { "<lang>": { "text": "...", "at": 0 } } } },
   "prompts": { "<sessionId>": { "<turn>": { "text": "...", "at": 0 } } },
+  "runs": { "<sessionId>": { "<turn>": { "turns": [2, 5], "active": 5, "models": { "5": { "provider": "...", "model": "..." } } } } },
   "shown": { "<sessionId>": { "<turn>": "<lang>" } },
   "origins": { "<sessionId>": { "<turn>": "<text the reader saw>" } } }
 ```
 
-`answers` holds the in-session answer variants — answers that deliberately never enter the
-session log (see below). `active: "native"` means the logged answer is the visible one.
+`answers` holds text variants — answers that deliberately never entered the session log, written by
+versions before 1.2.0 and still readable; `active: "native"` means the logged answer is the
+visible one. `runs` holds the groups of *real* turns that answer one question (see *Answering
+again is a turn of its own*), which is what `regenerate` and `switch model` use now.
 
 Writes are debounced (200 ms) and atomic (temp file + rename). The store is a convenience
 layer: a failure to persist never fails the operation.
