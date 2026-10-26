@@ -132,6 +132,15 @@ from `llm.listProviders()` + `llm.listModels(provider)`.
 | `hide` | `sessionId, turn, scope: "turn"\|"answer"\|"prompt", hidden: bool` | hides/restores one turn, one answer, or the replayed prompt of a turn in the transcript view; returns the new lists |
 | `models` | — | same catalog as `?models=1` |
 
+
+### Regenerate answers with the agent when the turn used tools
+
+Regenerate reaches for a real agent turn when the turn has to *do* something: the GET payload's
+`turns` carries `tools` (a count of `tool/call` events), and the client routes a turn with
+`tools > 0` through `rerunTurnInPlace` (`answer-run` + `hide` scope `answer`) instead of
+`answer-generate`. A plain completion cannot read a file, and a model asked to will narrate the
+work rather than admit it — which is what it did before this rule existed.
+
 Errors: `TypeError` → `400 {error}`, anything else → `409 {error}`.
 
 ## State

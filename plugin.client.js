@@ -390,6 +390,44 @@ function imageCount(content) {
   return imageParts(content).length;
 }
 
+/** The file attachments of one message: `{type:'file', attachment:{name, bytes}}`. */
+function fileParts(content) {
+  if (!Array.isArray(content)) return [];
+  return content
+    .filter(function (block) { return block && block.type === 'file'; })
+    .map(function (block) {
+      const attachment = block.attachment || {};
+      return {
+        name: typeof attachment.name === 'string' && attachment.name.length > 0 ? attachment.name : 'file',
+        bytes: typeof attachment.bytes === 'number' ? attachment.bytes : 0,
+      };
+    });
+}
+
+/** Bytes as the app's own file cards spell them, without needing its helpers. */
+function fileSize(bytes) {
+  if (typeof bytes !== 'number' || bytes <= 0) return '';
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(bytes < 10240 ? 1 : 0) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+/**
+ * One attached file, drawn like the app draws it: the type icon when the
+ * primitives are there, the name, and the size. An attachment the log knows
+ * about must never look like it vanished on the way out.
+ */
+function FileChip(props) {
+  const api = clientPrimitives();
+  const icon = api !== null && typeof api.FileTypeIcon === 'function'
+    ? h(api.FileTypeIcon, { path: props.name, className: 'mtt-file-icon' })
+    : null;
+  return h('span', { className: 'mtt-file', title: props.name },
+    icon,
+    h('span', { className: 'mtt-file-name' }, props.name),
+    props.size !== '' ? h('span', { className: 'mtt-file-meta' }, props.size) : null);
+}
+
 function clip(text, max) {
   const value = String(text || '');
   return value.length > max ? value.slice(0, max - 1) + '…' : value;
@@ -947,6 +985,19 @@ async function rerunAfterRevert(options) {
     await generateInto(options.sessionId, options.turn, options.model);
     return { kind: 'variant' };
   }
+  return rerunTurnInPlace(options);
+}
+
+/**
+ * Answer a turn again with a real agent turn **in this session**, replacing what
+ * the row shows: the answer being replaced is hidden and the host hides the
+ * prompt it replays, so one question keeps one answer on screen.
+ *
+ * This is the only way to get tools, a process card and the native streaming
+ * page out of a second attempt — a variant is one plain completion, and a model
+ * asked to "read that PDF" without tools will happily pretend it did.
+ */
+async function rerunTurnInPlace(options) {
   const result = await mutate({
     action: 'answer-run',
     sessionId: options.sessionId,
@@ -2485,6 +2536,7 @@ function UserMessageView(props) {
   const text = contentText(data.content);
   const images = imageCount(data.content);
   const imageBlocks = imageParts(data.content);
+  const files = fileParts(data.content);
   const sessionId = props.sessionId !== undefined ? props.sessionId : node.sessionId;
   const rawTurn = node.location ? node.location.turn : undefined;
   const turn = typeof rawTurn === 'number' ? rawTurn : (rawTurn && typeof rawTurn.turn === 'number' ? rawTurn.turn : undefined);
@@ -2576,8 +2628,16 @@ function UserMessageView(props) {
     }
     setBusy(true);
     try {
-      await generateInto(sessionId, turn, undefined);
-      showToast(t('answerGenerated'));
+      // Same rule as the answer row: a turn that used tools is answered again by
+      // the agent itself, everything else by one completion.
+      const facts = turnInfo(state, turn);
+      if (facts !== undefined && facts.tools > 0) {
+        await rerunTurnInPlace({ sessionId: sessionId, turn: turn, stopPrevious: prefs.stopPrevious });
+        showToast(t('answerRegenerated'));
+      } else {
+        await generateInto(sessionId, turn, undefined);
+        showToast(t('answerGenerated'));
+      }
     } catch (e) {
       showToast(failureText(e), 'error');
     }
@@ -2682,7 +2742,14 @@ function UserMessageView(props) {
       h('div', { className: 'mtt-bubble' },
         // The app's own text renderer, the same one an answer uses: a formula the
         // user typed between dollar signs comes out as a formula, not as source.
-        h('div', { className: 'mtt-text mtt-text-md' }, h(AnswerBody, { text: shownText })),
+        shownText !== ''
+          ? h('div', { className: 'mtt-text mtt-text-md' }, h(AnswerBody, { text: shownText }))
+          : null,
+        files.length > 0
+          ? h('div', { className: 'mtt-files' }, files.map(function (file, index) {
+            return h(FileChip, { key: 'f' + String(index), name: file.name, size: fileSize(file.bytes) });
+          }))
+          : null,
         imageBlocks.length > 0 && typeof props.renderMessageImages === 'function'
           ? props.renderMessageImages({ images: imageBlocks, align: 'end' })
           : (images > 0 ? h('div', { className: 'mtt-hint' }, t('imagesKept', { count: images })) : null))),
@@ -2891,9 +2958,18 @@ function AssistantToolbar(props) {
     }
     setBusy(true);
     try {
-      const info = currentModel();
-      await generateInto(sessionId, turn, info === null ? undefined : info);
-      showToast(t('answerGenerated'));
+      // A turn that reached for a tool cannot be answered again by one completion:
+      // the model would narrate the work instead of doing it. Those regenerate as
+      // a real agent turn, replacing the answer.
+      const facts = turnInfo(state, turn);
+      if (facts !== undefined && facts.tools > 0) {
+        await rerunTurnInPlace({ sessionId: sessionId, turn: turn, stopPrevious: prefs.stopPrevious });
+        showToast(t('answerRegenerated'));
+      } else {
+        const info = currentModel();
+        await generateInto(sessionId, turn, info === null ? undefined : info);
+        showToast(t('answerGenerated'));
+      }
     } catch (e) {
       setError(String((e && e.message) || e));
     }
@@ -3337,7 +3413,11 @@ const CSS = [
   // Exactly DSH's own user bubble (Sixlwa_bubble in dsh-client-ui-chat): the
   // light-blue fill is --dsw-specific-bubble, not a neutral tint — the grey
   // version this rule used to paint over it was the tell that the token was made up.
-  '.mtt-bubble{max-width:min(calc(var(--dsh-chat-content-width,748px) * .702),82%);background:var(--mtt-bubble);border-radius:var(--dsw-radius-xl,16px);padding:10px 16px;color:var(--dsw-alias-label-primary,CanvasText);font:inherit;font-size:var(--dsh-content-font-size,14px);line-height:calc(22px + var(--dsh-content-font-delta,0px));min-width:0;white-space:pre-wrap;word-break:break-word}',
+  '.mtt-files{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;min-width:0}',
+  '.mtt-file{display:inline-flex;align-items:center;gap:6px;max-width:100%;padding:4px 8px;border:.5px solid var(--mtt-line-strong);border-radius:var(--mtt-radius-sm);background:var(--mtt-surface-2);color:var(--mtt-fg);font-size:12px;line-height:16px}',
+  '.mtt-file svg,.mtt-file-icon{width:14px;height:14px;flex:none;display:block}',
+  '.mtt-file-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+  '.mtt-file-meta{color:var(--mtt-fg-3);flex:none}',  '.mtt-bubble{max-width:min(calc(var(--dsh-chat-content-width,748px) * .702),82%);background:var(--mtt-bubble);border-radius:var(--dsw-radius-xl,16px);padding:10px 16px;color:var(--dsw-alias-label-primary,CanvasText);font:inherit;font-size:var(--dsh-content-font-size,14px);line-height:calc(22px + var(--dsh-content-font-delta,0px));min-width:0;white-space:pre-wrap;word-break:break-word}',
   '.mtt-text{white-space:pre-wrap;word-break:break-word}',
   '.mtt-text-md{white-space:normal}',
   '.mtt-text-md p{margin:0 0 4px}',
@@ -3550,6 +3630,7 @@ const I18N = {
     thinking: 'Thinking…',
     thought: 'Thinking',
     answerGenerated: 'New answer ready — switch with ‹ ›',
+    answerRegenerated: 'Answered again by the agent, with tools',
     answerGeneratedBy: 'Answer from {name} ready',
     answerEdited: 'Edit saved as a variant',
     footnotes: 'Footnotes',
@@ -3630,6 +3711,7 @@ const I18N = {
     thinking: '思考中…',
     thought: '思考过程',
     answerGenerated: '新回答已生成——用 ‹ › 切换',
+    answerRegenerated: '已由 agent 带着工具重新回答',
     answerGeneratedBy: '{name} 的回答已就绪',
     answerEdited: '编辑已保存为备选',
     footnotes: '脚注',

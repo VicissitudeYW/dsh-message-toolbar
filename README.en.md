@@ -17,11 +17,12 @@ A message toolbar plugin for DSH (DeepSeek Harness).
 | Action | Where | What happens |
 | --- | --- | --- |
 | **Edit** | user messages | Changes the text shown for that question. |
-| **Regenerate** | assistant messages | Answers again in place, without opening a new conversation. The fresh answer to the same question is stored as a variant of that turn and swapped in for the logged one. `‹ 1/2 ›` switches between them. |
+| **Regenerate** | assistant messages | Answers again in place, without opening a new conversation. The fresh answer to the same question is stored as a variant of that turn and swapped in for the logged one; `‹ 1/2 ›` switches between them. A turn that used tools (read a file, ran a command) is answered again by the agent itself — tools, process card, native streaming — instead of by one plain completion. |
 | **Switch model** | assistant messages | Every model's answer becomes a variant of the same turn; `‹ 2/3 ›` walks them without leaving the conversation. |
 | **Undo file edits** | before regenerate / switch model | If the answer being replaced edited files, the row lists them and asks first. Confirming puts every file back the way it was before that answer; switching a model then adds the new answer to the `‹ 1/3 ›` ring. |
 | **Edit answer** | assistant messages | The answer becomes an editor where it stands, holding the markdown source of its text. |
 | **Translate** | assistant messages | Pressing translate opens a dropdown of target languages; pick one and the answer is redrawn block by block, original and translation side by side. |
+| **Attachments** | user messages | A file sent with a message (a PDF, say) is drawn in the bubble as a file card — icon, name, size — so it never looks like it vanished on the way out. |
 | **Delete message / answer** | user messages / assistant messages | Removes a whole turn (message, answer, tool cards) or a single answer from the conversation. |
 | **Version tree** | conversation view | A turn-level branching tree of the whole conversation family, with the active path highlighted, model labels, timestamps, and restore/delete controls. |
 
@@ -30,6 +31,7 @@ A message toolbar plugin for DSH (DeepSeek Harness).
 - DSH session logs are append-only and cannot be rewritten, so "delete" hides rows in the view.
 - Variants and translations live in `~/.dsh/message-toolbar/state.json`, not in the session log, so they do not travel with the conversation to another machine.
 - Undoing depends on the `workspace-changes` record: without a git repository it only covers file-tool edits, and after a host restart older turns have no record.
+- A variant is one plain completion and has no tools, so a simple question is answered that way; a turn that already used tools regenerates as a real agent turn instead.
 
 ## Screenshots
 

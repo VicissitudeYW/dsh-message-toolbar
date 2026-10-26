@@ -814,7 +814,26 @@ test('editing a question saves the text and answers nothing', () => {
   assert.match(source, /t\('editSaveHint'\)/);
   assert.doesNotMatch(source, /action: 'edit',\n\s+sessionId: sessionId,/);
 });
-test('every colour in the sheet resolves through a theme alias', () => {
+test('a turn that used tools is answered again by the agent, not by a completion', () => {
+  const source = SOURCE;
+  // Two regenerate paths, decided by the host's per-turn tool count: prose gets a
+  // variant (the ring), tool work gets a real turn (tools, process card, streaming).
+  assert.match(source, /const facts = turnInfo\(state, turn\);/);
+  assert.match(source, /facts !== undefined && facts\.tools > 0/);
+  assert.match(source, /function rerunTurnInPlace\(options\) \{/);
+  assert.match(source, /action: 'answer-run',\r?\n\s+sessionId: options\.sessionId,/);
+  assert.match(source, /return rerunTurnInPlace\(options\);/);
+});
+test('an attached file is drawn in the bubble', () => {
+  const source = SOURCE;
+  const { css } = applyToSlots();
+  const sheet = Array.isArray(css) ? css.join('\n') : css;
+  assert.match(source, /function fileParts\(content\) \{/);
+  assert.match(source, /h\(FileChip, \{ key: 'f' \+ String\(index\), name: file\.name, size: fileSize\(file\.bytes\) \}\)/);
+  assert.match(source, /attachment\.name/);
+  assert.match(sheet, /\.mtt-files\{display:flex/);
+  assert.match(sheet, /\.mtt-file\{display:inline-flex/);
+});test('every colour in the sheet resolves through a theme alias', () => {
   const { css } = applyToSlots();
   const literals = [];
   for (const rule of css) {

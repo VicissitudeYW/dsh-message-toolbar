@@ -252,6 +252,22 @@ test('GET reports per-turn answered and end reason', async () => {
   assert.equal(byTurn.get(4).answered, false);
 });
 
+test('GET counts the tool calls of every turn', async () => {
+  const events = rootEvents();
+  events.splice(3, 0, { type: 'tool/call', seq: 30, time: 1030, data: { turn: 1, step: 1, callId: 'c1', name: 'read', arguments: '{}' } });
+  events.splice(4, 0, { type: 'tool/call', seq: 31, time: 1031, data: { turn: 1, step: 1, callId: 'c2', name: 'write', arguments: '{}' } });
+
+  const { ctx, services } = makeContext({ rootEvents: events });
+  apply(ctx);
+
+  const { json } = await call(services.handler, 'GET', undefined, '?sessionId=A');
+  const byTurn = new Map(json.turns.map((t) => [t.turn, t]));
+  // The client answers a tool-using turn again with the agent itself; a turn of
+  // plain prose is answered by one completion.
+  assert.equal(byTurn.get(1).tools, 2);
+  assert.equal(byTurn.get(2).tools, 0);
+});
+
 test('POST edit creates a rewound child with a durable marker', async () => {
   const { ctx, services, created, followups } = makeContext();
   apply(ctx);
