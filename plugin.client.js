@@ -422,10 +422,20 @@ function FileChip(props) {
   const icon = api !== null && typeof api.FileTypeIcon === 'function'
     ? h(api.FileTypeIcon, { path: props.name, className: 'mtt-file-icon' })
     : null;
-  return h('span', { className: 'mtt-file', title: props.name },
+  // The same two strings the app puts under a file name: its own extension
+  // helper and its own byte formatter, so a card reads "PDF 1.2 MB" here too.
+  const extension = api !== null && typeof api.fileExtension === 'function'
+    ? String(api.fileExtension(props.name) || '').toUpperCase().slice(0, 8)
+    : '';
+  const size = api !== null && typeof api.fileSizeText === 'function'
+    ? String(api.fileSizeText(props.bytes) || '')
+    : fileSize(props.bytes);
+  const meta = [extension, size].filter(Boolean).join(' ');
+  return h('span', { className: 'mtt-file-card', title: props.name },
     icon,
-    h('span', { className: 'mtt-file-name' }, props.name),
-    props.size !== '' ? h('span', { className: 'mtt-file-meta' }, props.size) : null);
+    h('span', { className: 'mtt-file-content' },
+      h('span', { className: 'mtt-file-name' }, props.name),
+      meta === '' ? null : h('span', { className: 'mtt-file-meta' }, meta)));
 }
 
 function clip(text, max) {
@@ -2783,20 +2793,25 @@ function UserMessageView(props) {
 
   return h('div', { className: 'mtt-row', 'data-turn': turn, 'data-session': sessionId },
     h('div', { className: 'mtt-line' },
-      h('div', { className: 'mtt-bubble' },
-        // The app's own text renderer, the same one an answer uses: a formula the
-        // user typed between dollar signs comes out as a formula, not as source.
-        shownText !== ''
-          ? h('div', { className: 'mtt-text mtt-text-md' }, h(AnswerBody, { text: shownText }))
+      h('div', { className: 'mtt-stack' },
+        // Attachments sit above the bubble, right-aligned, exactly where the app
+        // puts them: a card of its own, not a line of text inside the message.
+        // What a reader sent must never look like it went missing.
+        files.length > 0 || imageBlocks.length > 0 || images > 0
+          ? h('div', { className: 'mtt-attach-row' },
+            files.map(function (file, index) {
+              return h(FileChip, { key: 'f' + String(index), name: file.name, bytes: file.bytes });
+            }),
+            imageBlocks.length > 0 && typeof props.renderMessageImages === 'function'
+              ? props.renderMessageImages({ images: imageBlocks, align: 'end', compact: imageBlocks.length > 1 })
+              : (images > 0 ? h('div', { className: 'mtt-hint' }, t('imagesKept', { count: images })) : null))
           : null,
-        files.length > 0
-          ? h('div', { className: 'mtt-files' }, files.map(function (file, index) {
-            return h(FileChip, { key: 'f' + String(index), name: file.name, size: fileSize(file.bytes) });
-          }))
-          : null,
-        imageBlocks.length > 0 && typeof props.renderMessageImages === 'function'
-          ? props.renderMessageImages({ images: imageBlocks, align: 'end' })
-          : (images > 0 ? h('div', { className: 'mtt-hint' }, t('imagesKept', { count: images })) : null))),
+        h('div', { className: 'mtt-bubble' },
+          // The app's own text renderer, the same one an answer uses: a formula the
+          // user typed between dollar signs comes out as a formula, not as source.
+          shownText !== ''
+            ? h('div', { className: 'mtt-text mtt-text-md' }, h(AnswerBody, { text: shownText }))
+            : null))),
     h('div', { className: 'mtt-actions' },
       h(VersionRing, { ring: ring }),
       isVersion && self && self.model ? h(ModelChip, { model: self.model, title: t('modelCard') }) : null,
@@ -3502,14 +3517,19 @@ const CSS = [
   '.mtt-row{display:flex;flex-direction:column;align-items:flex-end;gap:2px;margin:2px 0;min-width:0}',
   '.mtt-row.mtt-editing{align-items:stretch}',
   '.mtt-line{display:flex;justify-content:flex-end;width:100%;min-width:0}',
+  // The app's user row: attachments and bubble stack right-aligned, 8px apart.
+  '.mtt-stack{display:flex;flex-direction:column;align-items:flex-end;gap:8px;min-width:0;max-width:min(calc(var(--dsh-chat-content-width,748px) * .702),82%)}',
   // Exactly DSH's own user bubble (Sixlwa_bubble in dsh-client-ui-chat): the
   // light-blue fill is --dsw-specific-bubble, not a neutral tint — the grey
   // version this rule used to paint over it was the tell that the token was made up.
-  '.mtt-files{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;min-width:0}',
-  '.mtt-file{display:inline-flex;align-items:center;gap:6px;max-width:100%;padding:4px 8px;border:.5px solid var(--mtt-line-strong);border-radius:var(--mtt-radius-sm);background:var(--mtt-surface-2);color:var(--mtt-fg);font-size:12px;line-height:16px}',
-  '.mtt-file svg,.mtt-file-icon{width:14px;height:14px;flex:none;display:block}',
-  '.mtt-file-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
-  '.mtt-file-meta{color:var(--mtt-fg-3);flex:none}',  '.mtt-bubble{max-width:min(calc(var(--dsh-chat-content-width,748px) * .702),82%);background:var(--mtt-bubble);border-radius:var(--dsw-radius-xl,16px);padding:10px 16px;color:var(--dsw-alias-label-primary,CanvasText);font:inherit;font-size:var(--dsh-content-font-size,14px);line-height:calc(22px + var(--dsh-content-font-delta,0px));min-width:0;white-space:pre-wrap;word-break:break-word}',
+  // The app's own file card, measurement for measurement: a 240px card, a 28px
+  // type icon, the name over "PDF 1.2 MB".
+  '.mtt-attach-row{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;max-width:100%}',
+  '.mtt-file-card{box-sizing:border-box;display:inline-flex;flex:0 0 240px;align-items:center;gap:10px;width:240px;min-height:64px;padding:8px 12px;border:.5px solid var(--dsw-alias-border-l2,#0000001f);border-radius:var(--dsw-radius-xl,16px);background:var(--dsw-specific-input-major,transparent)}',
+  '.mtt-file-icon{flex:none;width:28px;height:28px}',
+  '.mtt-file-content{display:flex;flex-direction:column;flex:1;min-width:0}',
+  '.mtt-file-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-primary,CanvasText);font-size:14px;font-weight:500;line-height:22px}',
+  '.mtt-file-meta{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-tertiary,#00000073);font-size:12px;line-height:15px}',  '.mtt-bubble{max-width:min(calc(var(--dsh-chat-content-width,748px) * .702),82%);background:var(--mtt-bubble);border-radius:var(--dsw-radius-xl,16px);padding:10px 16px;color:var(--dsw-alias-label-primary,CanvasText);font:inherit;font-size:var(--dsh-content-font-size,14px);line-height:calc(22px + var(--dsh-content-font-delta,0px));min-width:0;white-space:pre-wrap;word-break:break-word}',
   '.mtt-text{white-space:pre-wrap;word-break:break-word}',
   '.mtt-text-md{white-space:normal}',
   '.mtt-text-md p{margin:0 0 4px}',

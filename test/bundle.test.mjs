@@ -828,15 +828,24 @@ test('answers of one question are turns, switched by the ring', () => {
   // Deleting the answer on screen falls back to the answer before it.
   assert.match(source, /await mutate\(\{ action: 'run-select', sessionId: sessionId, turn: run\.key, active: previous \}\);/);
 });
-test('an attached file is drawn in the bubble', () => {
+test('an attached file is drawn as the app draws it', () => {
   const source = SOURCE;
   const { css } = applyToSlots();
   const sheet = Array.isArray(css) ? css.join('\n') : css;
   assert.match(source, /function fileParts\(content\) \{/);
-  assert.match(source, /h\(FileChip, \{ key: 'f' \+ String\(index\), name: file\.name, size: fileSize\(file\.bytes\) \}\)/);
+  assert.match(source, /h\(FileChip, \{ key: 'f' \+ String\(index\), name: file\.name, bytes: file\.bytes \}\)/);
   assert.match(source, /attachment\.name/);
-  assert.match(sheet, /\.mtt-files\{display:flex/);
-  assert.match(sheet, /\.mtt-file\{display:inline-flex/);
+  // Above the bubble, right-aligned, one card per file — the app's own layout.
+  assert.match(source, /className: 'mtt-attach-row'/);
+  assert.match(source, /\.compact: imageBlocks\.length > 1|compact: imageBlocks\.length > 1/);
+  assert.match(sheet, /\.mtt-attach-row\{display:flex;flex-wrap:wrap;justify-content:flex-end/);
+  // The card itself is measured like the app's: 240px, 28px type icon, name over
+  // "PDF 1.2 MB", and those two strings come from the app's own helpers.
+  assert.match(sheet, /\.mtt-file-card\{box-sizing:border-box;display:inline-flex;flex:0 0 240px;[^}]*min-height:64px/);
+  assert.match(sheet, /\.mtt-file-icon\{flex:none;width:28px;height:28px\}/);
+  assert.match(sheet, /var\(--dsw-alias-label-tertiary,#00000073\);font-size:12px;line-height:15px/);
+  assert.match(source, /typeof api\.fileSizeText === 'function'/);
+  assert.match(source, /typeof api\.fileExtension === 'function'/);
 });test('every colour in the sheet resolves through a theme alias', () => {
   const { css } = applyToSlots();
   const literals = [];

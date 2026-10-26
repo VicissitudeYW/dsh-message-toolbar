@@ -18,7 +18,18 @@ const markup = `
 <div class="mock">
   <div class="mtt-row">
     <div class="mtt-line">
-      <div class="mtt-bubble">帮我把深色模式适配一下，顺便看看用户消息的框为什么变灰了。</div>
+      <div class="mtt-stack">
+        <div class="mtt-attach-row">
+          <span class="mtt-file-card" title="CV.pdf">
+            <svg class="mtt-file-icon" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true"><path d="M7 3.5h9l5 5v16a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1v-20a1 1 0 0 1 1-1Z"></path><path d="M16 3.5v5h5"></path></svg>
+            <span class="mtt-file-content">
+              <span class="mtt-file-name">CV.pdf</span>
+              <span class="mtt-file-meta">PDF 248.6 KB</span>
+            </span>
+          </span>
+        </div>
+        <div class="mtt-bubble">帮我把深色模式适配一下，顺便看看用户消息的框为什么变灰了。</div>
+      </div>
     </div>
     <div class="mtt-actions">
       <span class="mtt-toolbar">
