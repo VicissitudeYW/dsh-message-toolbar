@@ -132,10 +132,12 @@ test('apply() injects styles and registers every slot', () => {
   }, {});
   assert.deepEqual(counts, {
     'conversation.chat.assistant-actions': 1,
-    'conversation.chat.node': 1,
     'conversation.chat.turnTail': 1,
     'conversation.view': 1,
   });
+  // A question keeps the app's own renderer: the toolbar is mounted into that
+  // row, so nothing is registered on the chat node at all.
+  assert.match(css.join('\n'), /\.mtt-user-bar\{/);
   // One turnTail entry: the answer card, which also draws a translation in
   // place — and it must stay above the deliverables card ("files changed"),
   // which registers at the default order 0.
@@ -147,11 +149,24 @@ test('apply() injects styles and registers every slot', () => {
   for (const entry of registrations) assert.equal(typeof entry.component, 'function');
 });
 
-test('the user bubble is shadowed at the lowest priority', () => {
+// The app already draws a question: bubble, attachment cards, reference chips,
+// images. Replacing that renderer meant re-implementing all of it (and losing
+// whatever ships next), so the plugin decorates the row instead — it mounts its
+// own toolbar into the row and lays an overlay over the bubble only when the
+// text holds markdown or is being edited.
+test('a question is decorated, not re-drawn', () => {
   const { registrations } = applyToSlots();
-  const node = registrations.find((r) => r.descriptor.name === 'conversation.chat.node');
-  assert.equal(node.descriptor.key, 'user');
-  assert.equal(node.descriptor.priority, -1);
+  assert.equal(registrations.filter((r) => r.descriptor.name === 'conversation.chat.node').length, 0);
+  assert.match(SOURCE, /function installUserRows\(\) \{/);
+  assert.match(SOURCE, /const USER_ROW_SELECTOR = '\[data-chat-flow-kind="user"\]';/);
+  // The row is found by the attributes the transcript already publishes, and the
+  // overlay stands inside the app's own stack, in front of its bubble.
+  assert.match(SOURCE, /row\.querySelector\('\[class\*="_userStack"\]'\)/);
+  assert.match(SOURCE, /row\.querySelector\('\[class\*="_bubble"\]'\)/);
+  assert.match(SOURCE, /dom\.createPortal\(overlay, slot\)/);
+  // Everything else is left alone: no attachment row, no file card of our own.
+  assert.doesNotMatch(SOURCE, /function FileChip\(/);
+  assert.doesNotMatch(SOURCE, /mtt-attach-row/);
 });
 
 // DSH's client-modules registry refuses to start when a package declares
@@ -366,7 +381,7 @@ test('a translation is drawn beside the original, block by block', () => {
   assert.match(source, /if \(left\.length === 0 \|\| right\.length === 0 \|\| left\.length !== right\.length\) \{/);
   // ...and being on screen is not a variant: only the logged body makes way.
   assert.match(source, /: showingVariant \? 'answer' : \(translation !== null \|\| liveTranslation !== null\) \? 'translate' : null,/);
-  assert.match(source, /\} else if \(mark\.mode === 'translate'\) \{/);
+  assert.match(source, /\} else if \(modes\.has\('translate'\)\) \{/);
 });
 
 // Picking a language is a command, not a setting — nothing is "currently
@@ -410,12 +425,11 @@ test('the plugin ships no settings panel', () => {
 // that a deleted turn needs to keep its restore affordance clickable.
 test('both rows offer a delete action and the sheet knows how to hide a turn', () => {
   const { registrations, css } = applyToSlots();
-  const node = registrations.find((r) => r.descriptor.name === 'conversation.chat.node');
-  const userTitles = titlesOf(expand(node.component({
-    sessionId: 'sess-1',
-    node: { data: { content: [{ type: 'text', text: 'hi' }], seq: 1 }, location: { kind: 'turn', turn: 1 } },
-  })));
-  assert.ok(userTitles.includes('Delete this message'), 'the user row must offer "delete this message"');
+  // The question's own toolbar is mounted into the row by the decorator, so its
+  // labels are read off the source rather than off a registration.
+  assert.match(SOURCE, /h\(ActionButton, \{\s*\n\s*title: t\('deleteMessage'\),/);
+  assert.match(SOURCE, /function UserRow\(props\) \{/);
+  assert.equal(registrations.filter((r) => r.descriptor.name === 'conversation.chat.node').length, 0);
 
   const assistantTitles = titlesOf(assistantToolbarNodes());
   assert.ok(assistantTitles.includes('Delete this answer'), 'the assistant row must offer "delete this answer"');
@@ -446,13 +460,11 @@ test('rows read Chinese when the document is Chinese', () => {
   globalThis.document.documentElement = { lang: 'zh-CN' };
   try {
     const { registrations } = applyToSlots();
-    const node = registrations.find((r) => r.descriptor.name === 'conversation.chat.node');
-    const titles = titlesOf(expand(node.component({
-      sessionId: 'sess-1',
-      node: { data: { content: [{ type: 'text', text: 'hi' }], seq: 1 }, location: { kind: 'turn', turn: 1 } },
-    })));
-    assert.ok(titles.includes('删除这条消息'), 'a Chinese document gets Chinese copy: ' + titles.join(' | '));
-    assert.ok(titles.includes('编辑消息'), 'the edit action is localized too: ' + titles.join(' | '));
+    const titles = titlesOf(assistantToolbarNodes());
+    assert.ok(titles.includes('删除这条回答'), 'a Chinese document gets Chinese copy: ' + titles.join(' | '));
+    assert.ok(titles.includes('编辑这条回答'), 'the edit action is localized too: ' + titles.join(' | '));
+    // The question's own toolbar reads the same dictionary.
+    assert.match(SOURCE, /t\('deleteMessage'\)/);
   } finally {
     delete globalThis.document.documentElement;
   }
@@ -676,7 +688,9 @@ test('regenerating from the question adds another answer, like the answer row', 
   assert.equal(source.split('h(RevertConfirm, {').length - 1, 2);
   // The native in-place path is still there for API clients, and the replayed
   // prompt of such a turn never shows up as a second question of its own.
-  assert.match(source, /if \(rows\.prompt\) return null;/);
+  // The replayed prompt's own row leaves the flow through the stylesheet now.
+  assert.match(source, /useHideRule\('prompt:' \+ turn, turn, promptGone \? 'prompt' : null\);/);
+  assert.match(source, /\[data-chat-flow-kind="user"\]\[data-chat-turn="' \+ turn \+ '"\]\{display:none\}/);
   // Its rail mark is hidden by ladder position, not by dropping the entry (that
   // would shift every index after it).
   assert.match(source, /gonePrompts\.length === 0 \? goneTurns : goneTurns\.concat\(gonePrompts\)/);
@@ -700,7 +714,7 @@ test('a deleted answer takes its whole answer side with it', () => {
       'a deleted answer must hide the ' + kind + ' row too',
     );
   }
-  assert.match(source, /mark\.mode === 'deleted'/);
+  assert.match(source, /modes\.has\('deleted'\)/);
   // ...but only while nothing of ours stands in its place: a fresh answer brings the
   // answer area (and the tail row this card lives in) back.
   assert.match(source, /const answerGone = hidden\.answer && !showingVariant;/);
@@ -797,10 +811,13 @@ test('a question is drawn by the same renderer as an answer', () => {
   const sheet = Array.isArray(css) ? css.join('\n') : css;
   // What the user typed is text like any other: a formula between dollar signs
   // must be painted, not printed as source.
-  assert.match(source, /className: 'mtt-text mtt-text-md' \}, h\(AnswerBody, \{ text: shownText \}\)/);
+  assert.match(source, /className: 'mtt-bubble mtt-bubble-md' \}, h\(AnswerBody, \{ text: shownText \}\)/);
   assert.match(source, /const override = promptOverride\(state, turn\);/);
-  assert.match(sheet, /\.mtt-text-md\{white-space:normal\}/);
-  assert.match(sheet, /\.mtt-text-md p\{margin:0 0 4px\}/);
+  // Only a question that actually holds markdown gets the overlay; an ordinary
+  // one is left to the app, which is the whole point of decorating.
+  assert.match(source, /const wantsMarkdown = override !== null \|\| markdownish\(logged\);/);
+  assert.match(source, /function markdownish\(text\) \{/);
+  assert.match(sheet, /\.mtt-bubble-md\{white-space:normal/);
 });
 test('editing a question saves the text and answers nothing', () => {
   const source = SOURCE;
@@ -828,24 +845,17 @@ test('answers of one question are turns, switched by the ring', () => {
   // Deleting the answer on screen falls back to the answer before it.
   assert.match(source, /await mutate\(\{ action: 'run-select', sessionId: sessionId, turn: run\.key, active: previous \}\);/);
 });
-test('an attached file is drawn as the app draws it', () => {
-  const source = SOURCE;
+// A PDF sent with a question is drawn by the app, so it keeps the app's card —
+// icon, name, "PDF 1.2 MB" — and whatever the app adds to it next. The plugin
+// only steps the app's own action row aside so the two toolbars never show.
+test('a question keeps the attachment cards the app draws', () => {
   const { css } = applyToSlots();
   const sheet = Array.isArray(css) ? css.join('\n') : css;
-  assert.match(source, /function fileParts\(content\) \{/);
-  assert.match(source, /h\(FileChip, \{ key: 'f' \+ String\(index\), name: file\.name, bytes: file\.bytes \}\)/);
-  assert.match(source, /attachment\.name/);
-  // Above the bubble, right-aligned, one card per file — the app's own layout.
-  assert.match(source, /className: 'mtt-attach-row'/);
-  assert.match(source, /\.compact: imageBlocks\.length > 1|compact: imageBlocks\.length > 1/);
-  assert.match(sheet, /\.mtt-attach-row\{display:flex;flex-wrap:wrap;justify-content:flex-end/);
-  // The card itself is measured like the app's: 240px, 28px type icon, name over
-  // "PDF 1.2 MB", and those two strings come from the app's own helpers.
-  assert.match(sheet, /\.mtt-file-card\{box-sizing:border-box;display:inline-flex;flex:0 0 240px;[^}]*min-height:64px/);
-  assert.match(sheet, /\.mtt-file-icon\{flex:none;width:28px;height:28px\}/);
-  assert.match(sheet, /var\(--dsw-alias-label-tertiary,#00000073\);font-size:12px;line-height:15px/);
-  assert.match(source, /typeof api\.fileSizeText === 'function'/);
-  assert.match(source, /typeof api\.fileExtension === 'function'/);
+  assert.match(sheet, /\[data-mtt-row\] \[class\*="_actions"\]\{display:none\}/);
+  assert.match(SOURCE, /row\.setAttribute\('data-mtt-row', '1'\)/);
+  assert.match(SOURCE, /bar\.className = 'mtt-user-bar'/);
+  assert.doesNotMatch(SOURCE, /mtt-file-card/);
+  assert.doesNotMatch(SOURCE, /fileSizeText\(props\.bytes\)/);
 });test('every colour in the sheet resolves through a theme alias', () => {
   const { css } = applyToSlots();
   const literals = [];

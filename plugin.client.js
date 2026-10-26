@@ -369,74 +369,13 @@ function useSessionList() {
 
 /* ----------------------------------------------------------------- utils -- */
 
-function contentText(content) {
-  if (!Array.isArray(content)) return '';
-  let out = '';
-  for (let i = 0; i < content.length; i++) {
-    const block = content[i];
-    if (block && block.type === 'text' && typeof block.text === 'string') {
-      out += (out ? '\n' : '') + block.text;
-    }
-  }
-  return out;
-}
 
-function imageParts(content) {
-  if (!Array.isArray(content)) return [];
-  return content.filter(function (block) { return block && block.type === 'image'; });
-}
 
-function imageCount(content) {
-  return imageParts(content).length;
-}
 
 /** The file attachments of one message: `{type:'file', attachment:{name, bytes}}`. */
-function fileParts(content) {
-  if (!Array.isArray(content)) return [];
-  return content
-    .filter(function (block) { return block && block.type === 'file'; })
-    .map(function (block) {
-      const attachment = block.attachment || {};
-      return {
-        name: typeof attachment.name === 'string' && attachment.name.length > 0 ? attachment.name : 'file',
-        bytes: typeof attachment.bytes === 'number' ? attachment.bytes : 0,
-      };
-    });
-}
 
 /** Bytes as the app's own file cards spell them, without needing its helpers. */
-function fileSize(bytes) {
-  if (typeof bytes !== 'number' || bytes <= 0) return '';
-  if (bytes < 1024) return bytes + ' B';
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(bytes < 10240 ? 1 : 0) + ' KB';
-  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-}
 
-/**
- * One attached file, drawn like the app draws it: the type icon when the
- * primitives are there, the name, and the size. An attachment the log knows
- * about must never look like it vanished on the way out.
- */
-function FileChip(props) {
-  const api = clientPrimitives();
-  const icon = api !== null && typeof api.FileTypeIcon === 'function'
-    ? h(api.FileTypeIcon, { path: props.name, className: 'mtt-file-icon' })
-    : null;
-  // The same two strings the app puts under a file name: its own extension
-  // helper and its own byte formatter, so a card reads "PDF 1.2 MB" here too.
-  const extension = api !== null && typeof api.fileExtension === 'function'
-    ? String(api.fileExtension(props.name) || '').toUpperCase().slice(0, 8)
-    : '';
-  const size = api !== null && typeof api.fileSizeText === 'function'
-    ? String(api.fileSizeText(props.bytes) || '')
-    : fileSize(props.bytes);
-  const meta = [extension, size].filter(Boolean).join(' ');
-  return h('span', { className: 'mtt-file-card', title: props.name },
-    icon,
-    h('span', { className: 'mtt-file-content' },
-      h('span', { className: 'mtt-file-name' }, props.name),
-      meta === '' ? null : h('span', { className: 'mtt-file-meta' }, meta)));
-}
 
 function clip(text, max) {
   const value = String(text || '');
@@ -898,31 +837,42 @@ const nativeHideStyle = {
   render() {
     const node = this.ensure();
     if (!node) return;
+    // One turn can carry more than one mark — a replayed prompt and the answer
+    // it replaced, say — so the marks of a turn are a set, not a single mode.
     const turns = new Map();
     this.marks.forEach(function (mark) {
-      const previous = turns.get(mark.turn);
-      if (previous !== undefined && previous.mode === 'turn') return;
-      turns.set(mark.turn, { mode: mark.mode });
+      const set = turns.get(mark.turn) || new Set();
+      set.add(mark.mode);
+      turns.set(mark.turn, set);
     });
     const numbers = Array.from(turns.keys()).sort(function (a, b) { return a - b; });
     const key = numbers.map(function (turn) {
-      const mark = turns.get(turn);
-      return turn + ':' + mark.mode;
+      return turn + ':' + Array.from(turns.get(turn)).sort().join('+');
     }).join(',');
     if (key === this.key) return;
     this.key = key;
     const css = [];
     for (let i = 0; i < numbers.length; i++) {
       const turn = numbers[i];
-      const mark = turns.get(turn);
-      if (mark.mode === 'turn') {
+      const modes = turns.get(turn);
+      if (modes.has('turn')) {
         // Gone means gone: the whole turn leaves the flow, its own tail row
         // included — deleting is a view-level removal with nothing left behind.
         // The rail is handled by the navigation patch, not here: a mark carries
         // only its position (`data-index`) in the ladder, so hiding by position
         // would hit the wrong turn as soon as one is removed.
         css.push('[data-chat-turn="' + turn + '"]{display:none}');
-      } else if (mark.mode === 'deleted') {
+      } else if (modes.has('prompt')) {
+        // A prompt the plugin replayed to get a real answer out of the agent: it
+        // is in the log (the log cannot rewrite itself) but must not read as a
+        // second, identical question above the answer it produced.
+        css.push('[data-chat-flow-kind="user"][data-chat-turn="' + turn + '"]{display:none}');
+        if (modes.has('deleted')) {
+          for (let k = 0; k < DELETED_ANSWER_KINDS.length; k++) {
+            css.push('[data-chat-flow-kind="' + DELETED_ANSWER_KINDS[k] + '"][data-chat-turn="' + turn + '"]{display:none}');
+          }
+        }
+      } else if (modes.has('deleted')) {
         // "Delete this answer" has to leave nothing of that answer behind: not the
         // body, not the process card, not the tool cards — and not the tail row
         // either, because the tail row is what still carries the action row (and
@@ -931,7 +881,7 @@ const nativeHideStyle = {
         for (let k = 0; k < DELETED_ANSWER_KINDS.length; k++) {
           css.push('[data-chat-flow-kind="' + DELETED_ANSWER_KINDS[k] + '"][data-chat-turn="' + turn + '"]{display:none}');
         }
-      } else if (mark.mode === 'translate') {
+      } else if (modes.has('translate')) {
         // A translation is drawn beside the answer, so only the logged body makes
         // way for it — the process card and the tool cards of that answer are
         // still this turn's own record and stay visible.
@@ -1558,6 +1508,19 @@ function clientReactDom() {
   return reactDomCache;
 }
 
+// Mounting one React root per decorated row needs the client entry point: a
+// `createRoot` is not on `react-dom` itself.
+let reactDomClientCache;
+function clientReactDomClient() {
+  if (reactDomClientCache !== undefined) return reactDomClientCache;
+  try {
+    reactDomClientCache = require('react-dom/client');
+  } catch (e) {
+    reactDomClientCache = null;
+  }
+  return reactDomClientCache;
+}
+
 function Popover(props) {
   const anchor = props.anchor;
   const [place, setPlace] = React.useState(null);
@@ -2173,6 +2136,13 @@ function AnswerCard(props) {
         : showingVariant ? 'answer' : (translation !== null || liveTranslation !== null) ? 'translate' : null,
   );
 
+  // A prompt the plugin replayed to get a real answer out of the agent is in the
+  // log, but it must not read as a second, identical question above the answer it
+  // produced: the stylesheet takes that row out of the flow. It is a mark of its
+  // own, so a turn can be prompt-hidden and answer-visible at the same time.
+  const promptGone = hidden.prompt === true;
+  useHideRule('prompt:' + turn, turn, promptGone ? 'prompt' : null);
+
   // The visible answer of a group is the app's own: native rows, native
   // streaming, native process card. Nothing to add here, and nothing of ours to
   // hide: the turn is exactly as the app drew it the first time.
@@ -2549,6 +2519,9 @@ function installRailSync(ctx) {
   const cache = new WeakMap();
   const wrapped = function (source) {
     const real = original.call(conversation, source);
+    // The chat view tells us which session it draws: the row decorator needs it,
+    // because a flow row carries a turn number but no session id.
+    if (typeof source === 'string') activeSessionId = source;
     if (real === null || typeof real !== 'object') return real;
     const existing = cache.get(real);
     if (existing !== undefined) return existing;
@@ -2578,22 +2551,140 @@ function installRailSync(ctx) {
   return function () { conversation.binding = original; };
 }
 
+/* ----------------------------------------------------------- user rows -- */
+
+/**
+ * A question is drawn by the app as plain text. Everything that reads like a
+ * formula, a fence, a list or a table is handed to the markdown renderer
+ * instead — but only then, so an ordinary question stays exactly as the app
+ * draws it, attachments and all.
+ */
+function markdownish(text) {
+  if (typeof text !== 'string' || text === '') return false;
+  return /\$[^\n$]+\$|\\(|\\)|\[|\\\[|\]|\\.|\*\*|__|`|```|~~~|^\s{0,3}#{1,6}\s|^\s{0,3}[-*+]\s|^\s{0,3}\d+[.)]\s|^\s{0,3}>\s|^\s{0,3}\|.*\|/m.test(text) || /\n\s*\n/.test(text);
+}
+
+/** The session the chat view is bound to, as told by `conversation.binding`. */
+let activeSessionId = null;
+
+const USER_ROW_SELECTOR = '[data-chat-flow-kind="user"]';
+
+/**
+ * The app already draws a question — bubble, attachment cards, reference chips,
+ * image gallery. All that is missing is a toolbar, so instead of replacing that
+ * renderer this decorator walks the flow and mounts one small React root per row
+ * into the row itself, plus a slot inside the row's stack where an overlay (the
+ * editor, or the markdown copy of a question the app can only draw as text) can
+ * stand in front of the bubble.
+ */
+function installUserRows() {
+  const dom = clientReactDom();
+  const client = clientReactDomClient();
+  const createRoot = client === null || typeof client.createRoot !== 'function'
+    ? (dom !== null && typeof dom.createRoot === 'function' ? dom.createRoot : null)
+    : client.createRoot;
+  if (createRoot === null) return undefined;
+  if (typeof document === 'undefined' || document === null) return undefined;
+
+  const mounted = new Map();
+  let frame = 0;
+
+  function drop(row) {
+    const entry = mounted.get(row);
+    if (entry === undefined) return;
+    mounted.delete(row);
+    try { entry.root.unmount(); } catch (e) {}
+    entry.bar.remove();
+    entry.slot.remove();
+    row.removeAttribute('data-mtt-row');
+  }
+
+  function decorate(row) {
+    const raw = row.getAttribute('data-chat-turn');
+    const turn = raw === null ? NaN : Number(raw);
+    if (!Number.isFinite(turn)) return;
+    const sessionId = activeSessionId;
+    const existing = mounted.get(row);
+    if (existing !== undefined) {
+      if (existing.turn === turn && existing.sessionId === sessionId) return;
+      drop(row);
+    }
+    const stack = row.querySelector('[class*="_userStack"]');
+    if (stack === null) return;
+    const bubble = row.querySelector('[class*="_bubble"]');
+    const bar = document.createElement('div');
+    bar.className = 'mtt-user-bar';
+    const slot = document.createElement('div');
+    slot.className = 'mtt-user-slot';
+    stack.appendChild(slot);
+    row.appendChild(bar);
+    row.setAttribute('data-mtt-row', '1');
+    const root = createRoot(bar);
+    mounted.set(row, { root: root, bar: bar, slot: slot, turn: turn, sessionId: sessionId });
+    root.render(h(UserRow, { sessionId: sessionId, turn: turn, slot: slot, bubble: bubble }));
+  }
+
+  function scan() {
+    frame = 0;
+    if (typeof document === 'undefined' || document === null) return;
+    mounted.forEach(function (entry, row) {
+      if (row.isConnected !== true) drop(row);
+    });
+    const rows = document.querySelectorAll(USER_ROW_SELECTOR);
+    for (let index = 0; index < rows.length; index += 1) decorate(rows[index]);
+  }
+
+  function schedule() {
+    if (frame !== 0) return;
+    frame = 1;
+    // A timer, not requestAnimationFrame: a window that is not in front (a
+    // background tab, a headless check) throttles animation frames to never.
+    // The flag is cleared whatever happens, or one bad pass stops every later
+    // one.
+    setTimeout(function () {
+      frame = 0;
+      run('observe');
+    }, 0);
+  }
+
+  let lastRowError = null;
+  // One bad pass must not stop the later ones, and must not surface as an
+  // unhandled error on a timer.
+  const run = function () {
+    try {
+      scan();
+    } catch (error) {
+      lastRowError = error;
+    }
+  };
+  let observer = null;
+  if (typeof MutationObserver === 'function') {
+    observer = new MutationObserver(function () { schedule(); });
+    observer.observe(document.body, { childList: true, subtree: true });
+  }
+  run('install');
+  setTimeout(function () { run('tick0'); }, 0);
+  setTimeout(function () { run('tick300'); }, 300);
+
+  return function () {
+    observer.disconnect();
+    const rows = Array.from(mounted.keys());
+    rows.forEach(drop);
+  };
+}
+
 /* --------------------------------------------------------------- components -- */
 
 /**
  * The user bubble. Replaces the native renderer when no other plugin shadows
  * it (registered with priority -1; a collision degrades to "they win").
  */
-function UserMessageView(props) {
-  const node = props.node;
-  const data = node.data || {};
-  const text = contentText(data.content);
-  const images = imageCount(data.content);
-  const imageBlocks = imageParts(data.content);
-  const files = fileParts(data.content);
-  const sessionId = props.sessionId !== undefined ? props.sessionId : node.sessionId;
-  const rawTurn = node.location ? node.location.turn : undefined;
-  const turn = typeof rawTurn === 'number' ? rawTurn : (rawTurn && typeof rawTurn.turn === 'number' ? rawTurn.turn : undefined);
+function UserRow(props) {
+  const sessionId = props.sessionId;
+  const turn = props.turn;
+  const slot = props.slot;
+  const bubble = props.bubble;
+  const dom = clientReactDom();
 
   const prefs = usePrefs();
   const list = useSessionList();
@@ -2606,9 +2697,12 @@ function UserMessageView(props) {
   const ring = typeof turn === 'number' ? ringFor(versions, sessionId, turn) : null;
   const self = versions && versions.find(function (v) { return v.sessionId === sessionId; });
   const isVersion = !!(self && self.parentSessionId);
-  // What the row reads: the question as logged, unless the reader rewrote it.
+  // The question as it was asked, unless the reader rewrote it.
+  const info = turnInfo(state, turn);
+  const logged = info !== undefined && typeof info.text === 'string' ? info.text : '';
   const override = promptOverride(state, turn);
-  const shownText = override !== null ? override.text : text;
+  const shownText = override !== null ? override.text : logged;
+  const wantsMarkdown = override !== null || markdownish(logged);
 
   const [editing, setEditing] = React.useState(false);
   const [draft, setDraft] = React.useState('');
@@ -2618,11 +2712,8 @@ function UserMessageView(props) {
   const [confirmDelete, setConfirmDelete] = React.useState(false);
   const [confirmHide, setConfirmHide] = React.useState(false);
   const [popUp, setPopUp] = React.useState(false);
-  // Anchors for the portalled confirm boxes: the popover measures the button it
-  // belongs to instead of sitting inside the row (where the row would cover it).
   const hideAnchor = React.useRef(null);
   const cardAnchor = React.useRef(null);
-  // A turn whose answer edited files asks before anything is written back.
   const [revert, setRevert] = React.useState(null);
   const revertAnchor = React.useRef(null);
   const [toastNode, showToast] = useToast();
@@ -2642,8 +2733,7 @@ function UserMessageView(props) {
   }
 
   // Saving a question rewrites nothing but the row's own text: the answer that
-  // is already there stays, the conversation does not move, and no model is
-  // called. Answering again is the toolbar's job.
+  // is already there stays, the conversation does not move, no model is called.
   async function submit() {
     if (draft.trim() === '' || typeof turn !== 'number') { setEditing(false); return; }
     setBusy(true);
@@ -2659,19 +2749,12 @@ function UserMessageView(props) {
     setBusy(false);
   }
 
-  // "Regenerate" from a user bubble is the same action as the one on the answer
-  // row: it adds another answer to this turn, in place, so a second conversation
-  // never appears and the ring shows `1/2` with the earlier answer still reachable.
-  // Editing the prompt is the branch path — the logged prompt itself cannot be
-  // rewritten.
-  //
-  // That holds whether or not an answer is on screen: a deleted answer is simply
-  // the first entry of the ring that the new one is added to, which is why both
-  // rows behave alike.
-  //
-  // Unless the answer being replaced edited files: a text-only variant cannot
-  // run tools, and the edits would still be on disk, so the row asks to undo them
-  // and then answers with a real turn (see `rerunAfterRevert`).
+  // "Regenerate" from a question is the same action as the one on the answer
+  // row: another answer to this turn, in place, so a second conversation never
+  // appears and the ring shows 1/2 with the earlier answer still reachable.
+  // Unless the answer being replaced edited files: a text-only variant cannot run
+  // tools and the edits would still be on disk, so the row asks to undo them and
+  // then answers with a real turn (see rerunAfterRevert).
   async function retry() {
     if (typeof turn !== 'number') return;
     setError(null);
@@ -2682,9 +2765,6 @@ function UserMessageView(props) {
     }
     setBusy(true);
     try {
-      // One behaviour for both rows: the question is asked again, by the agent,
-      // in this session. The fresh answer is a turn like any other, and the one
-      // it replaces waits one `‹ ›` away.
       await rerunTurnInPlace({
         sessionId: sessionId,
         turn: turn,
@@ -2740,17 +2820,14 @@ function UserMessageView(props) {
   }
 
   // "Delete this message" removes the turn from the transcript view only: the
-  // log is append-only, so the row is hidden here and the tail row offers the
-  // undo. Handy right after a stalled turn left "continue" prompts behind.
+  // log is append-only, so the row is hidden here.
   async function hideTurn() {
     setConfirmHide(false);
     if (typeof turn !== 'number') return;
     setBusy(true);
     setError(null);
     try {
-      await hideMutate({
-        action: 'hide', sessionId: sessionId, turn: turn, scope: 'turn', hidden: true,
-      });
+      await hideMutate({ action: 'hide', sessionId: sessionId, turn: turn, scope: 'turn', hidden: true });
       showToast(t('turnHidden'));
     } catch (e) {
       showToast(failureText(e), 'error');
@@ -2758,123 +2835,108 @@ function UserMessageView(props) {
     setBusy(false);
   }
 
-  if (editing) {
-    return h('div', { className: 'mtt-row mtt-editing' },
-      h('div', { className: 'mtt-editor' },
-        h('textarea', {
-          className: 'mtt-textarea',
-          value: draft,
-          autoFocus: true,
-          rows: Math.min(10, Math.max(3, draft.split('\n').length + 1)),
-          onChange: function (e) { setDraft(e.target.value); },
-          onKeyDown: function (e) {
-            if (e.key === 'Escape') { e.preventDefault(); setEditing(false); }
-            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); submit(); }
-          },
-        }),
-        images > 0 ? h('div', { className: 'mtt-hint' }, t('imagesKept', { count: images })) : null,
-        h(ErrorChip, { error: error }),
-        h('div', { className: 'mtt-editor-actions' },
-          h('button', { type: 'button', className: 'mtt-btn', disabled: busy, onClick: function () { setEditing(false); } }, t('cancel')),
-          h('button', {
-            type: 'button', className: 'mtt-btn mtt-btn-primary',
-            disabled: busy || draft.trim() === '',
-            onClick: submit,
-          }, busy ? t('saving') : t('save')),
-          h('span', { className: 'mtt-hint' }, t('editSaveHint')))));
-  }
+  // The overlay stands where the bubble stands: the editor, or the markdown copy
+  // of a question the app can only draw as text. While it shows, the app's own
+  // bubble is hidden — the attachment cards above it are never touched.
+  const overlay = editing
+    ? h('div', { className: 'mtt-editor mtt-editor-inline' },
+      h('textarea', {
+        className: 'mtt-textarea',
+        value: draft,
+        autoFocus: true,
+        rows: Math.min(12, Math.max(3, draft.split('\n').length + 1)),
+        onChange: function (e) { setDraft(e.target.value); },
+        onKeyDown: function (e) {
+          if (e.key === 'Escape') { e.preventDefault(); setEditing(false); }
+          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); submit(); }
+        },
+      }),
+      h(ErrorChip, { error: error }),
+      h('div', { className: 'mtt-editor-actions' },
+        h('button', { type: 'button', className: 'mtt-btn', disabled: busy, onClick: function () { setEditing(false); } }, t('cancel')),
+        h('button', {
+          type: 'button', className: 'mtt-btn mtt-btn-primary',
+          disabled: busy || draft.trim() === '',
+          onClick: submit,
+        }, busy ? t('saving') : t('save')),
+        h('span', { className: 'mtt-hint' }, t('editSaveHint'))))
+    : wantsMarkdown && shownText !== ''
+      ? h('div', { className: 'mtt-bubble mtt-bubble-md' }, h(AnswerBody, { text: shownText }))
+      : null;
 
-  // A prompt we replayed to get a real answer out of the agent stays in the log
-  // (the log cannot rewrite itself) but never shows up as a second question: the
-  // turn it opened is marked as a prompt to hide, and this row is that turn's
-  // prompt, so it renders nothing at all.
-  const rows = hiddenOf(state, turn);
-  if (rows.prompt) return null;
+  const covered = overlay !== null;
+  React.useEffect(function () {
+    if (bubble === null || bubble === undefined) return undefined;
+    bubble.style.display = covered ? 'none' : '';
+    return function () { bubble.style.display = ''; };
+  }, [bubble, covered]);
 
-  return h('div', { className: 'mtt-row', 'data-turn': turn, 'data-session': sessionId },
-    h('div', { className: 'mtt-line' },
-      h('div', { className: 'mtt-stack' },
-        // Attachments sit above the bubble, right-aligned, exactly where the app
-        // puts them: a card of its own, not a line of text inside the message.
-        // What a reader sent must never look like it went missing.
-        files.length > 0 || imageBlocks.length > 0 || images > 0
-          ? h('div', { className: 'mtt-attach-row' },
-            files.map(function (file, index) {
-              return h(FileChip, { key: 'f' + String(index), name: file.name, bytes: file.bytes });
-            }),
-            imageBlocks.length > 0 && typeof props.renderMessageImages === 'function'
-              ? props.renderMessageImages({ images: imageBlocks, align: 'end', compact: imageBlocks.length > 1 })
-              : (images > 0 ? h('div', { className: 'mtt-hint' }, t('imagesKept', { count: images })) : null))
-          : null,
-        h('div', { className: 'mtt-bubble' },
-          // The app's own text renderer, the same one an answer uses: a formula the
-          // user typed between dollar signs comes out as a formula, not as source.
-          shownText !== ''
-            ? h('div', { className: 'mtt-text mtt-text-md' }, h(AnswerBody, { text: shownText }))
-            : null))),
-    h('div', { className: 'mtt-actions' },
-      h(VersionRing, { ring: ring }),
-      isVersion && self && self.model ? h(ModelChip, { model: self.model, title: t('modelCard') }) : null,
+  const bar = h('div', { className: 'mtt-actions' },
+    h(VersionRing, { ring: ring }),
+    isVersion && self && self.model ? h(ModelChip, { model: self.model, title: t('modelCard') }) : null,
+    h(ActionButton, {
+      title: copied ? t('copied') : t('copy'),
+      onClick: copy,
+      act: 'copy',
+    }, copied ? h(CheckIcon) : h(CopyIcon)),
+    h(ActionButton, { title: t('edit'), disabled: !canEdit, onClick: beginEdit, act: 'edit' }, h(PencilIcon)),
+    h('span', { className: 'mtt-anchor', ref: revertAnchor },
       h(ActionButton, {
-        title: copied ? t('copied') : t('copy'),
-        onClick: copy,
-      }, copied ? h(CheckIcon) : h(CopyIcon)),
-      h(ActionButton, { title: t('edit'), disabled: !canEdit, onClick: beginEdit, act: 'edit' }, h(PencilIcon)),
-      h('span', { className: 'mtt-anchor', ref: revertAnchor },
-        h(ActionButton, {
-          title: t('regenerate'), disabled: !canEdit || busy, onClick: retry, act: 'retry',
-          active: revert !== null,
-        }, h(RetryIcon))),
-      h(Popover, { open: revert !== null, anchor: revertAnchor, up: popUp },
-        revert === null ? null : h(RevertConfirm, {
-          plan: revert.plan,
-          busy: busy,
-          onCancel: function () { setRevert(null); },
-          onConfirm: confirmRevert,
-        })),
-      // Delete this turn from the transcript view (the log keeps every event).
-      // A version card is an entry of the version family rather than a row of
-      // this transcript, so it gets the card delete below instead of both: one
-      // trash per row, never two.
-      isVersion
-        ? null
-        : h('span', { className: 'mtt-menu-wrap' },
-          h('span', { className: 'mtt-anchor', ref: hideAnchor },
-            h(ActionButton, {
-              title: t('deleteMessage'),
-              disabled: busy || typeof turn !== 'number',
-              active: confirmHide,
-              act: 'delete-turn',
-              onClick: function (event) {
-                setPopUp(popupOpensUp(event));
-                setConfirmHide(!confirmHide);
-              },
-            }, h(TrashIcon))),
-          h(Popover, { open: confirmHide, anchor: hideAnchor, up: popUp },
-            h('div', { className: 'mtt-pop-title' }, t('deleteMessageConfirm')),
-            h('div', { className: 'mtt-pop-actions' },
-              h('button', { type: 'button', className: 'mtt-btn', onClick: function () { setConfirmHide(false); } }, t('cancel')),
-              h('button', { type: 'button', className: 'mtt-btn mtt-btn-danger', onClick: hideTurn }, t('delete'))))),
-      // No translate action on user bubbles: the bubbled prompt is already the
-      // language the user wrote in, and the useful direction to read is the
-      // answer's. Translation lives on assistant cards only.
-      isVersion
-        ? h('span', { className: 'mtt-menu-wrap' },
-          h('span', { className: 'mtt-anchor', ref: cardAnchor },
-            h(ActionButton, {
-              title: t('deleteCard'), disabled: busy, active: confirmDelete, act: 'delete-card',
-              onClick: function (event) {
-                setPopUp(popupOpensUp(event));
-                setConfirmDelete(!confirmDelete);
-              },
-            }, h(TrashIcon))),
-          h(Popover, { open: confirmDelete, anchor: cardAnchor, up: popUp },
-            h('div', { className: 'mtt-pop-title' }, t('deleteCardConfirm')),
-            h('div', { className: 'mtt-pop-actions' },
-              h('button', { type: 'button', className: 'mtt-btn', onClick: function () { setConfirmDelete(false); } }, t('cancel')),
-              h('button', { type: 'button', className: 'mtt-btn mtt-btn-danger', onClick: removeVersion }, t('delete')))))
-        : null),
-    h(ErrorChip, { error: error }),
+        title: t('regenerate'), disabled: !canEdit || busy, onClick: retry, act: 'retry',
+        active: revert !== null,
+      }, h(RetryIcon))),
+    h(Popover, { open: revert !== null, anchor: revertAnchor, up: popUp },
+      revert === null ? null : h(RevertConfirm, {
+        plan: revert.plan,
+        busy: busy,
+        onCancel: function () { setRevert(null); },
+        onConfirm: confirmRevert,
+      })),
+    // One trash per row: a version card is an entry of the version family rather
+    // than a row of this transcript, so it deletes the card instead.
+    isVersion
+      ? null
+      : h('span', { className: 'mtt-menu-wrap' },
+        h('span', { className: 'mtt-anchor', ref: hideAnchor },
+          h(ActionButton, {
+            title: t('deleteMessage'),
+            disabled: busy || typeof turn !== 'number',
+            active: confirmHide,
+            act: 'delete-turn',
+            onClick: function (event) {
+              setPopUp(popupOpensUp(event));
+              setConfirmHide(!confirmHide);
+            },
+          }, h(TrashIcon))),
+        h(Popover, { open: confirmHide, anchor: hideAnchor, up: popUp },
+          h('div', { className: 'mtt-pop-title' }, t('deleteMessageConfirm')),
+          h('div', { className: 'mtt-pop-actions' },
+            h('button', { type: 'button', className: 'mtt-btn', onClick: function () { setConfirmHide(false); } }, t('cancel')),
+            h('button', { type: 'button', className: 'mtt-btn mtt-btn-danger', onClick: hideTurn }, t('delete'))))),
+    // No translate action on a question: it is already in the language the reader
+    // wrote it in, and the useful direction is the answer's.
+    isVersion
+      ? h('span', { className: 'mtt-menu-wrap' },
+        h('span', { className: 'mtt-anchor', ref: cardAnchor },
+          h(ActionButton, {
+            title: t('deleteCard'), disabled: busy, active: confirmDelete, act: 'delete-card',
+            onClick: function (event) {
+              setPopUp(popupOpensUp(event));
+              setConfirmDelete(!confirmDelete);
+            },
+          }, h(TrashIcon))),
+        h(Popover, { open: confirmDelete, anchor: cardAnchor, up: popUp },
+          h('div', { className: 'mtt-pop-title' }, t('deleteCardConfirm')),
+          h('div', { className: 'mtt-pop-actions' },
+            h('button', { type: 'button', className: 'mtt-btn', onClick: function () { setConfirmDelete(false); } }, t('cancel')),
+            h('button', { type: 'button', className: 'mtt-btn mtt-btn-danger', onClick: removeVersion }, t('delete')))))
+      : null);
+
+  return h(React.Fragment, null,
+    bar,
+    slot !== null && slot !== undefined && dom !== null && typeof dom.createPortal === 'function'
+      ? dom.createPortal(overlay, slot)
+      : null,
     toastNode);
 }
 
@@ -3518,24 +3580,21 @@ const CSS = [
   '.mtt-row.mtt-editing{align-items:stretch}',
   '.mtt-line{display:flex;justify-content:flex-end;width:100%;min-width:0}',
   // The app's user row: attachments and bubble stack right-aligned, 8px apart.
-  '.mtt-stack{display:flex;flex-direction:column;align-items:flex-end;gap:8px;min-width:0;max-width:min(calc(var(--dsh-chat-content-width,748px) * .702),82%)}',
   // Exactly DSH's own user bubble (Sixlwa_bubble in dsh-client-ui-chat): the
   // light-blue fill is --dsw-specific-bubble, not a neutral tint — the grey
   // version this rule used to paint over it was the tell that the token was made up.
   // The app's own file card, measurement for measurement: a 240px card, a 28px
   // type icon, the name over "PDF 1.2 MB".
-  '.mtt-attach-row{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;max-width:100%}',
-  '.mtt-file-card{box-sizing:border-box;display:inline-flex;flex:0 0 240px;align-items:center;gap:10px;width:240px;min-height:64px;padding:8px 12px;border:.5px solid var(--dsw-alias-border-l2,#0000001f);border-radius:var(--dsw-radius-xl,16px);background:var(--dsw-specific-input-major,transparent)}',
-  '.mtt-file-icon{flex:none;width:28px;height:28px}',
-  '.mtt-file-content{display:flex;flex-direction:column;flex:1;min-width:0}',
-  '.mtt-file-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-primary,CanvasText);font-size:14px;font-weight:500;line-height:22px}',
-  '.mtt-file-meta{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-tertiary,#00000073);font-size:12px;line-height:15px}',  '.mtt-bubble{max-width:min(calc(var(--dsh-chat-content-width,748px) * .702),82%);background:var(--mtt-bubble);border-radius:var(--dsw-radius-xl,16px);padding:10px 16px;color:var(--dsw-alias-label-primary,CanvasText);font:inherit;font-size:var(--dsh-content-font-size,14px);line-height:calc(22px + var(--dsh-content-font-delta,0px));min-width:0;white-space:pre-wrap;word-break:break-word}',
-  '.mtt-text{white-space:pre-wrap;word-break:break-word}',
-  '.mtt-text-md{white-space:normal}',
-  '.mtt-text-md p{margin:0 0 4px}',
-  '.mtt-text-md p:last-child{margin-bottom:0}',
-  '.mtt-text-md>div>:first-child{margin-top:0}',
-  '.mtt-text-md>div>:last-child{margin-bottom:0}',
+  '.mtt-user-bar{display:flex;justify-content:flex-end;align-items:flex-start;gap:8px;padding:2px 0 0;min-width:0}',
+  // The app's own action row fades in under the pointer; ours sits in the app's row, so it follows the app's row and not a .mtt-row of ours.
+  '[data-mtt-row]:hover .mtt-actions,[data-mtt-row]:focus-within .mtt-actions{opacity:1}',
+  '.mtt-user-slot{display:flex;justify-content:flex-end;min-width:0;max-width:100%}',
+  '.mtt-bubble-md{white-space:normal;word-break:break-word;text-align:left}',
+  '.mtt-bubble-md>div>:first-child{margin-top:0}',
+  '.mtt-bubble-md>div>:last-child{margin-bottom:0}',
+  '.mtt-editor-inline{margin:0}',
+  '[data-mtt-row] [class*="_actions"]{display:none}',
+  '.mtt-bubble{max-width:min(calc(var(--dsh-chat-content-width,748px) * .702),82%);background:var(--mtt-bubble);border-radius:var(--dsw-radius-xl,16px);padding:10px 16px;color:var(--dsw-alias-label-primary,CanvasText);font:inherit;font-size:var(--dsh-content-font-size,14px);line-height:calc(22px + var(--dsh-content-font-delta,0px));min-width:0;white-space:pre-wrap;word-break:break-word}',
   // Action rows mirror DSH's own MessageIconActions.module.css exactly:
   // 28px hit box (plus the user's content-font delta), 6px padding, 8px gap,
   // 17px glyphs in a clock="end" row, tertiary label colour.
@@ -3902,19 +3961,12 @@ return {
       // Fall back to the built-in dictionary.
     }
 
-    // Shadow only the plain user bubble; steering and context rows keep the
-    // host renderer. A collision with another user-bubble plugin degrades to
-    // "they win" rather than failing this plugin's other registrations.
-    slots.inject('conversation.chat.node', function () {
-      try {
-        return slots.register(
-          { name: 'conversation.chat.node', key: 'user', priority: -1 },
-          UserMessageView);
-      } catch (e) {
-        console.warn('[dsh-message-toolbar] Failed to register the user-message view; editing is unavailable.', e);
-        return function () {};
-      }
-    });
+    // A question keeps the renderer the app ships — attachment cards, reference
+    // chips, images and the plain-text bubble all stay native. The toolbar is
+    // mounted into that row, and the markdown copy of a question (only when the
+    // text actually holds markdown) is laid over the bubble instead of replacing
+    // the row. See installUserRows().
+    ctx.effect(function () { return installUserRows(); }, 'message-toolbar: user rows');
 
     slots.inject('conversation.chat.assistant-actions', function () {
       try {

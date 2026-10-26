@@ -204,7 +204,6 @@ Registrations (`slots.inject(name, () => slots.register(descriptor, Component))`
 
 | slot | descriptor | component |
 | --- | --- | --- |
-| `conversation.chat.node` | `key: 'user', priority: -1` | `UserMessageView` — bubble + copy/edit/regenerate/delete controls, inline editor (textarea, ⌘/Ctrl+Enter to send) |
 | `conversation.chat.assistant-actions` | `id: message-toolbar, order: 30, inject: sessionId => ({ sessionId })` | `AssistantToolbar` — copy, regenerate (in place), model switch (in place), edit answer, translate, delete. Rendered inside the turn-tail action row, next to DSH's built-in copy/branch buttons |
 | `conversation.chat.turnTail` | `id: message-toolbar-answers, order: -10` | `AnswerCard` — the answer on screen: a variant, an edit, a translation, or the failed-turn toolbar. Above the file changes (deliverables registers at order 0) |
 | `conversation.view` | `id: message-toolbar, order` | `VersionsView` — turn-level branching tree with flip/restore/delete |
@@ -220,6 +219,38 @@ both turn-tail components therefore run it through `turnNumberOf()` before index
 Icons inline the official primitives artwork (`@deepseek-ai/dsh-client-ui-primitives`, 16 px grid,
 `strokeWidth: 1` / `ICON_MEDIUM_STROKE`), so the toolbar matches DSH's own action row in size,
 weight and hover behaviour.
+
+### The question row is decorated, not re-drawn
+
+The plugin used to register `conversation.chat.node` with `key: 'user'` — a shadow renderer that
+replaced DSH's own user bubble. Everything the app draws there (the bubble tint, the attachment
+cards, the `@`/`/` reference chips, image thumbnails) then had to be re-implemented, and every
+missing piece was a visible regression: a grey bubble instead of the light blue one, a vanished
+PDF card.
+
+So it no longer shadows the slot at all. `installUserRows()` decorates the app's own DOM instead:
+
+1. A `MutationObserver` on `document.body` (plus a first pass at install and two timers) walks
+   `[data-chat-flow-kind="user"]` rows — every message row carries `data-chat-turn`, `data-chat-node-key`
+   and the node kind.
+2. For each row it calls `createRoot` once on a `<div class="mtt-user-bar">` appended to the row, and
+   marks the row `data-mtt-row="1"`. The React tree is `UserRow`, which renders the toolbar
+   (copy / edit / regenerate / delete / version ring / model chip) and, **only when it must**, an
+   overlay into a `<div class="mtt-user-slot">` inside the app's `*_userStack`.
+3. `[data-mtt-row] [class*="_actions"] { display: none }` takes the app's own copy/branch row out of
+   the way — one row of controls, not two. Ours fades in on the same hover the app uses
+   (`[data-mtt-row]:hover .mtt-actions`).
+4. The overlay is used for two cases only: the question is being edited (the textarea), or the
+   question contains markdown (`markdownish()` — `$…$`, `**…**`, fences, headings, lists, tables)
+   and/or has been rewritten (`prompt-save`). Plain questions are left exactly as the app draws
+   them: `projectUserText`, no markdown, `$std(w)$` stays literal — which is what DSH does.
+
+Everything else about the question — attachments, images, references — is the app's own markup,
+untouched.
+
+The row needs a session id and a turn number: the turn comes from `data-chat-turn`, and the session
+is captured by the wrapped `conversation.binding(source)` (`activeSessionId`), because the row
+itself does not carry one.
 
 ### The model picker is the composer's picker
 
@@ -301,7 +332,7 @@ records it and the same generated stylesheet applies it:
 | scope | rule | note |
 | --- | --- | --- |
 | `turn` | `[data-chat-turn="N"]{display:none}` | the turn's user row, its answer and its tail row all go: a deleted prompt leaves no orphan answer behind, and no placeholder either |
-| `prompt` | that turn's user row renders `null` (our shadow node) | a prompt replayed by `answer-run`: the question it re-asks must not appear twice; its rail entry is dropped too |
+| `prompt` | `[data-chat-flow-kind="user"][data-chat-turn="N"]` is hidden (the question row, nothing else) | a prompt replayed by `answer-run`: the question it re-asks must not appear twice; its rail entry is dropped too |
 | `answer` | one rule per kind in `DELETED_ANSWER_KINDS` (`assistant-step`, `turn-process`, `tool`, `turn-error`, `turn-max-tokens`, `model-retry`, `turn-tail`), each scoped to `[data-chat-turn="N"]` | everything the answer owns goes, including the tail row (which carries the action row and the file-change card); the user row stays, with its own toolbar, so the turn can be answered again |
 
 A failed turn has no `assistant-step` row at all — only an error banner and the action row — which is why
@@ -322,9 +353,10 @@ the first entry of the ring, and `answerGone` (see above) steps aside as soon as
 tool cards, streaming), and a closed turn cannot accept a second `assistant/message`. It replays the prompt
 on the session's own agent — a fresh turn with the same text — and hands back the turn it opened, with
 `hidePrompt` marking that prompt hidden in the same request (that turn is not in the log yet, so a later
-`hide` would be rejected). The prompt renders as `null` (it is our own shadowed node, so no stylesheet is
-needed) and its rail entry is dropped. Both buttons reach it only through `rerunAfterRevert` (below); the
-cost, when used, is one replayed prompt in the log — visible to the model on later turns.
+`hide` would be rejected). That prompt's question row is then hidden by the stylesheet (the `prompt`
+mark in the table above) and its rail entry is dropped. Both buttons reach it only through
+`rerunAfterRevert` (below); the cost, when used, is one replayed prompt in the log — visible to the
+model on later turns.
 
 ### Undoing what the answer did
 
@@ -480,9 +512,12 @@ should not appear twice.
 
 - Peer: `@deepseek-ai/dsh >=0.2.0-rc.2 <0.3.0-0`.
 - Slot contracts were written against `dsh-client-ui-conversation` /
-  `dsh-client-ui-chat` `0.2.0-rc.2` (`conversation.chat.node`, `conversation.chat.assistant-actions`,
+  `dsh-client-ui-chat` `0.2.0-rc.2` (`conversation.chat.assistant-actions`,
   `conversation.chat.turnTail`, `conversation.view`).
-- A `conversation.chat.node` collision (e.g. `dsh-plugin-message-edit` also shadowing `user`)
-  degrades to "the other plugin wins" for that slot; the remaining registrations still apply.
+- The question row is decorated in the DOM, not shadowed through a slot, so this plugin no longer
+  collides with `dsh-plugin-message-edit` / `dsh-msg-edit`; both can be installed at once, though
+  two toolbars on one row is not useful. The decorator keys off `data-chat-flow-kind`,
+  `data-chat-turn` and the app's `*_userStack` / `*_bubble` class suffixes — if a future DSH renames
+  them, the row simply renders as the app draws it (no toolbar, no crash).
 - `message-toolbar` is used as the cordis plugin id, HTTP path segment, event type prefix and
   state directory name, distinct from `message-edit`/`message-tree` to avoid collisions.
