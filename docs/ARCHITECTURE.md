@@ -332,7 +332,7 @@ records it and the same generated stylesheet applies it:
 | scope | rule | note |
 | --- | --- | --- |
 | `turn` | `[data-chat-turn="N"]{display:none}` | the turn's user row, its answer and its tail row all go: a deleted prompt leaves no orphan answer behind, and no placeholder either |
-| `prompt` | `[data-chat-flow-kind="user"][data-chat-turn="N"]` is hidden (the question row, nothing else) | a prompt replayed by `answer-run`: the question it re-asks must not appear twice; its rail entry is dropped too |
+| `prompt` | `[data-chat-flow-kind="user"][data-chat-turn="N"]` is hidden (the question row, nothing else) | a prompt replayed by `answer-run`: the question it re-asks must not appear twice; its rail entry is dropped too. Two forces hide it: the decorator sets that row's own `display: none` (it runs for every row, including a turn that failed or is still running and therefore has no tail row yet), and `AnswerCard` writes the same rule into the sheet as a fallback |
 | `answer` | one rule per kind in `DELETED_ANSWER_KINDS` (`assistant-step`, `turn-process`, `tool`, `turn-error`, `turn-max-tokens`, `model-retry`, `turn-tail`), each scoped to `[data-chat-turn="N"]` | everything the answer owns goes, including the tail row (which carries the action row and the file-change card); the user row stays, with its own toolbar, so the turn can be answered again |
 
 A failed turn has no `assistant-step` row at all — only an error banner and the action row — which is why
@@ -345,18 +345,23 @@ is saved, the card switches to the `answer` mark, which keeps the tail row — t
 rendered in. Without that, a fresh answer to a just-deleted turn would be hidden by the hole it is filling.
 
 Answering a turn again is **one action**, whichever row it is pressed on: the question's button and the
-answer's button both call `generateInto()` → `answer-generate`, so the new answer is a variant of the same
-turn and the ring shows `‹ 1/2 ›`. That includes a turn whose answer is gone — the deleted answer is simply
-the first entry of the ring, and `answerGone` (see above) steps aside as soon as a variant exists.
+answer's button both run `rerunTurnInPlace()` → `answer-run`, so a new answer is a *turn of its own* in the
+same session — thinking, tool cards, streaming, exactly like the first time — and the runs record groups
+those turns under the question they answer, so the ring shows `‹ 2/2 ›` and switches between them by hiding
+the ones that are not chosen. Nothing is generated as text any more.
 
-`answer-run` is the *native* alternative: a question without an answer deserves a real agent run (thinking,
-tool cards, streaming), and a closed turn cannot accept a second `assistant/message`. It replays the prompt
-on the session's own agent — a fresh turn with the same text — and hands back the turn it opened, with
-`hidePrompt` marking that prompt hidden in the same request (that turn is not in the log yet, so a later
-`hide` would be rejected). That prompt's question row is then hidden by the stylesheet (the `prompt`
-mark in the table above) and its rail entry is dropped. Both buttons reach it only through
-`rerunAfterRevert` (below); the cost, when used, is one replayed prompt in the log — visible to the
-model on later turns.
+`answer-run` replays the prompt on the session's own agent — a fresh turn with the same text — and hands
+back the turn it opened, with `hidePrompt` marking that prompt hidden in the same request (that turn is not
+in the log yet, so a later `hide` would be rejected). That prompt's question row is then hidden by the
+`prompt` mark in the table above and its rail entry is dropped. Both buttons reach it through
+`rerunAfterRevert` (below) — or directly, when nothing was reverted; the cost, when used, is one replayed
+prompt in the log — visible to the model on later turns.
+
+A run group can also end in failure: the chosen turn has no answer to draw, so `AnswerCard` returns `null`
+for every member of the group — and the app has no action row for a failed turn, which used to take the
+retry button away with it. So the *visible* member of a group is the one exception: if it has no answer and
+is not still open, the card renders the failed-turn toolbar (`AssistantToolbar{ failed: true }`) instead of
+`null`.
 
 ### Undoing what the answer did
 
