@@ -312,10 +312,27 @@ const store = {
     }
   },
 
+  /** Replace the cached turn groups after switching which answer is shown. */
+  patchRuns(sessionId, runs) {
+    const entry = this.bySession.get(sessionId);
+    if (!entry || !entry.state || !runs || typeof runs !== 'object') return;
+    entry.state.runs = runs;
+    entry.updatedAt = Date.now();
+    this.notify();
+  },
+
   invalidate(sessionId) {
     if (!sessionId) {
-      this.bySession.forEach(function (e) { if (e) e.updatedAt = 0; });
+      const stale = [];
+      this.bySession.forEach(function (entry, key) {
+        if (entry) entry.updatedAt = 0;
+        stale.push(key);
+      });
       this.notify();
+      // A caller without a session is asking for "everything is stale", so every
+      // cached conversation has to be refetched — notifying alone would leave the
+      // panels showing what they had until some later reload.
+      for (let i = 0; i < stale.length; i++) this.load(stale[i]);
       return;
     }
     const entry = this.bySession.get(sessionId);
@@ -3188,8 +3205,11 @@ function AssistantToolbar(props) {
       setBusy(true);
       setError(null);
       try {
-        await mutate({ action: 'run-select', sessionId: sessionId, turn: run.key, active: next });
-        store.invalidate();
+        const result = await mutate({ action: 'run-select', sessionId: sessionId, turn: run.key, active: next });
+        // The route hands back every group it knows about, so the ring can flip
+        // immediately instead of waiting for the next refetch of the payload.
+        if (result && result.all) store.patchRuns(sessionId, result.all);
+        else store.invalidate(sessionId);
       } catch (e) {
         showToast(failureText(e), 'error');
       }
