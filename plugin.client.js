@@ -3387,18 +3387,14 @@ function AssistantToolbar(props) {
     try {
       const current = answerRing(state ? state.answers : null, turn);
       if (run !== null) {
-        // Deleting the answer on screen: that whole turn's answer leaves the
-        // flow, and the group falls back to the answer before it — the reader
-        // asked for one answer fewer, not for an empty place in the transcript.
-        const position = runPosition(run);
-        const previous = position.index > 0 ? run.turns[position.index - 1] : undefined;
-        await hideMutate({
-          action: 'hide', sessionId: sessionId, turn: turn, scope: 'answer', hidden: true,
-        });
-        if (previous !== undefined) {
-          await mutate({ action: 'run-select', sessionId: sessionId, turn: run.key, active: previous });
-        }
-        store.invalidate();
+        // Deleting one answer of a group has to take it out of the group, not only
+        // hide its rows: while it stayed a member the ring still counted it and
+        // could still switch back to it. The host drops the member, drops the whole
+        // group once a single answer is left, and hides the deleted rows at once.
+        const result = await mutate({ action: 'run-delete', sessionId: sessionId, turn: turn });
+        if (result && result.runs) store.patchRuns(sessionId, result.runs);
+        if (result && result.hidden) store.patchHidden(sessionId, result.hidden);
+        if (!result || !result.runs || !result.hidden) store.invalidate(sessionId);
         showToast(t('answerHidden'));
       } else if (current !== null && current.active.id !== 'native') {
         await answerMutate({
