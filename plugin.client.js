@@ -2769,19 +2769,42 @@ function UserRow(props) {
 
   // Saving a question rewrites nothing but the row's own text: the answer that
   // is already there stays, the conversation does not move, no model is called.
+  // `send` is the same write followed by the row's own regenerate, so the reader
+  // can fix a question and have it answered from the corrected wording.
+  async function savePrompt() {
+    if (typeof turn !== 'number') return false;
+    if (draft === shownText) return true;
+    try {
+      const result = await mutate({ action: 'prompt-save', sessionId: sessionId, turn: turn, text: draft });
+      store.patchPrompt(sessionId, result && result.prompts ? result.prompts : {});
+      return true;
+    } catch (e) {
+      setError(String((e && e.message) || e));
+      return false;
+    }
+  }
+
   async function submit() {
     if (draft.trim() === '' || typeof turn !== 'number') { setEditing(false); return; }
     setBusy(true);
     setError(null);
-    try {
-      const result = await mutate({ action: 'prompt-save', sessionId: sessionId, turn: turn, text: draft });
-      store.patchPrompt(sessionId, result && result.prompts ? result.prompts : {});
-      setEditing(false);
-      if (draft !== shownText) showToast(t('promptEdited'));
-    } catch (e) {
-      setError(String((e && e.message) || e));
-    }
+    const saved = await savePrompt();
     setBusy(false);
+    if (!saved) return;
+    setEditing(false);
+    if (draft !== shownText) showToast(t('promptEdited'));
+  }
+
+  /** Save the rewritten question, then answer it again — the row's own retry. */
+  async function send() {
+    if (draft.trim() === '' || typeof turn !== 'number') return;
+    setBusy(true);
+    setError(null);
+    const saved = await savePrompt();
+    setBusy(false);
+    if (!saved) return;
+    setEditing(false);
+    await retry();
   }
 
   // "Regenerate" from a question is the same action as the one on the answer
@@ -2873,28 +2896,41 @@ function UserRow(props) {
   // The overlay stands where the bubble stands: the editor, or the markdown copy
   // of a question the app can only draw as text. While it shows, the app's own
   // bubble is hidden — the attachment cards above it are never touched.
+  // The editor is the answer editor with one extra button: `send` writes the new
+  // question and then answers it again, so a corrected prompt never needs a
+  // second trip to the toolbar.
   const overlay = editing
-    ? h('div', { className: 'mtt-editor mtt-editor-inline' },
+    ? h('div', { className: 'mtt-answer-edit mtt-answer-edit-prompt' },
+      h('div', { className: 'mtt-answer-edit-head' },
+        h('span', { className: 'mtt-answer-edit-label' }, t('editing')),
+        h('span', { className: 'mtt-answer-edit-tools' },
+          h('button', {
+            type: 'button', className: 'mtt-act', title: t('exitEdit'),
+            onClick: function () { setEditing(false); },
+          }, h(CloseIcon)),
+          h('button', {
+            type: 'button', className: 'mtt-btn mtt-btn-small',
+            disabled: busy || draft.trim() === '',
+            onClick: submit,
+          }, t('save')),
+          h('button', {
+            type: 'button', className: 'mtt-btn mtt-btn-small mtt-btn-primary',
+            disabled: busy || draft.trim() === '',
+            onClick: send,
+          }, t('send')))),
       h('textarea', {
-        className: 'mtt-textarea',
+        className: 'mtt-answer-edit-input',
         value: draft,
         autoFocus: true,
-        rows: Math.min(12, Math.max(3, draft.split('\n').length + 1)),
+        spellCheck: false,
+        placeholder: t('editSendHint'),
         onChange: function (e) { setDraft(e.target.value); },
         onKeyDown: function (e) {
           if (e.key === 'Escape') { e.preventDefault(); setEditing(false); }
-          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); submit(); }
+          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); send(); }
         },
       }),
-      h(ErrorChip, { error: error }),
-      h('div', { className: 'mtt-editor-actions' },
-        h('button', { type: 'button', className: 'mtt-btn', disabled: busy, onClick: function () { setEditing(false); } }, t('cancel')),
-        h('button', {
-          type: 'button', className: 'mtt-btn mtt-btn-primary',
-          disabled: busy || draft.trim() === '',
-          onClick: submit,
-        }, busy ? t('saving') : t('save')),
-        h('span', { className: 'mtt-hint' }, t('editSaveHint'))))
+      h(ErrorChip, { error: error }))
     : wantsMarkdown && shownText !== ''
       ? h('div', { className: 'mtt-bubble mtt-bubble-md' }, h(AnswerBody, { text: shownText }))
       : null;
@@ -3599,10 +3635,10 @@ const CSS = [
   // Every surface we own starts from the themed label colour, and every control
   // we own inherits it: a button with no colour of its own would otherwise fall
   // back to the UA's ButtonText, which stays black under a dark app theme.
-  '.mtt-row,.mtt-toolbar,.mtt-answer,.mtt-alt,.mtt-view,.mtt-editor,.mtt-pop,.mtt-toast{color:var(--mtt-fg)}',
+  '.mtt-row,.mtt-toolbar,.mtt-answer,.mtt-alt,.mtt-view,.mtt-pop,.mtt-toast{color:var(--mtt-fg)}',
   // `:where()` keeps this at zero specificity so a variant that does state its
   // own ink — .mtt-btn-primary, .mtt-btn-danger — still wins.
-  ':where(button.mtt-btn,button.mtt-act,button.mtt-pop-item,button.mtt-ring-btn,button.mtt-node-card,textarea.mtt-textarea){color:inherit}',
+  ':where(button.mtt-btn,button.mtt-act,button.mtt-pop-item,button.mtt-ring-btn,button.mtt-node-card,textarea.mtt-answer-edit-input){color:inherit}',
     // Fallback for the toast, used only when the primitives package is absent:
   // it copies Toast.module.css from that package — including the design rule
   // that a toast surface stays dark in both themes, so its label never flips.
@@ -3626,11 +3662,15 @@ const CSS = [
   '.mtt-user-bar{display:flex;justify-content:flex-end;align-items:flex-start;gap:8px;padding:2px 0 0;min-width:0}',
   // The app's own action row fades in under the pointer; ours sits in the app's row, so it follows the app's row and not a .mtt-row of ours.
   '[data-mtt-row]:hover .mtt-actions,[data-mtt-row]:focus-within .mtt-actions{opacity:1}',
-  '.mtt-user-slot{display:flex;justify-content:flex-end;min-width:0;max-width:100%}',
+  // The stack around a question shrink-wraps its bubble, and that bubble is hidden
+  // while the editor is open — without this the editor had nothing to size against
+  // and collapsed to the width of its own head. Stretch the decorated row's stack
+  // so the editor gets the width the bubble would have had.
+  '[data-mtt-row] [class*="_userStack"]{width:100%}',
+  '.mtt-user-slot{display:flex;justify-content:flex-end;width:100%;min-width:0;max-width:100%}',
   '.mtt-bubble-md{white-space:normal;word-break:break-word;text-align:left}',
   '.mtt-bubble-md>div>:first-child{margin-top:0}',
   '.mtt-bubble-md>div>:last-child{margin-bottom:0}',
-  '.mtt-editor-inline{margin:0}',
   '[data-mtt-row] [class*="_actions"]{display:none}',
   '.mtt-bubble{max-width:min(calc(var(--dsh-chat-content-width,748px) * .702),82%);background:var(--mtt-bubble);border-radius:var(--dsw-radius-xl,16px);padding:10px 16px;color:var(--dsw-alias-label-primary,CanvasText);font:inherit;font-size:var(--dsh-content-font-size,14px);line-height:calc(22px + var(--dsh-content-font-delta,0px));min-width:0;white-space:pre-wrap;word-break:break-word}',
   // Action rows mirror DSH's own MessageIconActions.module.css exactly:
@@ -3694,6 +3734,12 @@ const CSS = [
   '.mtt-answer-edit-tools{display:flex;align-items:center;gap:4px}',
   '.mtt-answer-edit-input{display:block;width:100%;height:clamp(140px,34vh,360px);resize:vertical;border:0;background:transparent;color:var(--mtt-fg);font-family:inherit;font-size:var(--dsh-content-font-size,14px);line-height:1.6;padding:0;outline:none;overflow:auto;overscroll-behavior:contain}',
   '.mtt-answer-edit-input::placeholder{color:var(--mtt-fg-3)}',
+  // The question editor is the answer editor where a bubble would be: same box,
+  // same head, plus `send`. It sits right-aligned under the attachment cards.
+  // Same box as the answer editor, sized to the width the bubble would have used.
+  // (The bubble's own `0.702 × content-width` cap is too narrow to type in.)
+  '.mtt-answer-edit-prompt{width:100%;max-width:100%;margin-left:auto}',
+  '.mtt-answer-edit-prompt .mtt-answer-edit-input{height:clamp(96px,22vh,240px)}',
   '.mtt-answer-wait{font-size:var(--dsh-content-font-size-secondary,13px);color:var(--mtt-fg-3);padding:2px 0}',
   '.mtt-wait-text{opacity:.75}',
   '.mtt-think{margin:2px 0 6px}',
@@ -3754,10 +3800,6 @@ const CSS = [
   '.mtt-btn-danger:hover{background:var(--mtt-danger);filter:brightness(1.08)}',
   '.mtt-btn-small{padding:2px 8px;font-size:11px}',
   '.mtt-btn:disabled{opacity:.5;cursor:default}',
-  '.mtt-editor{width:100%;display:flex;flex-direction:column;gap:6px;background:var(--mtt-surface);color:var(--mtt-fg);border:.5px solid var(--mtt-line-strong);border-radius:var(--mtt-radius-lg);padding:10px}',
-  '.mtt-textarea{width:100%;min-height:64px;resize:vertical;border:0;outline:none;background:transparent;font:inherit;color:var(--mtt-fg)}',
-  '.mtt-editor-actions{display:flex;gap:8px;align-items:center;justify-content:flex-end}',
-  '.mtt-hint{font-size:11px;color:var(--mtt-fg-3)}',
   '.mtt-error{font-size:11px;color:var(--mtt-danger);margin-top:2px;max-width:76%;text-align:right;white-space:pre-wrap;align-self:flex-end}',
   '.mtt-view{padding:16px;display:flex;flex-direction:column;gap:10px;overflow:auto;height:100%;min-width:0;color:var(--mtt-fg)}',
   '.mtt-view-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}',
@@ -3812,7 +3854,8 @@ const I18N = {
     sending: 'Sending…',
     shortcutHint: 'Ctrl/⌘+Enter to send · Esc to cancel',
     saving: 'Saving…',
-    editSaveHint: 'Only the text changes — nothing is answered again; use regenerate in the toolbar for that.',
+    editSaveHint: 'Save keeps the answer you already have; send answers the new question.',
+    editSendHint: 'Rewrite the question — ⌘/Ctrl+Enter sends it.',
     promptEdited: 'Question updated',
     prevVersion: 'Previous version',
     nextVersion: 'Next version',
@@ -3893,7 +3936,8 @@ const I18N = {
     sending: '发送中…',
     shortcutHint: 'Ctrl/⌘+Enter 发送 · Esc 取消',
     saving: '保存中…',
-    editSaveHint: '只改显示的文字，不会重新回答；要重答用工具栏的重新生成。',
+    editSaveHint: '保存只改文字，保留现有回答；发送会按新问题重新回答。',
+    editSendHint: '改写这条提问 — ⌘/Ctrl+Enter 直接发送。',
     promptEdited: '问题已更新',
     prevVersion: '上一个版本',
     nextVersion: '下一个版本',
