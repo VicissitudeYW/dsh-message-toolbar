@@ -985,7 +985,40 @@ async function turnChangePlan(sessionId, turn) {
  */
 async function rerunAfterRevert(options) {
   await mutate({ action: 'revert', sessionId: options.sessionId, turn: options.turn });
+  if (options.mode === 'branch') return branchFromTurn(options);
   return rerunTurnInPlace(options);
+}
+
+/**
+ * Answer a turn again as a fresh conversation, seeded with the history **before**
+ * that question.
+ *
+ * Replaying the question inside the same session is what made a regenerated
+ * answer read like a copy of the last one: the agent builds its request from the
+ * whole log, so it saw the answer being replaced *and* the question twice (the
+ * replay is a second user message). A child session seeded from the log's prefix
+ * shows the model exactly what it saw the first time — one copy of the question,
+ * no previous answer — and the parent is archived once navigation commits, so the
+ * reader still has one conversation rather than two.
+ */
+async function branchFromTurn(options) {
+  const result = await mutate({
+    action: 'retry',
+    sessionId: options.sessionId,
+    turn: options.turn,
+    stopPrevious: options.stopPrevious === true,
+    ...(options.model === undefined || options.model === null
+      ? {}
+      : { model: { provider: options.model.provider, model: options.model.model } }),
+  });
+  const next = result && typeof result.sessionId === 'string' ? result.sessionId : null;
+  if (next === null) throw new Error('没有拿到新的会话。');
+  store.invalidate();
+  // Focus (archiving the answer being replaced) happens on the first toolbar that
+  // mounts inside the new session — archiving a session that is still open closes
+  // the main view.
+  switchToVersion(navigation, { sessionId: next }, options.sessionId);
+  return { kind: 'branch', sessionId: next };
 }
 
 /**
@@ -1131,7 +1164,12 @@ function ringFor(versions, sessionId, turn) {
   }
   const alternatives = versions
     .filter(function (v) {
-      return !v.deleted && (v.sessionId === fork.sessionId || (v.targetTurn === turn && walksToFork(v)));
+      if (v.deleted) return false;
+      if (v.sessionId === fork.sessionId) return true;
+      // A regenerate is a replacement, not another card: its child session must
+      // not turn into a `‹ 1/2 ›` the reader never asked for. Edits keep their ring.
+      if (v.operation === 'retry') return false;
+      return v.targetTurn === turn && walksToFork(v);
     })
     .sort(function (a, b) {
       return a.createdAt - b.createdAt || String(a.sessionId).localeCompare(String(b.sessionId));
@@ -2818,12 +2856,15 @@ function UserRow(props) {
     setError(null);
     const plan = await turnChangePlan(sessionId, turn);
     if (plan !== null) {
-      setRevert({ plan: plan, model: null });
+      setRevert({ plan: plan, model: null, mode: 'branch' });
       return;
     }
     setBusy(true);
     try {
-      await rerunTurnInPlace({
+      // A fresh conversation seeded with everything this question had seen: the
+      // answer being replaced stays out of the model context, and there is no
+      // second answer to switch to.
+      await branchFromTurn({
         sessionId: sessionId,
         turn: turn,
         model: state && state.model ? { provider: state.model.provider, model: state.model.model } : undefined,
@@ -2846,6 +2887,7 @@ function UserRow(props) {
         sessionId: sessionId,
         turn: turn,
         model: pending.model,
+        mode: pending.mode,
         stopPrevious: prefs.stopPrevious,
       });
       showToast(t('revertedToast', { count: String(pending.plan.files.length) }));
@@ -3156,16 +3198,15 @@ function AssistantToolbar(props) {
     setError(null);
     const plan = await turnChangePlan(sessionId, turn);
     if (plan !== null) {
-      setRevert({ plan: plan, model: null });
+      setRevert({ plan: plan, model: null, mode: 'branch' });
       return;
     }
     setBusy(true);
     try {
-      // Answering again is the app answering again: a real turn of this session,
-      // with tools, thinking, streaming and its own process card — the reader
-      // cannot tell it apart from the first answer, because nothing about it is
-      // ours. The other answers of this question stay one `‹ ›` away.
-      await rerunTurnInPlace({
+      // Regenerating replaces the answer: it starts a fresh conversation seeded
+      // with everything the question had seen, so the answer being replaced is not
+      // in the model's context and there is no second answer to switch between.
+      await branchFromTurn({
         sessionId: sessionId,
         turn: turn,
         model: currentModel(),
@@ -3219,6 +3260,7 @@ function AssistantToolbar(props) {
         sessionId: sessionId,
         turn: turn,
         model: pending.model,
+        mode: pending.mode,
         stopPrevious: prefs.stopPrevious,
       });
       showToast(t('revertedToast', { count: String(pending.plan.files.length) }));
