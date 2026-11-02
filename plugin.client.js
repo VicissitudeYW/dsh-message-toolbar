@@ -1964,6 +1964,35 @@ function markdownLabels() {
 }
 
 /**
+ * Markdown is other people's code as far as this plugin is concerned: KaTeX,
+ * the syntax highlighter and the transcript renderer all run inside it, over
+ * text the reader typed. A throw in there must not take the panel with it — and
+ * above all it must never leave a native bubble hidden with nothing painted over
+ * it, which is how a question used to vanish from the transcript. So the failure
+ * is caught here, the plain text is painted instead, and `onFail` lets the caller
+ * uncover what it covered.
+ */
+class BodyBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { failed: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch() {
+    if (typeof this.props.onFail === 'function') this.props.onFail();
+  }
+
+  render() {
+    if (this.state.failed) return h('div', { className: 'mtt-alt-text' }, this.props.text);
+    return this.props.children;
+  }
+}
+
+/**
  * A variant answer body: the official Markdown renderer when the primitives
  * package is available (the same component the chat view uses, so a variant and
  * a logged answer are typographically identical), plain text otherwise.
@@ -1973,12 +2002,16 @@ function markdownLabels() {
 function AnswerBody(props) {
   const Markdown = markdownRenderer();
   if (Markdown !== null) {
-    return h(Markdown, {
-      text: props.text,
-      labels: markdownLabels(),
-      variant: 'body',
-      ...props.streaming === true ? { streaming: true } : {},
-    });
+    return h(
+      BodyBoundary,
+      { text: props.text, onFail: props.onFail },
+      h(Markdown, {
+        text: props.text,
+        labels: markdownLabels(),
+        variant: 'body',
+        ...props.streaming === true ? { streaming: true } : {},
+      }),
+    );
   }
   return h('div', { className: 'mtt-alt-text' }, props.text);
 }
@@ -2769,13 +2802,19 @@ function UserRow(props) {
   // here rather than by AnswerCard: a turn that failed or is still running has no
   // tail row yet, so a tail-owned rule would never be written for it.
   const hidden = hiddenOf(state, turn);
+  // A mark written for a replayed prompt names a turn the agent was about to
+  // open. If that turn never opened — the run failed before it started — the mark
+  // is stale, and hiding by it would delete the reader's question from a
+  // transcript that has every right to show it. So the mark only counts when the
+  // log actually has that turn.
+  const promptGone = hidden.prompt === true && info !== undefined;
   const promptRow = props.row;
   React.useEffect(function () {
     if (!promptRow) return undefined;
-    promptRow.style.display = hidden.prompt ? 'none' : '';
+    promptRow.style.display = promptGone ? 'none' : '';
     return function () { promptRow.style.display = ''; };
-  }, [promptRow, hidden.prompt]);
-  const wantsMarkdown = override !== null || markdownish(logged);
+  }, [promptRow, promptGone]);
+  const wantsMarkdown = !bodyFailed && (override !== null || markdownish(logged));
 
   const [editing, setEditing] = React.useState(false);
   const [draft, setDraft] = React.useState('');
@@ -2790,6 +2829,10 @@ function UserRow(props) {
   const [revert, setRevert] = React.useState(null);
   const revertAnchor = React.useRef(null);
   const [toastNode, showToast] = useToast();
+  React.useEffect(function () { setBodyFailed(false); }, [shownText]);
+  // Set when the markdown body threw: the native bubble comes back rather than
+  // staying hidden under an overlay that cannot paint.
+  const [bodyFailed, setBodyFailed] = React.useState(false);
 
   useDismiss(confirmDelete || confirmHide || revert !== null, function () {
     setConfirmDelete(false);
@@ -2974,7 +3017,11 @@ function UserRow(props) {
       }),
       h(ErrorChip, { error: error }))
     : wantsMarkdown && shownText !== ''
-      ? h('div', { className: 'mtt-bubble mtt-bubble-md' }, h(AnswerBody, { text: shownText }))
+      ? h(
+          'div',
+          { className: 'mtt-bubble mtt-bubble-md', 'data-mtt-overlay': '1' },
+          h(AnswerBody, { text: shownText, onFail: function () { setBodyFailed(true); } }),
+        )
       : null;
 
   const covered = overlay !== null;

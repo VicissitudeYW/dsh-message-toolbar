@@ -248,6 +248,23 @@ So it no longer shadows the slot at all. `installUserRows()` decorates the app's
 Everything else about the question — attachments, images, references — is the app's own markup,
 untouched.
 
+**An overlay that cannot paint must uncover what it covered.** Hiding the native bubble and painting
+over it is only safe while the paint succeeds, and the paint runs other people's code: KaTeX, the
+syntax highlighter, the transcript renderer, all of it over text the reader typed. A question like
+`$\frac{1}{$` makes KaTeX throw; React then unmounts the failed subtree, the bubble stays
+`display: none`, and the question disappears from the transcript while the row itself stays behind —
+invisible, and impossible to edit, copy or delete, because its toolbar lives in that same root.
+
+So the markdown body renders inside `BodyBoundary` (a `getDerivedStateFromError` component). On a
+failure it drops the overlay (`bodyFailed`), which uncovers the native bubble: the question falls
+back to exactly what DSH draws on its own, and the flag resets when the text changes so a corrected
+question can try markdown again. The same boundary makes a failing *answer* body fall back to plain
+text instead of blanking the answer area.
+
+For the same reason the `prompt` mark only hides a row when the log really has that turn: the mark
+names a turn the agent was about to open, and a run that fails before opening it would otherwise
+delete the reader's question for the sake of hiding a duplicate that never arrived.
+
 The row needs a session id and a turn number: the turn comes from `data-chat-turn`, and the session
 is captured by the wrapped `conversation.binding(source)` (`activeSessionId`), because the row
 itself does not carry one.
