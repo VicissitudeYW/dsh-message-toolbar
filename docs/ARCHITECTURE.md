@@ -65,6 +65,22 @@ parent, archived: parentEntry.archived }, current)`, which un-archives first (th
 focus pass tidy the family. When the family walk could not name the parent, it assumes archived —
 an unnecessary activate costs nothing, a missing one costs the view.
 
+### The trash deletes the message, never the conversation
+
+A row used to carry two different trashes on a version card: one deleted the message, the other
+deleted the card — and the card one archives a session, which on screen looks like the whole
+conversation disappearing. The distinction was invisible in the toolbar and the damage was not.
+
+Now a row has exactly **one** trash and it always means *this message*: the answer (`answer` mark,
+`run-delete` when the turn belongs to a run group), the question (`turn` mark), or the whole failed
+turn. Deleting a branch is a branch-level decision, so it lives where the branch is the thing being
+looked at: `VersionsView` draws a `delete` button on every node that is not the root and not
+already deleted, and a deleted node keeps its `restore` button instead.
+
+Because that view can delete the card **of the conversation on screen**, it takes the same walk-back
+as `removeVersion` above (activate the parent, then open it). Sibling cards need no navigation: the
+main view is untouched, so the node just turns into "已归档 已删除" with a restore button.
+
 ### A branch keeps its parent's title
 
 The fork is the same conversation, so its title must not change — but nothing made that
@@ -222,9 +238,9 @@ Registrations (`slots.inject(name, () => slots.register(descriptor, Component))`
 
 | slot | descriptor | component |
 | --- | --- | --- |
-| `conversation.chat.assistant-actions` | `id: message-toolbar, order: 30, inject: sessionId => ({ sessionId })` | `AssistantToolbar` — copy, regenerate (in place), model switch (in place), edit answer, translate, delete. Rendered inside the turn-tail action row, next to DSH's built-in copy/branch buttons |
+| `conversation.chat.assistant-actions` | `id: message-toolbar, order: 30, inject: sessionId => ({ sessionId })` | `AssistantToolbar` — copy, regenerate (in place), model switch (in place), edit answer, translate, delete the message. Rendered inside the turn-tail action row, next to DSH's built-in copy/branch buttons. Deleting a *branch* is not here: see the Versions view |
 | `conversation.chat.turnTail` | `id: message-toolbar-answers, order: -10` | `AnswerCard` — the answer on screen: a variant, an edit, a translation, or the failed-turn toolbar. Above the file changes (deliverables registers at order 0) |
-| `conversation.view` | `id: message-toolbar, order` | `VersionsView` — turn-level branching tree with flip/restore/delete |
+| `conversation.view` | `id: message-toolbar, order` | `VersionsView` — turn-level branching tree with flip / restore, and the only place a card can be deleted |
 
 There is **no settings section**: the translate button opens the language dropdown at the moment it is
 pressed (`LanguageMenuHost`, the same `Menu` the model picker uses), so the target language and the
