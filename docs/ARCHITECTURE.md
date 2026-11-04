@@ -71,7 +71,7 @@ A row used to carry two different trashes on a version card: one deleted the mes
 deleted the card — and the card one archives a session, which on screen looks like the whole
 conversation disappearing. The distinction was invisible in the toolbar and the damage was not.
 
-Now a row has exactly **one** trash and it always means *this message*: the answer (`answer` mark,
+Now a row has exactly **one** trash and it always means *this message* — the question row included, on a version card too: the answer (`answer` mark,
 `run-delete` when the turn belongs to a run group), the question (`turn` mark), or the whole failed
 turn. Deleting a branch is a branch-level decision, so it lives where the branch is the thing being
 looked at: `VersionsView` draws a `delete` button on every node that is not the root and not
