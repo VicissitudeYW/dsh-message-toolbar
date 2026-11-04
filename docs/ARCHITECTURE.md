@@ -175,7 +175,19 @@ same session (`answer-run`), so the fresh answer has the agent's tools, its thin
 card and DSH's own streaming page. There is no second, cheaper path in the UI; `answer-generate`
 survives only for API callers and for text variants stored by older versions.
 
-Those turns are alternatives of one answer, and only the plugin knows it — the log cannot say so.
+The two differ in one flag, and the flag is the whole difference in what the reader sees:
+
+| row action | `group` | result on screen |
+| --- | --- | --- |
+| regenerate (answer row, question row) | `false` | the answer being replaced is hidden (`hide {scope:"answer"}`), the new turn is drawn natively — one question, one answer, **no ring** |
+| switch model | `true` | the new turn joins the question's group, so `‹ 1/2 ›` walks the real turns |
+| "…或新建回答卡片" (last row of the model menu) | — | a fresh session seeded before the turn (`retry`), for when the replaced answer must not be in the model's context |
+
+Regenerating in place cannot also give a clean context: the log is append-only, so the replaced
+answer stays in it and therefore in the next request. The branch is the honest way to get that, and
+it is one menu row away.
+
+When turns do form a group, only the plugin knows it — the log cannot say so.
 `runs[sessionId][turn]` groups them:
 
     { "turns": [2, 5, 7], "active": 7, "models": { "5": { "provider": "…", "model": "…" } } }

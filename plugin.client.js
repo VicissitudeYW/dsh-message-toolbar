@@ -986,6 +986,7 @@ async function turnChangePlan(sessionId, turn) {
 async function rerunAfterRevert(options) {
   await mutate({ action: 'revert', sessionId: options.sessionId, turn: options.turn });
   if (options.mode === 'branch') return branchFromTurn(options);
+  if (options.mode === 'replace') return rerunTurnInPlace({ ...options, replace: true });
   return rerunTurnInPlace(options);
 }
 
@@ -1031,8 +1032,13 @@ async function branchFromTurn(options) {
  * asked to "read that PDF" without tools will happily pretend it did.
  */
 async function rerunTurnInPlace(options) {
+  const replace = options.replace === true;
   const result = await mutate({
     action: 'answer-run',
+    // Regenerating replaces the answer in this conversation: the host must not file
+    // the new turn under the question's group, or the row would grow a 1/2 ring and
+    // the replaced answer would stay reachable instead of being replaced.
+    ...(replace ? { group: false } : {}),
     sessionId: options.sessionId,
     turn: options.turn,
     ...(options.model === undefined || options.model === null
@@ -1044,10 +1050,20 @@ async function rerunTurnInPlace(options) {
     // rejected as "第 N 轮不存在".
     hidePrompt: true,
   });
-  // Nothing is hidden by hand any more: the host records the new turn in the
-  // question's group, and the card takes every answer of that group except the
-  // one on screen out of the flow. That is what makes the older answer disappear
-  // *and* stay reachable through `‹ 1/2 ›` instead of being deleted.
+  // Switching a model keeps every answer of the question: the host files the new
+  // turn under the question's group and the card takes every member except the one
+  // on screen out of the flow, so the older answer stays reachable through the ring.
+  // Replacing hides the answer being replaced instead - one question, one answer,
+  // no second card, no ring.
+  if (replace) {
+    await hideMutate({
+      action: 'hide',
+      sessionId: options.sessionId,
+      turn: options.turn,
+      scope: 'answer',
+      hidden: true,
+    });
+  }
   store.invalidate();
   return { kind: 'turn', turn: result && typeof result.turn === 'number' ? result.turn : null };
 }
@@ -2903,19 +2919,20 @@ function UserRow(props) {
     setError(null);
     const plan = await turnChangePlan(sessionId, turn);
     if (plan !== null) {
-      setRevert({ plan: plan, model: null, mode: 'branch' });
+      setRevert({ plan: plan, model: null, mode: 'replace' });
       return;
     }
     setBusy(true);
     try {
-      // A fresh conversation seeded with everything this question had seen: the
-      // answer being replaced stays out of the model context, and there is no
-      // second answer to switch to.
-      await branchFromTurn({
+      // Same as the answer row: this question keeps one answer, replaced in place.
+      // A brand new conversation is one menu row away when the context has to be clean.
+
+      await rerunTurnInPlace({
         sessionId: sessionId,
         turn: turn,
         model: state && state.model ? { provider: state.model.provider, model: state.model.model } : undefined,
         stopPrevious: prefs.stopPrevious,
+        replace: true,
       });
       showToast(t('answerRegenerated'));
     } catch (e) {
@@ -3260,19 +3277,20 @@ function AssistantToolbar(props) {
     setError(null);
     const plan = await turnChangePlan(sessionId, turn);
     if (plan !== null) {
-      setRevert({ plan: plan, model: null, mode: 'branch' });
+      setRevert({ plan: plan, model: null, mode: 'replace' });
       return;
     }
     setBusy(true);
     try {
-      // Regenerating replaces the answer: it starts a fresh conversation seeded
-      // with everything the question had seen, so the answer being replaced is not
-      // in the model's context and there is no second answer to switch between.
-      await branchFromTurn({
+      // Regenerating replaces the answer in this conversation: same question, same
+      // session, one answer on screen. The answer being replaced is hidden; the model
+      // menu keeps the clean-context way out ("...或新建回答卡片").
+      await rerunTurnInPlace({
         sessionId: sessionId,
         turn: turn,
         model: currentModel(),
         stopPrevious: prefs.stopPrevious,
+        replace: true,
       });
       showToast(t('answerRegenerated'));
     } catch (e) {
@@ -3290,6 +3308,7 @@ function AssistantToolbar(props) {
       setRevert({
         plan: plan,
         model: { provider: model.provider, model: model.model, name: model.name },
+        mode: 'model',
       });
       return;
     }
