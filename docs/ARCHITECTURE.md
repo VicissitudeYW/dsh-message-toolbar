@@ -47,6 +47,24 @@ creation (the app cannot navigate to an archived session). They appear in the si
 can be continued independently, and are attached to the parent's workspace so their files
 resolve the same way.
 
+### Deleting the card you are reading walks back, not blank
+
+`delete-version` archives the card's session — and switching to a version archived the rest of
+the family long before that, so the parent is almost always archived too. Two consequences:
+
+1. The workspace clears its main view the moment the session it is showing is archived. Deleting
+   the card of the conversation you are reading therefore reads as *the whole conversation
+   vanished*, not as *one branch was removed*.
+2. Coming back is not just "open the parent": its client-side session reference was released when
+   it was archived, and `openSession` on a released reference fails with `Session reference … is
+   released` — a blank pane and a sidebar error.
+
+So the client steps back **through the activate path**: `switchToVersion(navigation, { sessionId:
+parent, archived: parentEntry.archived }, current)`, which un-archives first (the host's
+`activate` is idempotent), waits for the session to be listed, then opens it and lets the usual
+focus pass tidy the family. When the family walk could not name the parent, it assumes archived —
+an unnecessary activate costs nothing, a missing one costs the view.
+
 ### A branch keeps its parent's title
 
 The fork is the same conversation, so its title must not change — but nothing made that
@@ -114,7 +132,7 @@ from `llm.listProviders()` + `llm.listModels(provider)`.
 | `retry` | `sessionId, turn, model?` | rewound child + followup (model optional) |
 | `translate` | `sessionId, lang, eventSeq? , turn?, text?, model?, stream?` | auxiliary `llm.stream` call (no `maxTokens`), cached under `eventSeq` or `turn:<n>`; records `shown[turn] = lang` and `origins[turn] = <text>` so the answer is drawn bilingual, block by block. With `stream: true` it answers in NDJSON frames (`start` → `delta`* → `done`) |
 | `translate-off` | `sessionId, turn` | drops `shown[turn]` and `origins[turn]`, folding the translation away (the cached translation stays) |
-| `delete-version` | `sessionId` | flags the card deleted (root refused, 400) |
+| `delete-version` | `sessionId` | flags the card deleted and archives it; returns `{ deleted, archived, parent, turn }` (root refused, 400) |
 | `restore-version` | `sessionId` | clears the flag |
 | `activate` | `sessionId` | un-archives (if needed) and attaches to the parent workspace |
 | `focus` | `sessionId` | un-archives the target, archives every other family member (one visible conversation) |
