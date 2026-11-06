@@ -204,6 +204,13 @@ A model chosen for one answer is pinned through the session controller —
 pending selection in memory. The request the replayed turn assembles carries it, and that request's
 own header retires it, so the choice lasts exactly one turn and the conversation keeps its model.
 
+The model a row *offers* when no explicit choice was made (`state.model`, and `resolveAnswerModel`'s
+fallback) is read by `sessionModel(events)` — the same fold `dsh-agent` uses for its selection
+projection: the last `model/selection` (the composer's pending choice) before the last
+`request/header` (what the last finished request used). A failed turn leaves no header, so reading
+only the header would name the model the user had already moved away from; the pending selection is
+what "regenerate this failed answer" should use, and now does.
+
 Errors: `TypeError` → `400 {error}`, anything else → `409 {error}`.
 
 ## State
