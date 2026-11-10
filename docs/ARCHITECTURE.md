@@ -183,8 +183,11 @@ The two differ in one flag, and the flag is the whole difference in what the rea
 | switch model | `true` | the same — regenerating and switching a model differ in nothing but the model they pass |
 | "…或新建回答卡片" (last row of the model menu) | — | a fresh session seeded before the turn (`retry`), for when the replaced answer must not be in the model's context |
 
-`group: false` (hide the replaced answer, no ring) remains accepted by the route for API callers,
-but no row sends it any more: the reader decides when an answer goes away, not the button.
+`group: false` (no group, no ring) is sent in exactly one case: regenerating a question **whose
+answer was deleted**. The question is then waiting for its first answer again, and a ring over one
+answer plus one deleted answer would read as "nothing was deleted at all" — so it starts over with
+a single answer. Every other regenerate joins the group: the reader decides when an answer goes
+away, not the button.
 Regenerating in place cannot give a clean context either — the log is append-only, so the replaced
 answer stays in it and therefore in the next request. The branch is the honest way to get that, and
 it is one menu row away.

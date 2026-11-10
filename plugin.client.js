@@ -1033,6 +1033,10 @@ async function branchFromTurn(options) {
 async function rerunTurnInPlace(options) {
   const result = await mutate({
     action: 'answer-run',
+    // Starting over: the question's answer was deleted, so the new turn must not
+    // join a group behind it - a ring over one answer and one deleted answer reads
+    // as "nothing was deleted at all".
+    ...(options.replace === true ? { group: false } : {}),
     sessionId: options.sessionId,
     turn: options.turn,
     ...(options.model === undefined || options.model === null
@@ -2901,21 +2905,25 @@ function UserRow(props) {
   async function retry() {
     if (typeof turn !== 'number') return;
     setError(null);
+    // A deleted answer means the question is waiting for its first answer again:
+    // regenerating then produces one answer, not another card behind a deleted one.
+    const answerGone = hidden.answer === true;
     const plan = await turnChangePlan(sessionId, turn);
     if (plan !== null) {
-      setRevert({ plan: plan, model: null, mode: 'model' });
+      setRevert({ plan: plan, model: null, mode: 'model', replace: answerGone });
       return;
     }
     setBusy(true);
     try {
-      // Same as the answer row: this question keeps one answer, replaced in place.
+      // Same as the answer row: this question keeps its answers behind the ring.
+      // A deleted answer is the exception - it starts over with a single answer.
       // A brand new conversation is one menu row away when the context has to be clean.
-
       await rerunTurnInPlace({
         sessionId: sessionId,
         turn: turn,
         model: state && state.model ? { provider: state.model.provider, model: state.model.model } : undefined,
         stopPrevious: prefs.stopPrevious,
+        replace: answerGone,
       });
       showToast(t('answerRegenerated'));
     } catch (e) {
@@ -2936,6 +2944,7 @@ function UserRow(props) {
         model: pending.model,
         mode: pending.mode,
         stopPrevious: prefs.stopPrevious,
+        ...(pending.replace === true ? { replace: true } : {}),
       });
       showToast(t('revertedToast', { count: String(pending.plan.files.length) }));
     } catch (e) {
@@ -3325,6 +3334,7 @@ function AssistantToolbar(props) {
         model: pending.model,
         mode: pending.mode,
         stopPrevious: prefs.stopPrevious,
+        ...(pending.replace === true ? { replace: true } : {}),
       });
       showToast(t('revertedToast', { count: String(pending.plan.files.length) }));
     } catch (e) {
