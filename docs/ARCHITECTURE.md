@@ -505,6 +505,15 @@ the ladder is rebuilt from the projection itself (`sessions.projectionStore(sess
 index in that same ascending list. The sheet is rewritten on every snapshot, empty included, so
 switching to a session with nothing hidden drops the previous session's rules.
 
+Hiding the mark is only half of it. The rail is a virtual list where each mark fills one pitch
+(`TURN_SPACING_PX = 10` in the app's `TurnNavigator`), and a hidden mark does not reclaim its
+slot — the rail would read as a run of marks with holes punched through it. So the sheet also pulls
+every mark after a hidden one up by the pitch it lost
+(`transform: translateY(-10px * hiddenBefore) !important`, the only way to add to the position the
+virtualizer writes inline). For the same reason the entry cannot simply be removed from
+`navigation.items()`: that list feeds the ladder the indices are measured against, so removing one
+item would shift every index after it and hide the wrong marks.
+
 No projection is written: registrants sharing the `turnOutline` key share one unit, so a second
 writer would fight the host's own frames. Nothing is written to the log either, so switching back
 restores the original preview.
