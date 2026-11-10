@@ -986,7 +986,6 @@ async function turnChangePlan(sessionId, turn) {
 async function rerunAfterRevert(options) {
   await mutate({ action: 'revert', sessionId: options.sessionId, turn: options.turn });
   if (options.mode === 'branch') return branchFromTurn(options);
-  if (options.mode === 'replace') return rerunTurnInPlace({ ...options, replace: true });
   return rerunTurnInPlace(options);
 }
 
@@ -1032,13 +1031,8 @@ async function branchFromTurn(options) {
  * asked to "read that PDF" without tools will happily pretend it did.
  */
 async function rerunTurnInPlace(options) {
-  const replace = options.replace === true;
   const result = await mutate({
     action: 'answer-run',
-    // Regenerating replaces the answer in this conversation: the host must not file
-    // the new turn under the question's group, or the row would grow a 1/2 ring and
-    // the replaced answer would stay reachable instead of being replaced.
-    ...(replace ? { group: false } : {}),
     sessionId: options.sessionId,
     turn: options.turn,
     ...(options.model === undefined || options.model === null
@@ -1050,20 +1044,10 @@ async function rerunTurnInPlace(options) {
     // rejected as "第 N 轮不存在".
     hidePrompt: true,
   });
-  // Switching a model keeps every answer of the question: the host files the new
-  // turn under the question's group and the card takes every member except the one
-  // on screen out of the flow, so the older answer stays reachable through the ring.
-  // Replacing hides the answer being replaced instead - one question, one answer,
-  // no second card, no ring.
-  if (replace) {
-    await hideMutate({
-      action: 'hide',
-      sessionId: options.sessionId,
-      turn: options.turn,
-      scope: 'answer',
-      hidden: true,
-    });
-  }
+  // Every answer of this question stays: the host files the new turn under the
+  // question's group and the card takes every member except the one on screen out of
+  // the flow, so the older answers stay reachable through the ring until the reader
+  // deletes them. Regenerating and switching a model differ in nothing else either.
   store.invalidate();
   return { kind: 'turn', turn: result && typeof result.turn === 'number' ? result.turn : null };
 }
@@ -2919,7 +2903,7 @@ function UserRow(props) {
     setError(null);
     const plan = await turnChangePlan(sessionId, turn);
     if (plan !== null) {
-      setRevert({ plan: plan, model: null, mode: 'replace' });
+      setRevert({ plan: plan, model: null, mode: 'model' });
       return;
     }
     setBusy(true);
@@ -2932,7 +2916,6 @@ function UserRow(props) {
         turn: turn,
         model: state && state.model ? { provider: state.model.provider, model: state.model.model } : undefined,
         stopPrevious: prefs.stopPrevious,
-        replace: true,
       });
       showToast(t('answerRegenerated'));
     } catch (e) {
@@ -3277,7 +3260,7 @@ function AssistantToolbar(props) {
     setError(null);
     const plan = await turnChangePlan(sessionId, turn);
     if (plan !== null) {
-      setRevert({ plan: plan, model: null, mode: 'replace' });
+      setRevert({ plan: plan, model: null, mode: 'model' });
       return;
     }
     setBusy(true);
@@ -3290,7 +3273,6 @@ function AssistantToolbar(props) {
         turn: turn,
         model: currentModel(),
         stopPrevious: prefs.stopPrevious,
-        replace: true,
       });
       showToast(t('answerRegenerated'));
     } catch (e) {

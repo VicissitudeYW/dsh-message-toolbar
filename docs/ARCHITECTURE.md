@@ -179,11 +179,13 @@ The two differ in one flag, and the flag is the whole difference in what the rea
 
 | row action | `group` | result on screen |
 | --- | --- | --- |
-| regenerate (answer row, question row) | `false` | the answer being replaced is hidden (`hide {scope:"answer"}`), the new turn is drawn natively — one question, one answer, **no ring** |
-| switch model | `true` | the new turn joins the question's group, so `‹ 1/2 ›` walks the real turns |
+| regenerate (answer row, question row) | `true` | the new turn joins the question's group, so `‹ 1/2 ›` walks the real turns; the answers stay until the reader deletes them |
+| switch model | `true` | the same — regenerating and switching a model differ in nothing but the model they pass |
 | "…或新建回答卡片" (last row of the model menu) | — | a fresh session seeded before the turn (`retry`), for when the replaced answer must not be in the model's context |
 
-Regenerating in place cannot also give a clean context: the log is append-only, so the replaced
+`group: false` (hide the replaced answer, no ring) remains accepted by the route for API callers,
+but no row sends it any more: the reader decides when an answer goes away, not the button.
+Regenerating in place cannot give a clean context either — the log is append-only, so the replaced
 answer stays in it and therefore in the next request. The branch is the honest way to get that, and
 it is one menu row away.
 
