@@ -428,7 +428,18 @@ the ones that are not chosen. Nothing is generated as text any more.
 `answer-run` replays the prompt on the session's own agent — a fresh turn with the same text — and hands
 back the turn it opened, with `hidePrompt` marking that prompt hidden in the same request (that turn is not
 in the log yet, so a later `hide` would be rejected). That prompt's question row is then hidden by the
-`prompt` mark in the table above and its rail entry is dropped. Both buttons reach it through
+`prompt` mark in the table above and its rail entry is dropped.
+
+The row must be hidden *before it is painted*, which takes three things working together,
+because the log records the replayed question the moment the followup is queued:
+
+- the client guesses the turn the replay will open (`last turn + 1`) and marks it before the
+  request leaves, so the row has something to hide it from the outset. The guess is retired when a
+  payload either contains that turn (the host's mark governs from then on) or has already moved past
+  it (nothing was opened, so the guess must not hide a later question);
+- the host writes its own mark when it queues the followup, so the row stays hidden across reloads;
+- the decorator decides inside the MutationObserver callback, which runs before the frame is
+  painted. A timer would run after it, and one painted frame is the flash this all exists to avoid. Both buttons reach it through
 `rerunAfterRevert` (below) — or directly, when nothing was reverted; the cost, when used, is one replayed
 prompt in the log — visible to the model on later turns.
 
