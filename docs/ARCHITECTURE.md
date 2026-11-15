@@ -574,11 +574,12 @@ so a second writer would fight the host's own frames), but it can be *read* thro
 `faceOf('turnOutline')` answers with a face that drops the forgotten turns. Every other key is
 untouched, and the patch is restored on dispose.
 
-That patch has to be on the prototype rather than on `sessions.projectionStore(sessionId)`: the app
-reaches the store through the Session object, which keeps the instance and never calls the method
-again. Which session a store belongs to is remembered in a WeakMap, filled both by the service method
-(whenever a caller asks) and by the sample taken at install time; a store whose session is still
-unknown answers unfiltered, which is exactly the stock behaviour.
+That patch goes on the prototype because the app reaches the store through the Session object
+(`binding(sessionId).session.projections`), which keeps the instance and never looks anything up on the
+service again. Since a store carries no session id of its own, `service.binding` is wrapped too: every
+binding tells us which session a store belongs to, and sessions already open when the plugin loads are
+walked once at install time (`binding` is a pure map lookup, so that costs nothing). A store whose
+session is still unknown answers unfiltered — exactly the stock behaviour.
 
 The face keeps its value's reference until either the host publishes a new value or the forgotten set
 changes — `useProjection` binds it with `useSyncExternalStore`, so a fresh array per call would

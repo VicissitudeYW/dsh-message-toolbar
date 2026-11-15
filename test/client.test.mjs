@@ -383,7 +383,9 @@ const projection = new ProjectionStore();
 
 const sessionsStub = {
   list: { getSnapshot: () => ({ byId: { 'session-x': { id: 'session-x', running: false } } }), subscribe: () => () => {} },
-  projectionStore: () => projection,
+  // The app reaches a session's projections through its binding, never through a
+  // store lookup on the service: this is the shape the filter has to hook.
+  binding: () => ({ session: { id: 'session-x', projections: projection } }),
 };
 
 // The chat target the rail reads: its items are the loaded Turns, and the app
@@ -528,12 +530,13 @@ if (run !== undefined) {
   // The plugin wraps `sessions.projectionStore` during apply, so this is the
   // wrapped store: `turnOutline` must answer without the deleted turn and
   // without the replay of a question that was asked again.
-  const face = sessionsStub.projectionStore('session-x').faceOf('turnOutline');
+  const store = sessionsStub.binding('session-x').session.projections;
+  const face = store.faceOf('turnOutline');
   const first = face.getSnapshot();
   check('the outline drops the deleted turn and the replay', first.map((entry) => entry.turn), [1, 3, 5]);
   check('the outline keeps its keepers', first.map((entry) => entry.prompt), ['p1', 'p3', 'p5']);
   check('the filtered value keeps its identity', face.getSnapshot(), first);
-  check('a plain key is passed through', sessionsStub.projectionStore('session-x').faceOf('title').getSnapshot(), undefined);
+  check('a plain key is passed through', store.faceOf('title').getSnapshot(), undefined);
 
   // The chat target's items are the other half of the merge; a turn missing from
   // one half still shows, so both have to agree.
