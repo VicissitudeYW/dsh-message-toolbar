@@ -260,7 +260,18 @@ const fetchStub = async function (url, init) {
     return { ok: true, status: 200, json: async () => body };
   }
   if ((init && init.method) === 'POST') {
-    return { ok: true, status: 200, json: async () => ({ runs: {}, hidden: {}, prompts: {}, answers: {} }) };
+    let sent = {};
+    try { sent = JSON.parse(String(init.body)); } catch (e) {}
+    if (sent.action === 'prompt-save') {
+      const entry = { text: sent.text, at: 1 };
+      if (Array.isArray(sent.files) && sent.files.length > 0) entry.files = sent.files;
+      // The save is durable: a later GET has to answer with it too.
+      statePayload.prompts[String(sent.turn)] = entry;
+      return { ok: true, status: 200, json: async () => ({ prompts: statePayload.prompts }) };
+    }
+    // The real host answers a run with its runs only: it never sends an empty
+    // prompt table, which would read as "this question has no attachments".
+    return { ok: true, status: 200, json: async () => ({ runs: {} }) };
   }
   return { ok: true, status: 200, json: async () => statePayload };
 };
@@ -283,16 +294,29 @@ globalThis.MutationObserver = windowStub.MutationObserver;
 
 globalThis.__ModuleLoader__ = windowStub.__ModuleLoader__;
 
+URL.createObjectURL = function () { return 'blob:preview-1'; };
+
 const ReactDom = {
   createPortal(node) { return node; },
   createRoot(container) {
-    return { render(element) { ReactDom.last = element; }, unmount() {} };
+    const slot = { element: null };
+    ReactDom.roots.push(slot);
+    return {
+      render(element) { slot.element = element; ReactDom.last = element; },
+      unmount() {},
+    };
   },
 };
 ReactDom.last = null;
+// Every root the plugin mounted, in mount order: the row's own, and the one that
+// draws the question's attachments above the bubble.
+ReactDom.roots = [];
 
 const primitives = {
   Menu(props) { return React.createElement('div', { 'data-native-menu': '', 'data-count': String((props.items || []).length) }); },
+  FileTypeIcon(props) { return React.createElement('span', { 'data-file-icon': props.path }); },
+  fileExtension(name) { const dot = String(name).lastIndexOf('.'); return dot < 0 ? '' : String(name).slice(dot + 1); },
+  fileSizeText(bytes) { return bytes < 1024 ? bytes + 'B' : (bytes / 1024).toFixed(1) + 'KB'; },
   Toast(props) { return React.createElement('div', { className: 'native-toast' }, props.text); },
   MarkdownText: { $$memo: true, fn: (props) => React.createElement('div', { className: 'native-md' }, props.text) },
   TextShimmer: { $$memo: true, fn: (props) => React.createElement('span', {}, props.children) },
@@ -384,10 +408,14 @@ check('it names the study session and the file', upload[0].url, '/api/session/up
 check('it sends the bytes as a stream', upload[0].init.headers['content-type'], 'application/octet-stream');
 check('it posts', upload[0].init.method, 'POST');
 
-const chips = findAll(tree, (node) => typeof node.props.className === 'string' && node.props.className === 'mtt-attach');
-check('the file shows as one chip', chips.length, 1);
-check('the chip is named', textOf(chips[0]).indexOf('notes.pdf') !== -1, true);
-check('the chip shows the size', textOf(chips[0]).indexOf('2.0 KB') !== -1, true);
+const rail = findAll(tree, (node) => typeof node.props.className === 'string' && node.props.className === 'mtt-rail')[0];
+check('the cards sit in a rail, as in the composer', rail !== undefined, true);
+const cards = findAll(tree, (node) => typeof node.props.className === 'string' && node.props.className === 'mtt-file');
+check('the file shows as the app\'s own card', cards.length, 1);
+check('the card is named', textOf(cards[0]).indexOf('notes.pdf') !== -1, true);
+check('the card leads with the suffix and the size', textOf(cards[0]).indexOf('PDF 2.0KB') !== -1, true);
+check('the card draws the category glyph', findAll([cards[0]], (node) => node.props && node.props['data-file-icon'] === 'notes.pdf').length, 1);
+check('the card can be taken back out', findAll([cards[0]], (node) => typeof node.props.className === 'string' && node.props.className === 'mtt-file-remove').length, 1);
 
 // 3. an image is admitted as an image, not as a file
 editor.props.onDrop({
@@ -399,9 +427,12 @@ tree = render(mount);
 const imageUpload = calls.filter((call) => call.url.indexOf('mediaType=') !== -1)[0];
 check('the image upload names its media type', imageUpload !== undefined ? imageUpload.url : null,
   '/api/session/uploadFileBinary?sessionId=session-x&name=shot.png&mediaType=image%2Fpng');
-const chipsNow = findAll(tree, (node) => typeof node.props.className === 'string' && node.props.className === 'mtt-attach');
-check('both attachments are listed', chipsNow.length, 2);
-check('the image chip shows its size in pixels', textOf(chipsNow[1]).indexOf('640 × 480') !== -1, true);
+const tiles = findAll(tree, (node) => typeof node.props.className === 'string' && node.props.className === 'mtt-tile');
+check('the picture shows as a thumbnail', tiles.length, 1);
+const picture = findAll([tiles[0]], (node) => node.type === 'img')[0];
+check('the thumbnail carries the dropped bytes', picture === undefined ? null : picture.props.src, 'blob:preview-1');
+check('both attachments are listed', findAll(tree, (node) => typeof node.props.className === 'string'
+  && (node.props.className === 'mtt-file' || node.props.className === 'mtt-tile')).length, 2);
 
 // 4. sending replays the question with the files attached
 const sendButton = findAll(tree, (node) => typeof node.props.className === 'string' && node.props.className.indexOf('mtt-btn-primary') !== -1)[0];
@@ -411,6 +442,10 @@ await new Promise((resolve) => setTimeout(resolve, 20));
 tree = render(mount);
 
 const posts = calls.filter((call) => call.init.method === 'POST' && call.url.indexOf('/message-toolbar') === 0);
+const saved = posts.filter((call) => {
+  try { return JSON.parse(call.init.body).action === 'prompt-save'; } catch (e) { return false; }
+}).pop();
+check('saving the question also saves the rail', saved === undefined ? null : JSON.parse(saved.init.body).files.length, 2);
 const run = posts.filter((call) => {
   try { return JSON.parse(call.init.body).action === 'answer-run'; } catch (e) { return false; }
 }).pop();
@@ -422,6 +457,24 @@ if (run !== undefined) {
     { type: 'image', attachment: { attachmentId: 'img-1', width: 640, height: 480 } },
   ]);
   check('the run names the turn', body.turn, 1);
+}
+
+// 5. the question keeps showing its attachments, above the bubble
+{
+  const mounted = ReactDom.roots.map((slot) => slot.element).filter((element) => element !== null);
+  // The row reads the plugin state through the store, which reloads the session
+  // payload after a run: let that land, then draw again.
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  const rows = mounted.flatMap((element) => {
+    const one = render({ type: element.type, props: Object.assign({}, element.props, { sessionId: 'session-x', turn: 1 }) });
+    return findAll(one, (node) => typeof node.props.className === 'string' && node.props.className === 'mtt-attach-row');
+  });
+  check('the question row draws its attachments', rows.length, 1);
+  if (rows.length === 1) {
+    check('the row shows the file card', findAll(rows, (node) => typeof node.props.className === 'string' && node.props.className === 'mtt-file').length, 1);
+    check('the row shows the picture', findAll(rows, (node) => typeof node.props.className === 'string' && node.props.className === 'mtt-tile').length, 1);
+    check('the row offers no remove button', findAll(rows, (node) => typeof node.props.className === 'string' && node.props.className === 'mtt-file-remove').length, 0);
+  }
 }
 
 console.log(failures === 0 ? '\nall good' : '\n' + failures + ' failure(s)');

@@ -3,7 +3,7 @@
 // picks it up. A `file:` install creates a real directory copy, so rebuilding
 // in this repo is not enough on its own.
 //
-//   node scripts/sync-profile.mjs          # ~/.dsh/profiles/web
+//   node scripts/sync-profile.mjs          # the profile that exists (desktop, else web)
 //   node scripts/sync-profile.mjs desktop  # ~/.dsh/profiles/desktop
 
 import fs from 'node:fs';
@@ -13,7 +13,20 @@ import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
-const profile = process.argv[2] ?? 'web';
+
+/** The profile argument, or the only one installed: the desktop app comes first. */
+function pickProfile() {
+  const asked = process.argv[2];
+  if (asked !== undefined) return asked;
+  const base = path.join(os.homedir(), '.dsh', 'profiles');
+  const candidates = ['desktop', 'web'];
+  for (const name of candidates) {
+    if (fs.existsSync(path.join(base, name, 'node_modules'))) return name;
+  }
+  return 'web';
+}
+
+const profile = pickProfile();
 const target = path.join(os.homedir(), '.dsh', 'profiles', profile, 'node_modules', 'dsh-message-toolbar');
 
 if (!fs.existsSync(path.dirname(target))) {

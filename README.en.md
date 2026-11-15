@@ -27,9 +27,17 @@ A message toolbar plugin for DSH (DeepSeek Harness).
 
 While editing a question, **files dropped into the editor** leave with it; the paperclip in its
 corner picks them too. They go through DSH's own upload route and land in the same attachment store
-as anything you attach in the composer — images stay images — and the editor lists each one with its
-size so you can take it back before sending. A question that already carried attachments replays
-with them.
+as anything you attach in the composer — images stay images.
+
+The editor is not its own design: it is the composer's. Same surface and panel radius, the rail above
+the text, pictures as 64px thumbnails and files as the app's 240×64 cards (type glyph, name, and a
+`PDF 4.2KB` line), with the remove button appearing on hover exactly as it does up there. A question
+that already carried attachments replays with them.
+
+After sending, the question **shows its attachments above the bubble** — the position and the cards
+the app uses for a question that carried them — because the plugin stored them
+(`prompts[turn].files` in `~/.dsh/message-toolbar/state.json`) instead of keeping them in the
+editor's short-lived state. Reload the page and they are still there.
 
 ## Limits
 

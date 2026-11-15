@@ -10,6 +10,17 @@ process.env.HOME = home;
 
 const root = new URL('../lib/index.js', import.meta.url).href.replace(/lib\/index\.js$/, '');
 const { apply, MESSAGE_TOOLBAR_PATH } = await import(root + 'lib/index.js');
+const { flushState, reloadState, promptFiles } = await import(root + 'lib/state-store.js');
+
+// Every case starts from an empty plugin state: attachments a reader dropped are
+// remembered across replays, which is exactly what makes one case leak into the
+// next one otherwise.
+const STATE_FILE = path.join(home, '.dsh', 'message-toolbar', 'state.json');
+function resetState() {
+  try { flushState(); } catch (e) {}
+  rmSync(STATE_FILE, { force: true });
+  reloadState();
+}
 
 let failures = 0;
 function check(label, actual, expected) {
@@ -87,12 +98,24 @@ function response() {
 }
 
 async function run(events, body) {
+  resetState();
   queued = [];
   const { handler } = makeContext(events);
   const res = response();
   await handler(request(body), res);
   return { status: res.status, payload: JSON.parse(res.body || '{}'), queued };
 }
+
+/** Same, without clearing the plugin state: for "what does the next pass see?". */
+async function replay(events, body) {
+  queued = [];
+  const { handler } = makeContext(events);
+  const res = response();
+  await handler(request(body), res);
+  return { status: res.status, payload: JSON.parse(res.body || '{}'), queued };
+}
+
+
 
 // 1. a dropped file travels with the replayed question
 {
@@ -121,7 +144,25 @@ async function run(events, body) {
   check('keeps the original id', sent[0].id === 'u2', false);
 }
 
-// 4. bad payloads are refused as client errors
+// 4. the attachments are remembered: the row keeps drawing them, and a later
+//    replay still carries them even though that pass dropped nothing new.
+{
+  resetState();
+  const file = { type: 'file', attachment: { attachmentId: 'att-keep', name: 'keep.txt', bytes: 3 } };
+  const first = await replay(log('second'), { action: 'answer-run', sessionId: 'session-attach-1', turn: 2, files: [file] });
+  check('first pass carries it', first.queued[0].content, [{ type: 'text', text: 'second' }, file]);
+  const after = await replay(log('second'), { action: 'prompt-save', sessionId: 'session-attach-1', turn: 2, text: 'second', files: [file] });
+  check('the state remembers them', promptFiles('session-attach-1', 2), [file]);
+  check('the save answered with them', after.payload.prompts['2'].files, [file]);
+  const second = await replay(log('second'), { action: 'answer-run', sessionId: 'session-attach-1', turn: 2 });
+  check('the next pass still carries it', second.queued[0].content, [{ type: 'text', text: 'second' }, file]);
+  // Saving without `files` (an answer edit, not a question edit) leaves them be.
+  const saved = await replay(log('second'), { action: 'prompt-save', sessionId: 'session-attach-1', turn: 2, text: 'rewritten' });
+  check('a text-only save keeps them', saved.payload.prompts['2'].files, [file]);
+  check('a text-only save stores the wording', saved.payload.prompts['2'].text, 'rewritten');
+}
+
+// 5. bad payloads are refused as client errors
 {
   const bad = await run(log('second'), { action: 'answer-run', sessionId: 'session-attach-1', turn: 2, files: [{ type: 'text', text: 'nope' }] });
   check('refuses a text block as an attachment', bad.status, 400);

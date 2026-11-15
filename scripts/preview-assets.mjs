@@ -14,12 +14,25 @@ const THEME_CLIENT = process.env.DSH_THEME_CLIENT
   ?? 'D:/Dev/npm/npm-global/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-theme/lib/client.js';
 
 /**
+ * Where the app's theme variables come from for a preview.
+ *
+ * `test/theme-tokens.css` holds the light and dark blocks exactly as they were
+ * extracted from `@deepseek-ai/dsh-client-ui-theme` (the same two blocks this
+ * function used to pull out of its client bundle at run time). It is committed
+ * because the packages live inside the desktop app's `app.asar`, which no file
+ * system path can reach — and because a preview that pins its tokens is a
+ * preview that keeps rendering after the install moves.
+ */
+const THEME_TOKENS = path.join(root, 'test', 'theme-tokens.css');
+
+/**
  * Every light and dark token block from the theme plugin. Declared on `body` and
  * `body[data-ds-dark-theme]`, which is exactly why the plugin's own aliases live
  * on `body` too — a `:root` alias would resolve once, at parse time, and freeze
  * the light values.
  */
 export function themeCss() {
+  if (fs.existsSync(THEME_TOKENS)) return fs.readFileSync(THEME_TOKENS, 'utf8');
   const source = fs.readFileSync(THEME_CLIENT, 'utf8');
   const chunks = [];
   for (const match of source.matchAll(/"((?:[^"\\]|\\.){500,})"/g)) {
@@ -56,6 +69,13 @@ export function pluginCss() {
     useReducer(reducer, init) { return [init, function () {}]; },
     useEffect() {},
     useRef(init) { return { current: init === undefined ? null : init }; },
+    // The answer body is wrapped in an error boundary, so the capture needs the
+    // class base to construct at all.
+    Component: class Component {
+      constructor(props) { this.props = props; this.state = {}; }
+      setState() {}
+      render() { return null; }
+    },
   };
   const mod = entry.factory((name) => {
     if (name === 'react') return React;

@@ -20,13 +20,16 @@ const markup = `
     <div class="mtt-line">
       <div class="mtt-stack">
         <div class="mtt-attach-row">
-          <span class="mtt-file-card" title="CV.pdf">
-            <svg class="mtt-file-icon" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true"><path d="M7 3.5h9l5 5v16a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1v-20a1 1 0 0 1 1-1Z"></path><path d="M16 3.5v5h5"></path></svg>
-            <span class="mtt-file-content">
-              <span class="mtt-file-name">CV.pdf</span>
-              <span class="mtt-file-meta">PDF 248.6 KB</span>
-            </span>
-          </span>
+          <div class="mtt-tile">
+            <img class="mtt-tile-img" alt="shot.png" src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%237aa7f7'/%3E%3Cstop offset='1' stop-color='%234b6fa8'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' fill='url(%23g)'/%3E%3Ccircle cx='46' cy='18' r='7' fill='%23ffffff' opacity='.75'/%3E%3Cpath d='M0 52l20-16 14 11 12-8 18 13v12H0z' fill='%23ffffff' opacity='.35'/%3E%3C/svg%3E">
+          </div>
+          <div class="mtt-file" title="CV.pdf">
+            <span class="mtt-file-icon mtt-file-icon-plain">PDF</span>
+            <div class="mtt-file-body">
+              <div class="mtt-file-name">CV.pdf</div>
+              <div class="mtt-file-meta">PDF 248.6KB</div>
+            </div>
+          </div>
         </div>
         <div class="mtt-bubble">帮我把深色模式适配一下，顺便看看用户消息的框为什么变灰了。</div>
       </div>
@@ -116,7 +119,7 @@ const markup = `
   </div>
 
   <div class="mtt-answer">
-    <div class="mtt-answer-edit">
+    <div class="mtt-answer-edit mtt-answer-edit-prompt">
       <div class="mtt-answer-edit-head">
         <span class="mtt-answer-edit-label">Editing · 编辑中</span>
         <span class="mtt-answer-edit-tools">
@@ -124,18 +127,34 @@ const markup = `
           <button class="mtt-btn mtt-btn-small mtt-btn-primary">Save</button>
         </span>
       </div>
+      <div class="mtt-rail">
+        <div class="mtt-tile">
+          <img class="mtt-tile-img" alt="drop.png" src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64'%3E%3Crect width='64' height='64' fill='%23d8e3f6'/%3E%3Cpath d='M8 46l14-14 10 8 9-7 15 13v10H8z' fill='%236f8fbd'/%3E%3Ccircle cx='44' cy='18' r='6' fill='%23f2f6ff'/%3E%3C/svg%3E">
+          <button class="mtt-tile-remove" type="button" title="Remove">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" aria-hidden="true"><path d="M3 3l10 10M13 3L3 13"></path></svg>
+          </button>
+        </div>
+        <div class="mtt-file" title="notes.pdf">
+          <span class="mtt-file-icon mtt-file-icon-plain">PDF</span>
+          <div class="mtt-file-body">
+            <div class="mtt-file-name">notes.pdf</div>
+            <div class="mtt-file-meta">PDF 4.2KB</div>
+          </div>
+          <button class="mtt-file-remove" type="button" title="Remove">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" aria-hidden="true"><path d="M3 3l10 10M13 3L3 13"></path></svg>
+          </button>
+        </div>
+        <div class="mtt-file mtt-file-busy" title="Uploading">
+          <span class="mtt-file-spin"></span>
+          <div class="mtt-file-body"><div class="mtt-file-name">Uploading…</div></div>
+        </div>
+      </div>
       <textarea class="mtt-answer-edit-input" rows="7">### 一、你的清单里漏了刷题
 
 你上一条自己说的是 "每天刷题 + Zero to Hero + 项目"，这一条却把刷题丢了。刷题是**唯一一个必须每天碰**的东西。
 
 把它当成刷牙：**不看心情，每天 1–2 题**，Hot 100 为主。</textarea>
     </div>
-  </div>
-
-  <div class="mtt-hidden">
-    <span class="mtt-hidden-icon">⌦</span>
-    <span class="mtt-hidden-note">Answer deleted from the transcript view</span>
-    <button class="mtt-btn mtt-btn-small">Restore</button>
   </div>
 
   <div class="mtt-toast mtt-toast-ok mock-static">Answer deleted</div>

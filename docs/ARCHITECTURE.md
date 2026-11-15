@@ -241,6 +241,33 @@ replayed `user/message` is an ordinary prompt, and the runtime already accepts a
 read back from the store. Dropping the original's non-text parts matters for the same reason — a
 regenerate of a question that had a PDF must not answer a question that no longer has it.
 
+#### Where the list lives, and who else reads it
+
+`prompts[sessionId][turn].files` holds the attachments of a question, in the order they were added.
+It is written in two places and read in one:
+
+- `prompt-save` replaces it when the client sends `files` (the editor owns the whole list, so a
+  removal is a save too); a save without `files` — the words changed, the rail did not — leaves it
+  alone.
+- `answer-run` writes back `plan.attachments` after queueing the message: exactly what went into the
+  replay, merged with the stored list by `type:attachmentId` so a second edit neither loses nor
+  duplicates an attachment.
+- The client draws it above the bubble of the question, which is why the attachments stay visible
+  after sending and survive a reload. The log cannot serve this: a question the reader edited and did
+  not re-send has no entry of its own, and the replayed copy is hidden.
+
+The rail and the cards are the app's components in everything but name: no slot exposes them, so the
+geometry is copied from `dsh-client-ui-chat`'s `MessageItem.module.css` and
+`dsh-client-ui-attachment`'s `FileCard.module.css` (64px tiles, 240×64 cards, hover-only remove),
+while `FileTypeIcon`, `fileExtension` and `fileSizeText` are taken from
+`@deepseek-ai/dsh-client-ui-primitives` at run time — the same helpers the app uses, so `4.2KB`
+reads the same in both places. A picture that was just dropped is drawn from an object URL until
+`uiConversation.imageUrl(sessionId, attachment)` can answer with the stored one.
+
+`scripts/preview-assets.mjs` reads the theme tokens from `test/theme-tokens.css`, a committed
+extract of `@deepseek-ai/dsh-client-ui-theme`'s two blocks: the packages now live inside the desktop
+app's `app.asar`, which no path can reach, and a pinned extract keeps the preview reproducible.
+
 ## State
 
 `~/.dsh/message-toolbar/state.json`:
@@ -249,13 +276,17 @@ regenerate of a question that had a PDF must not answer a question that no longe
 { "schema": 1,
   "deleted": { "<sessionId>": { "at": 0, "operation": "...", "targetTurn": 0 } },
   "answers": { "<sessionId>": { "<turn>": { "active": "native", "items": [] } } },
-  "hidden": { "<sessionId>": { "turns": [1, 4], "answers": [2] } },
+  "hidden": { "<sessionId>": { "turns": [1, 4], "answers": [2], "prompts": [9] } },
   "translations": { "<sessionId>": { "<eventSeq|turn:n>": { "<lang>": { "text": "...", "at": 0 } } } },
-  "prompts": { "<sessionId>": { "<turn>": { "text": "...", "at": 0 } } },
+  "prompts": { "<sessionId>": { "<turn>": { "text": "...", "at": 0, "files": [{ "type": "file", "attachment": { "attachmentId": "..." } }] } } },
   "runs": { "<sessionId>": { "<turn>": { "turns": [2, 5], "active": 5, "models": { "5": { "provider": "...", "model": "..." } } } } },
   "shown": { "<sessionId>": { "<turn>": "<lang>" } },
   "origins": { "<sessionId>": { "<turn>": "<text the reader saw>" } } }
 ```
+
+`prompts` carries what the reader changed about a question: the wording it reads as now (`text`,
+absent when only the rail changed) and the attachments dropped into it (`files`, absent when there are
+none). A turn with neither is not an entry at all.
 
 `answers` holds text variants — answers that deliberately never entered the session log, written by
 versions before 1.2.0 and still readable; `active: "native"` means the logged answer is the
