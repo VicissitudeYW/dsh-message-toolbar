@@ -16,7 +16,7 @@ A message toolbar plugin for DSH (DeepSeek Harness).
 
 | Action | Where | What happens |
 | --- | --- | --- |
-| **Edit** | user messages | Changes the text shown for that question. |
+| **Edit** | user messages | Rewrites that question — drop files into the editor and they leave with it. |
 | **Regenerate** | assistant messages | Answers again in place, without opening a new conversation. The fresh answer to the same question is stored as a variant of that turn and swapped in for the logged one. `‹ 1/2 ›` switches between them. |
 | **Switch model** | assistant messages | Every model's answer becomes a variant of the same turn; `‹ 2/3 ›` walks them without leaving the conversation. |
 | **Undo file edits** | before regenerate / switch model | If the answer being replaced edited files, the row lists them and asks first. Confirming puts every file back the way it was before that answer; switching a model then adds the new answer to the `‹ 1/3 ›` ring. |
@@ -24,6 +24,12 @@ A message toolbar plugin for DSH (DeepSeek Harness).
 | **Translate** | assistant messages | Pressing translate opens a dropdown of target languages; pick one and the answer is redrawn block by block, original and translation side by side. |
 | **Delete message / answer** | user messages / assistant messages | Removes a whole turn (message, answer, tool cards) or a single answer from the conversation. |
 | **Version tree** | conversation view | A turn-level branching tree of the whole conversation family, with the active path highlighted, model labels, timestamps, and restore/delete controls. |
+
+While editing a question, **files dropped into the editor** leave with it; the paperclip in its
+corner picks them too. They go through DSH's own upload route and land in the same attachment store
+as anything you attach in the composer — images stay images — and the editor lists each one with its
+size so you can take it back before sending. A question that already carried attachments replays
+with them.
 
 ## Limits
 

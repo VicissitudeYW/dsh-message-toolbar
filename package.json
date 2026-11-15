@@ -1,9 +1,12 @@
 {
   "name": "dsh-message-toolbar",
-  "version": "1.5.5",
+  "version": "1.6.0",
   "description": "DSH message toolbar: copy, regenerate and switch models in place, edit answers, bilingual translation, edit user turns, delete and a version tree",
   "license": "MIT",
-  "repository": { "type": "git", "url": "git+https://github.com/VicissitudeYW/dsh-message-toolbar.git" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/VicissitudeYW/dsh-message-toolbar.git"
+  },
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -63,6 +66,6 @@
   "scripts": {
     "build": "node scripts/build-client.mjs",
     "sync": "node scripts/build-client.mjs && node scripts/sync-profile.mjs",
-    "test": "node --test test/host.test.mjs test/logic.test.mjs test/bundle.test.mjs"
+    "test": "node test/attachments.host.test.mjs && node test/attachments.client.test.mjs"
   }
 }

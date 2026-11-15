@@ -218,6 +218,29 @@ what "regenerate this failed answer" should use, and now does.
 
 Errors: `TypeError` → `400 {error}`, anything else → `409 {error}`.
 
+### Files dropped into a question
+
+The editor of a question accepts files, and they leave with the answer:
+
+1. The client posts each dropped file, unchanged, to the app's own upload route
+   (`POST /api/session/uploadFileBinary?sessionId=…&name=…[&mediaType=…]`, body
+   `application/octet-stream`). That is the route the composer itself uses, so nothing is stored
+   twice and no new storage is invented here: the bytes are committed to the attachment store and
+   the answer carries the durable reference. An image is uploaded with `mediaType`, so it is
+   admitted, validated and normalized as an image instead of being kept as an opaque file.
+2. `answer-run` gains `files: [{type: 'file'|'image', attachment: {attachmentId, …}}]` — the blocks
+   exactly as the upload answered them. `promptAttachments` checks only their identity (the type and
+   the `attachmentId`) and passes the reference through untouched; a bad shape is a `400`.
+3. `retryPlan` rebuilds the replayed message with `replayedContent`: the text as it reads now, every
+   part of the original message that is not text (a file the question already carried), then the new
+   ones. When neither the text nor the files changed, the message is cloned verbatim instead, so an
+   ordinary regenerate keeps its exact shape.
+
+A durable reference rather than a per-session staged receipt is what makes this work at all: the
+replayed `user/message` is an ordinary prompt, and the runtime already accepts attachments it can
+read back from the store. Dropping the original's non-text parts matters for the same reason — a
+regenerate of a question that had a PDF must not answer a question that no longer has it.
+
 ## State
 
 `~/.dsh/message-toolbar/state.json`:

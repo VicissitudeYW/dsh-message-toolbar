@@ -1,0 +1,137 @@
+// Harness for the 1.6.0 host change: a replayed question carries dropped files.
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+
+const home = mkdtempSync(path.join(tmpdir(), 'mtt-attach-home-'));
+process.env.USERPROFILE = home;
+process.env.HOME = home;
+
+const root = new URL('../lib/index.js', import.meta.url).href.replace(/lib\/index\.js$/, '');
+const { apply, MESSAGE_TOOLBAR_PATH } = await import(root + 'lib/index.js');
+
+let failures = 0;
+function check(label, actual, expected) {
+  const a = JSON.stringify(actual);
+  const e = JSON.stringify(expected);
+  if (a === e) { console.log('ok   ' + label); return; }
+  failures += 1;
+  console.log('FAIL ' + label + '\n  actual:   ' + a + '\n  expected: ' + e);
+}
+
+function userMessage(id, text, extra) {
+  return { id, role: 'user', content: [{ type: 'text', text }, ...(extra || [])], source: { kind: 'user' } };
+}
+
+function assistantMessage(id) {
+  return { id, role: 'assistant', content: [{ type: 'text', text: 'answer' }], source: { kind: 'model', provider: 'p', model: 'm' } };
+}
+
+function log(question, extra) {
+  return [
+    { seq: 0, type: 'turn/start', data: { turn: 1 } },
+    { seq: 1, type: 'user/message', data: userMessage('u1', 'first', undefined) },
+    { seq: 2, type: 'assistant/message', data: { turn: 1, step: 1, message: assistantMessage('a1'), stream: [] } },
+    { seq: 3, type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
+    { seq: 4, type: 'turn/start', data: { turn: 2 } },
+    { seq: 5, type: 'user/message', data: userMessage('u2', question, extra) },
+    { seq: 6, type: 'assistant/message', data: { turn: 2, step: 1, message: assistantMessage('a2'), stream: [] } },
+    { seq: 7, type: 'turn/end', data: { turn: 2, reason: { kind: 'completed' } } },
+  ];
+}
+
+let queued = [];
+function makeContext(events) {
+  const routes = new Map();
+  const agent = {
+    session: { header: { id: 'session-attach-1', cwd: 'D:/work' }, events },
+    followup(message) { queued.push(message); },
+    runMaintenance(fn) { return fn(); },
+    cancel() { return true; },
+    whenIdle() { return Promise.resolve(); },
+  };
+  const ctx = {
+    effect(fn) { fn(); return () => {}; },
+    webServer: { register(route) { routes.set(route.path, route.handler); return () => {}; } },
+    agents: { get: (id) => (id === 'session-attach-1' ? agent : undefined) },
+    sessions: { get: () => undefined },
+    llm: { listProviders: () => [], listModels: async () => [], stream: async function* () {} },
+  };
+  apply(ctx);
+  return { handler: routes.get(MESSAGE_TOOLBAR_PATH), ctx };
+}
+
+function request(body) {
+  const chunks = [Buffer.from(JSON.stringify(body), 'utf8')];
+  const listeners = {};
+  return {
+    method: 'POST',
+    url: MESSAGE_TOOLBAR_PATH,
+    headers: { 'content-type': 'application/json' },
+    on(event, fn) { (listeners[event] ||= []).push(fn); if (event === 'data') chunks.forEach((c) => fn(c)); if (event === 'end') fn(); return this; },
+  };
+}
+
+function response() {
+  return {
+    status: 0,
+    body: '',
+    headersSent: false,
+    writableEnded: false,
+    writeHead(status) { this.status = status; this.headersSent = true; },
+    write(text) { this.body += text; return true; },
+    flushHeaders() {},
+    end(text) { if (text) this.body += text; this.writableEnded = true; },
+  };
+}
+
+async function run(events, body) {
+  queued = [];
+  const { handler } = makeContext(events);
+  const res = response();
+  await handler(request(body), res);
+  return { status: res.status, payload: JSON.parse(res.body || '{}'), queued };
+}
+
+// 1. a dropped file travels with the replayed question
+{
+  const file = { type: 'file', attachment: { attachmentId: 'att-1', name: 'spec.pdf', bytes: 1234 } };
+  const { status, queued: sent } = await run(log('second'), { action: 'answer-run', sessionId: 'session-attach-1', turn: 2, files: [file] });
+  check('status', status, 200);
+  check('one message queued', sent.length, 1);
+  check('content', sent[0].content, [{ type: 'text', text: 'second' }, file]);
+  check('role', sent[0].role, 'user');
+  check('fresh id', typeof sent[0].id === 'string' && sent[0].id !== 'u2', true);
+  check('source', sent[0].source, { kind: 'user' });
+}
+
+// 2. an attachment the question already had survives, before the new one
+{
+  const existing = { type: 'file', attachment: { attachmentId: 'att-old', name: 'old.txt', bytes: 5 } };
+  const dropped = { type: 'image', attachment: { attachmentId: 'att-new', name: 'shot.png', width: 10, height: 10 } };
+  const { queued: sent } = await run(log('second', [existing]), { action: 'answer-run', sessionId: 'session-attach-1', turn: 2, files: [dropped] });
+  check('keeps the old attachment first', sent[0].content, [{ type: 'text', text: 'second' }, existing, dropped]);
+}
+
+// 3. no files at all: the message is replayed exactly as it was
+{
+  const { queued: sent } = await run(log('second'), { action: 'answer-run', sessionId: 'session-attach-1', turn: 2 });
+  check('untouched replay', sent[0].content, [{ type: 'text', text: 'second' }]);
+  check('keeps the original id', sent[0].id === 'u2', false);
+}
+
+// 4. bad payloads are refused as client errors
+{
+  const bad = await run(log('second'), { action: 'answer-run', sessionId: 'session-attach-1', turn: 2, files: [{ type: 'text', text: 'nope' }] });
+  check('refuses a text block as an attachment', bad.status, 400);
+  const notArray = await run(log('second'), { action: 'answer-run', sessionId: 'session-attach-1', turn: 2, files: 'x' });
+  check('refuses a non-array', notArray.status, 400);
+  const noId = await run(log('second'), { action: 'answer-run', sessionId: 'session-attach-1', turn: 2, files: [{ type: 'file', attachment: { name: 'x' } }] });
+  check('refuses a reference without an id', noId.status, 400);
+  check('nothing was queued', noId.queued.length, 0);
+}
+
+rmSync(home, { recursive: true, force: true });
+console.log(failures === 0 ? '\nall good' : '\n' + failures + ' failure(s)');
+process.exit(failures === 0 ? 0 : 1);
