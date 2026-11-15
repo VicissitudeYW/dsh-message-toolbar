@@ -546,42 +546,53 @@ which is a separate, much larger operation.
 The rail on the right is fed from two places, both folded from the log: the host's `turnOutline`
 session projection (every turn, loaded or not) and the chat view's own navigation items, which win
 for a turn that is loaded (`dsh-client-ui-chat`, `mergeTurnRailItems`). Neither knows about a variant,
-an edit, or a delete — those live in this plugin's state, not in the log.
+an edit, or a delete — those live in this plugin's state, not in the log. So both halves are patched.
 
-The seam is the loaded half. `ChatView` asks `ctx.uiConversation.binding(session).target('chat')` for
-a snapshot whose `navigation.items()` is the list it merges, so `installRailSync` wraps
-`binding` (once, in `ctx.inject(['uiConversation'], …)`) and hands back a proxy that only rewrites
-the `chat` target's snapshot:
+**The loaded half.** `ChatView` asks `ctx.uiConversation.binding(session).target('chat')` for a
+snapshot whose `navigation.items()` is one side of the merge, so `installRailSync` wraps `binding`
+(once, in `ctx.inject(['uiConversation'], …)`) and hands back a proxy that only rewrites the `chat`
+target's snapshot:
 
-- items for a deleted turn are dropped, so its mark leaves the ladder;
+- items of a forgotten turn (deleted, or the replay of a question asked again) are dropped;
 - for every other item, `response` is replaced with what is on screen when this plugin knows better
   (`live` stream text → the active variant's text → an override), and left alone otherwise, keeping
   the item's identity so nothing re-renders for nothing;
-- the patched snapshot is memoized per host snapshot and keyed by the store's `railVersion`, which
-  `notify()` bumps, so a switch or a delete repaints the rail without waiting for a host frame — and
-  re-reading the same snapshot still returns the same array.
+- the patched snapshot is memoized per host snapshot, validated by the store's `railVersion` *and* by
+  the item array's identity — the app's own change signal (`TurnNavigationIndex`: “the array identity
+  changes exactly when a Turn enters, leaves, or changes preview”) — so a switch, a delete, or a new
+  turn all repaint without waiting for a host frame, and re-reading the same snapshot still returns
+  the same array.
 
-Dropping an item is not enough to remove a deleted turn's mark: the `turnOutline` half still carries
-one entry per `turn/start`, and an entry there has no loaded twin to suppress, so it renders as an
-`unloaded` mark that scrolls to a row this plugin has hidden — a click that lands somewhere else. The
-projection cannot be rewritten (see above), so `railHideStyle` hides those marks by ladder position:
-the ladder is rebuilt from the projection itself (`sessions.projectionStore(sessionId).values()
-.turnOutline`, read-only, falling back to the host's `turns` list) and the mark's `data-index` is the
-index in that same ascending list. The sheet is rewritten on every snapshot, empty included, so
-switching to a session with nothing hidden drops the previous session's rules.
+Dropping an item there is not enough on its own: the projection contributes one entry per
+`turn/start`, and an entry with no loaded twin renders as an `unloaded` mark that scrolls to a row
+this plugin has hidden. So the other half is patched too.
 
-Hiding the mark is only half of it. The rail is a virtual list where each mark fills one pitch
-(`TURN_SPACING_PX = 10` in the app's `TurnNavigator`), and a hidden mark does not reclaim its
-slot — the rail would read as a run of marks with holes punched through it. So the sheet also pulls
-every mark after a hidden one up by the pitch it lost
-(`transform: translateY(-10px * hiddenBefore) !important`, the only way to add to the position the
-virtualizer writes inline). For the same reason the entry cannot simply be removed from
-`navigation.items()`: that list feeds the ladder the indices are measured against, so removing one
-item would shift every index after it and hide the wrong marks.
+**The projection half.** The projection cannot be *written* (registrants sharing a key share one unit,
+so a second writer would fight the host's own frames), but it can be *read* through a filter:
+`installOutlineFilter` patches `ProjectionValueStore.prototype.faceOf` — the method the app's
+`useProjection` resolves through, and the one object the Session holds as `projections` — so
+`faceOf('turnOutline')` answers with a face that drops the forgotten turns. Every other key is
+untouched, and the patch is restored on dispose.
 
-No projection is written: registrants sharing the `turnOutline` key share one unit, so a second
-writer would fight the host's own frames. Nothing is written to the log either, so switching back
-restores the original preview.
+That patch has to be on the prototype rather than on `sessions.projectionStore(sessionId)`: the app
+reaches the store through the Session object, which keeps the instance and never calls the method
+again. Which session a store belongs to is remembered in a WeakMap, filled both by the service method
+(whenever a caller asks) and by the sample taken at install time; a store whose session is still
+unknown answers unfiltered, which is exactly the stock behaviour.
+
+The face keeps its value's reference until either the host publishes a new value or the forgotten set
+changes — `useProjection` binds it with `useSyncExternalStore`, so a fresh array per call would
+loop — and it forwards our own `store.subscribe`, so deleting a row repaints the rail immediately.
+
+**Why not hide the mark.** An earlier version hid the deleted turn's mark with
+`nav button[data-index="N"]{display:none}` and pulled the marks after it up with an
+`!important` `translateY`, because a hidden mark does not reclaim its pitch in the virtual list
+(`TURN_SPACING_PX = 10` in the app's `TurnNavigator`). That fights the virtualizer: it writes each
+mark's position as an inline `transform` (`directDomUpdatesMode: 'transform'`), so an `!important`
+transform on the same property wins and repositions *every* mark onto the same spot. The rail then
+looks frozen — new turns land on the pile — and in a session with many deleted turns the whole rail
+disappears. Filtering the source list instead leaves the virtualizer's geometry alone: with the entry
+gone, the marks are contiguous and the rail is simply shorter.
 
 ### Why a turn cannot gain a second answer
 

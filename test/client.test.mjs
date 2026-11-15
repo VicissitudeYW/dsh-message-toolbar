@@ -243,9 +243,16 @@ const imageResponse = {
 const statePayload = {
   sessionId: 'session-x',
   versions: [],
-  turns: [{ turn: 1, text: 'a question', time: 1, answered: true }],
-  answers: {},
-  hidden: {},
+  turns: [
+    { turn: 1, text: 'a question', time: 1, answered: true },
+    { turn: 2, text: 'a deleted question', time: 2, answered: true },
+    { turn: 3, text: 'another question', time: 3, answered: true },
+    { turn: 4, text: 'a question', time: 4, answered: true },
+    { turn: 5, text: 'the last question', time: 5, answered: true },
+  ],
+  answers: { 1: { active: 'v-1', items: [{ id: 'v-1', kind: 'model', text: '另一个模型写的回答', at: 1 }] } },
+  // Turn 2 was deleted and turn 4 is the replay of the question asked in turn 1.
+  hidden: { turns: [2], answers: [], prompts: [4] },
   shown: {},
   origins: {},
   prompts: {},
@@ -350,21 +357,60 @@ bubbleStub.className = 'abc_bubble';
 rowStub.querySelector = (selector) => (selector.indexOf('_userStack') !== -1 ? stackStub : selector.indexOf('_bubble') !== -1 ? bubbleStub : null);
 document.querySelectorAll = (selector) => (String(selector).indexOf('data-chat-flow-kind="user"') !== -1 ? [rowStub] : []);
 
+// The host's projection store: one face per key, exactly as the app's own
+// `ProjectionValueStore` answers them — a class instance whose `faceOf` lives on
+// the prototype, because that is where the plugin's filter is installed.
+const outlineValue = [1, 2, 3, 4, 5].map((turn) => ({
+  turn: turn, seq: turn * 10, prompt: 'p' + String(turn), response: 'r' + String(turn),
+}));
+
+class ProjectionStore {
+  constructor() { this.faces = new Map(); }
+  faceOf(key) {
+    if (!this.faces.has(key)) {
+      this.faces.set(key, {
+        getSnapshot: () => (key === 'turnOutline' ? outlineValue : undefined),
+        subscribe: () => () => {},
+      });
+    }
+    return this.faces.get(key);
+  }
+  get(key) { return key === 'turnOutline' ? outlineValue : undefined; }
+  values() { return { turnOutline: outlineValue }; }
+}
+
+const projection = new ProjectionStore();
+
+const sessionsStub = {
+  list: { getSnapshot: () => ({ byId: { 'session-x': { id: 'session-x', running: false } } }), subscribe: () => () => {} },
+  projectionStore: () => projection,
+};
+
+// The chat target the rail reads: its items are the loaded Turns, and the app
+// positions one mark per item in list order.
+const navItems = [1, 2, 3, 4, 5].map((turn) => ({
+  turn: turn, anchorKey: 'k' + String(turn), prompt: 'p' + String(turn), response: 'r' + String(turn),
+}));
+const chatSnapshot = {
+  order: [], nodes: {}, locations: {}, timeline: {}, legacy: {},
+  navigation: { items: () => navItems },
+};
+const chatTarget = { getSnapshot: () => chatSnapshot, subscribe: () => () => {} };
+const uiConversationStub = {
+  binding: () => ({ target: (name) => (name === 'chat' ? chatTarget : null) }),
+};
+
 const ctx = {
   effect(fn) { try { fn(); } catch (e) { console.log('effect threw: ' + e.message); } return () => {}; },
   get(name) {
     if (name === 'slots') return slots;
-    if (name === 'sessions') {
-      return {
-        list: { getSnapshot: () => ({ byId: { 'session-x': { id: 'session-x', running: false } } }), subscribe: () => () => {} },
-        projectionStore: () => ({ values: () => ({}) }),
-      };
-    }
+    if (name === 'sessions') return sessionsStub;
+    if (name === 'uiConversation') return uiConversationStub;
     if (name === 'uiWorkspace') return { openSession: () => {} };
     if (name === 'locale') return { register: () => () => {}, subscribe: () => () => {}, getLocale: () => ({ active: 'en' }) };
     return undefined;
   },
-  inject() {},
+  inject(names, fn) { fn(this); },
 };
 
 module.apply(ctx);
@@ -475,6 +521,30 @@ if (run !== undefined) {
     check('the row shows the picture', findAll(rows, (node) => typeof node.props.className === 'string' && node.props.className === 'mtt-tile').length, 1);
     check('the row offers no remove button', findAll(rows, (node) => typeof node.props.className === 'string' && node.props.className === 'mtt-file-remove').length, 0);
   }
+}
+
+// 6. the right-hand rail lists the turns the transcript shows — and only those
+{
+  // The plugin wraps `sessions.projectionStore` during apply, so this is the
+  // wrapped store: `turnOutline` must answer without the deleted turn and
+  // without the replay of a question that was asked again.
+  const face = sessionsStub.projectionStore('session-x').faceOf('turnOutline');
+  const first = face.getSnapshot();
+  check('the outline drops the deleted turn and the replay', first.map((entry) => entry.turn), [1, 3, 5]);
+  check('the outline keeps its keepers', first.map((entry) => entry.prompt), ['p1', 'p3', 'p5']);
+  check('the filtered value keeps its identity', face.getSnapshot(), first);
+  check('a plain key is passed through', sessionsStub.projectionStore('session-x').faceOf('title').getSnapshot(), undefined);
+
+  // The chat target's items are the other half of the merge; a turn missing from
+  // one half still shows, so both have to agree.
+  const bound = uiConversationStub.binding('session-x').target('chat');
+  const patched = bound.getSnapshot();
+  const items = patched.navigation.items();
+  check('the rail drops the same turns', items.map((item) => item.turn), [1, 3, 5]);
+  check('the rail describes the variant that is on screen', items[0].response, '另一个模型写的回答');
+  check('the rail keeps the previews it did not touch', items[1].response, 'r3');
+  check('the patched snapshot is cached for the same host frame', bound.getSnapshot(), patched);
+  check('the untouched snapshot is left alone', chatTarget.getSnapshot(), chatSnapshot);
 }
 
 console.log(failures === 0 ? '\nall good' : '\n' + failures + ' failure(s)');

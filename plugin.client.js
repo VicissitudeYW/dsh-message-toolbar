@@ -2576,26 +2576,6 @@ function turnInfo(state, turn) {
  */
 const RAIL_PREVIEW_CAP = 120;
 
-/**
- * The host's `turnOutline` projection for one session — one entry per
- * `turn/start`. Read-only: this plugin never writes a projection (registrants
- * sharing a key share one unit, so a second writer would fight the host's own
- * frames). `null` when the session controller does not expose it.
- */
-function railOutline(sessionId) {
-  const service = sessionsService;
-  if (!service || typeof service.projectionStore !== 'function') return null;
-  try {
-    const store = service.projectionStore(sessionId);
-    if (!store || typeof store.values !== 'function') return null;
-    const values = store.values();
-    const outline = values ? values.turnOutline : null;
-    return Array.isArray(outline) ? outline : null;
-  } catch (error) {
-    return null;
-  }
-}
-
 /** One rail line: whitespace collapsed, capped like the host's own preview. */
 function railPreview(text) {
   if (typeof text !== 'string') return '';
@@ -2627,18 +2607,13 @@ function railAnswerText(state, sessionId, turn) {
 
 /** Rewrite or drop the rail entries that no longer match the transcript. */
 function patchRailItems(items, state, sessionId) {
-  const hidden = state && state.hidden ? state.hidden : {};
-  // Only whole-turn deletions drop entries here. A replayed prompt is a turn that
-  // exists in the projection from the moment it starts, so it is hidden by
-  // position in the ladder instead (removing it from this list would shift every
-  // later index).
-  const gone = Array.isArray(hidden.turns) ? hidden.turns : [];
+  const forget = railGoneTurns(state);
   const out = [];
   let changed = false;
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
     if (!item || typeof item.turn !== 'number') { out.push(item); continue; }
-    if (gone.indexOf(item.turn) !== -1) { changed = true; continue; }
+    if (forget.indexOf(item.turn) !== -1) { changed = true; continue; }
     const text = railAnswerText(state, sessionId, item.turn);
     if (text === null) { out.push(item); continue; }
     const response = railPreview(text);
@@ -2655,49 +2630,6 @@ function railNavigation(navigation, items) {
   Object.assign(patched, navigation);
   patched.items = function () { return items; };
   return patched;
-}
-
-/**
- * Every turn the rail knows about, in ladder order. The rail merges the host's
- * `turnOutline` projection (one entry per `turn/start`, loaded or not) with the
- * chat view's loaded items, and a deleted turn cannot be removed from the
- * projection half — so its mark has to be hidden by position instead. The
- * position is its index in that merged ladder, which we rebuild here: the
- * projection is a fold of the same log, so its turns are the ladder.
- */
-/**
- * One rail mark fills this much height in the app's virtual list
- * (`TURN_SPACING_PX` in dsh-client-ui-chat's TurnNavigator). Hiding a mark does
- * not reclaim its slot, so every mark after a hidden one is pulled up by this.
- */
-const RAIL_PITCH_PX = 10;
-
-function railLadder(sessionId, state) {
-  const outline = railOutline(sessionId);
-  const turns = [];
-  // The union of both folds of the log: the projection is pushed by the host and
-  // can lag a frame behind a turn that was just created (a replayed prompt, for
-  // one), while `state.turns` comes from the log we just read. Taking both keeps
-  // the ladder — and therefore every hidden position — aligned with what the rail
-  // actually draws.
-  if (outline !== null) {
-    for (let i = 0; i < outline.length; i++) {
-      const entry = outline[i];
-      if (entry && typeof entry.turn === 'number') turns.push(entry.turn);
-    }
-  }
-  if (state && Array.isArray(state.turns)) {
-    for (let i = 0; i < state.turns.length; i++) {
-      const entry = state.turns[i];
-      if (entry && typeof entry.turn === 'number') turns.push(entry.turn);
-    }
-  }
-  const unique = [];
-  turns.sort(function (a, b) { return a - b; });
-  for (let i = 0; i < turns.length; i++) {
-    if (i === 0 || turns[i] !== turns[i - 1]) unique.push(turns[i]);
-  }
-  return unique;
 }
 
 /**
@@ -2719,76 +2651,163 @@ function promptIsReplayed(sessionId, turn) {
 }
 
 /**
- * Hide the rail marks of deleted turns. They cannot be dropped from the
- * projection half of the ladder, so the only lever is the mark's own position —
- * `data-index` is the index in the merged list we just rebuilt.
+ * Turns the rail must not list: a row the reader deleted, and the extra copy of
+ * a question that `answer-run` asked again (that turn is real, so the rail would
+ * otherwise show the same question twice).
  */
-const railHideStyle = {
-  node: null,
-  key: '',
+function railGoneTurns(state) {
+  const hidden = state && state.hidden ? state.hidden : null;
+  if (hidden === null) return [];
+  const turns = Array.isArray(hidden.turns) ? hidden.turns : [];
+  const prompts = Array.isArray(hidden.prompts) ? hidden.prompts : [];
+  if (prompts.length === 0) return turns;
+  return turns.length === 0 ? prompts : turns.concat(prompts);
+}
 
-  ensure() {
-    if (this.node) return this.node;
-    if (typeof document === 'undefined' || !document.head) return null;
-    const node = document.createElement('style');
-    node.dataset.plugin = 'dsh-message-toolbar-rail';
-    document.head.appendChild(node);
-    this.node = node;
-    return node;
-  },
+/** The same list without the entries of the forgotten turns. */
+function filterOutline(outline, forget) {
+  if (!Array.isArray(outline) || forget.length === 0) return outline;
+  let changed = false;
+  const kept = [];
+  for (let i = 0; i < outline.length; i++) {
+    const entry = outline[i];
+    const turn = entry && typeof entry.turn === 'number' ? entry.turn : null;
+    if (turn !== null && forget.indexOf(turn) !== -1) { changed = true; continue; }
+    kept.push(entry);
+  }
+  return changed ? kept : outline;
+}
 
-  apply(indexes, total) {
-    const node = this.ensure();
-    if (!node) return;
-    const hidden = indexes.slice().sort(function (a, b) { return a - b; });
-    const key = hidden.join(',') + '|' + String(total);
-    if (key === this.key) return;
-    this.key = key;
-    const rules = [];
-    for (let i = 0; i < hidden.length; i++) {
-      rules.push('nav button[data-index="' + hidden[i] + '"]{display:none}');
-    }
-    // The marks after a hidden one move up by the pitch it occupied, so the rail
-    // reads as shorter instead of holed: the app positions every mark itself
-    // (TURN_SPACING_PX = 10), and an !important translate is the only way to add
-    // to that from outside.
-    let shift = 0;
-    let cursor = 0;
-    for (let index = 0; index < total; index++) {
-      if (cursor < hidden.length && hidden[cursor] === index) {
-        shift += 1;
-        cursor += 1;
-        continue;
-      }
-      if (shift === 0) continue;
-      rules.push('nav button[data-index="' + index + '"]{transform:translateY(-'
-        + String(shift * RAIL_PITCH_PX) + 'px)!important}');
-    }
-    node.textContent = rules.join('\n');
-  },
-};
+/** Whether two small turn lists say the same thing. */
+function sameTurns(left, right) {
+  if (left === right) return true;
+  if (left.length !== right.length) return false;
+  for (let i = 0; i < left.length; i++) if (left[i] !== right[i]) return false;
+  return true;
+}
+
+/**
+ * Which session a projection store belongs to. The store is a per-session
+ * instance handed to the Session object as `projections`, so the only place the
+ * two are correlated is here.
+ */
+const outlineSessions = new WeakMap();
+
+/** Faces already handed out, one per store, so identity stays stable. */
+const outlineFaces = new WeakMap();
+
+/**
+ * The turns our own state says the rail must not list, read fresh. A store whose
+ * session we have not seen yet answers `[]` — unfiltered, exactly as shipped.
+ */
+function forgottenTurns(sessionId) {
+  if (typeof sessionId !== 'string') return [];
+  const cached = store.get(sessionId);
+  const state = cached && cached.state;
+  return state ? railGoneTurns(state) : [];
+}
+
+/**
+ * One filtered face over the real `turnOutline` face.
+ *
+ * The rail merges two folds of the log: the loaded navigation items and the
+ * host's `turnOutline` projection (every turn, loaded or not). Removing a turn
+ * from the first is not enough — the projection keeps listing it, and the merged
+ * list is what the marks are drawn from. The projection cannot be written to
+ * (registrants sharing a key share one unit, so a second writer fights the
+ * host's own frames), but it can be *read* through a filter.
+ *
+ * Identity matters: `useProjection` binds this face with
+ * `useSyncExternalStore`, so the filtered value keeps its reference until either
+ * the host publishes a new value or the forgotten set changes. The face also
+ * subscribes to our store, so deleting a row repaints the rail without waiting
+ * for the next host frame.
+ * @param sessionId - the session this store belongs to, so the filter can ask.
+ * @param inner - the store's own `turnOutline` face.
+ * @returns a face that answers without the forgotten turns.
+ */
+function outlineFace(sessionId, inner) {
+  const box = { raw: undefined, value: undefined, forget: [] };
+  box.face = {
+    getSnapshot: function () {
+      const raw = inner.getSnapshot();
+      const next = forgottenTurns(sessionId);
+      if (!sameTurns(box.forget, next)) { box.forget = next; box.raw = undefined; }
+      if (raw === box.raw) return box.value;
+      box.raw = raw;
+      box.value = filterOutline(raw, box.forget);
+      return box.value;
+    },
+    subscribe: function (listener) {
+      const offHost = inner.subscribe(listener);
+      const offOurs = store.subscribe(listener);
+      return function () { offHost(); offOurs(); };
+    },
+  };
+  return box.face;
+}
+
+/**
+ * Install the `turnOutline` filter on the projection store itself.
+ *
+ * It has to sit on the prototype, not on `sessions.projectionStore`: the app
+ * reads the host's projection through `binding(sessionId).session.projections`,
+ * which is the same instance the manager keeps but never goes through that
+ * method again. Patching the shared method covers every store, present and
+ * future, and is restored on dispose.
+ * @param ctx - the plugin's client context.
+ * @returns the disposer that restores the untouched prototype.
+ */
+function installOutlineFilter(ctx) {
+  const service = (typeof ctx.get === 'function' ? ctx.get('sessions') : null) || sessionsService;
+  if (!service || typeof service.projectionStore !== 'function') return undefined;
+  const original = service.projectionStore;
+  // Any store will do to find the shared prototype; a listed session's own store
+  // is already there, so asking for it creates nothing.
+  let sample = null;
+  try {
+    const list = typeof service.list.getSnapshot === 'function' ? service.list.getSnapshot() : null;
+    const byId = list && list.byId ? list.byId : {};
+    const first = Object.keys(byId)[0];
+    if (first !== undefined) sample = original.call(service, first);
+    if (sample && typeof sample === 'object') outlineSessions.set(sample, first);
+  } catch (error) {
+    sample = null;
+  }
+  if (!sample || typeof sample !== 'object') return undefined;
+  const proto = Object.getPrototypeOf(sample);
+  if (!proto || typeof proto.faceOf !== 'function') return undefined;
+  const previous = proto.faceOf;
+  proto.faceOf = function (key) {
+    const inner = previous.call(this, key);
+    if (key !== 'turnOutline') return inner;
+    const cached = outlineFaces.get(this);
+    if (cached !== undefined && cached.inner === inner) return cached.face;
+    const face = outlineFace(outlineSessions.get(this), inner);
+    outlineFaces.set(this, { inner: inner, face: face });
+    return face;
+  };
+  // Whoever asks for a store now tells us which session it is.
+  const wrapped = function (sessionId) {
+    const real = original.call(service, sessionId);
+    if (real !== null && typeof real === 'object') outlineSessions.set(real, sessionId);
+    return real;
+  };
+  try {
+    service.projectionStore = wrapped;
+  } catch (error) {
+    // A frozen service object: the prototype patch still stands.
+  }
+  return function () {
+    proto.faceOf = previous;
+    try { service.projectionStore = original; } catch (error) {}
+  };
+}
 
 /** A chat snapshot whose navigation items follow the transcript. */
 function railSnapshot(snapshot, sessionId) {
   const cached = store.get(sessionId);
   const state = cached && cached.state;
-  const hidden = state && state.hidden ? state.hidden : null;
-  const goneTurns = hidden && Array.isArray(hidden.turns) ? hidden.turns : [];
-  // A replayed prompt opens a turn of its own; that turn is real, so its rail
-  // item would read as a second copy of the same question. Hide it too.
-  const gonePrompts = hidden && Array.isArray(hidden.prompts) ? hidden.prompts : [];
-  const gone = gonePrompts.length === 0 ? goneTurns : goneTurns.concat(gonePrompts);
-  // Always write the sheet, empty included: switching to a session with nothing
-  // hidden has to drop the previous session's marks, not keep them hidden.
-  if (gone.length === 0) railHideStyle.apply([], 0);
-  else {
-    const ladder = railLadder(sessionId, state);
-    const indexes = [];
-    for (let i = 0; i < ladder.length; i++) {
-      if (gone.indexOf(ladder[i]) !== -1) indexes.push(i);
-    }
-    railHideStyle.apply(indexes, ladder.length);
-  }
   if (!state) return snapshot;
   const navigation = snapshot.navigation;
   if (!navigation || typeof navigation.items !== 'function') return snapshot;
@@ -2811,10 +2830,17 @@ function railTarget(target, sessionId) {
       const snapshot = target.getSnapshot();
       if (!snapshot || typeof snapshot !== 'object') return snapshot;
       const version = store.railVersion;
+      // The host rebuilds its snapshot object on every publish, but the item
+      // array is the app's own change signal (`TurnNavigationIndex` doc), so it
+      // is the safe thing to validate the memo against: a snapshot that comes
+      // back with a different list must not answer with the old patch.
+      const items = snapshot.navigation && typeof snapshot.navigation.items === 'function'
+        ? snapshot.navigation.items()
+        : null;
       const hit = railMemo.get(snapshot);
-      if (hit !== undefined && hit.version === version) return hit.value;
+      if (hit !== undefined && hit.version === version && hit.items === items) return hit.value;
       const value = railSnapshot(snapshot, sessionId);
-      railMemo.set(snapshot, { version: version, value: value });
+      railMemo.set(snapshot, { version: version, items: items, value: value });
       return value;
     },
     subscribe: function (listener) {
@@ -4768,10 +4794,14 @@ return {
 
     ctx.effect(function () { return styles.insert(CSS); });
 
-    // The right-hand turn rail folds the session log, so it cannot know about an
-    // answer we never logged or a row we hid. Patch the chat target's navigation
-    // items so the rail follows the transcript. Optional: a shell without
-    // `uiConversation` simply keeps the stock rail.
+    // The right-hand turn rail is a merge of two folds of the log, and neither
+    // knows about a row the reader deleted or a question that was asked twice.
+    // Filtering the host's projection is what actually shortens the rail (its
+    // marks are positioned by index in the merged list, so hiding one by
+    // position leaves the virtual list's own transform in the way); patching the
+    // chat target's navigation items covers the other half.
+    ctx.effect(function () { return installOutlineFilter(ctx); }, 'message-toolbar: turn rail outline');
+    // Optional: a shell without `uiConversation` simply keeps the stock rail.
     const attachRail = function (scope) {
       scope.effect(function () { return installRailSync(scope); }, 'message-toolbar: turn rail');
     };
