@@ -440,6 +440,13 @@ state instead:
    never lost and `active: 'native'` renders with no stylesheet rule at all. The row only draws the
    control when the turn has more than one answer; deleting the visible variant goes through
    `answer-delete`, and the answer before it in the ring (native when it was first) takes over.
+   The count between the two arrows is a **picker**: `ringChoices` turns a run
+   (`{ turns, active, models }`) or a variant slot into menu rows labelled `n. <model>`, the one on
+   screen ticked, and picking a row goes straight to it (`run-select` or `answer-select`). A run
+   records the model of every answer it made (`runs[key].models[turn]`), which is why the rows can
+   be named at all; an answer with no recorded model falls back to `Answer n`. Cherry Studio's
+   sibling navigator works the same way — arrows for stepping, the number for jumping — and it is
+   the only shape that survives five answers to one question.
 5. **Editing overwrites the visible answer**, it does not append one: `answer-save` rewrites the
    active variant's `text` in place (`edited: true`, same id, ring size unchanged) and the card draws
    it through the very same `AnswerBody` → `MarkdownText` path as a generated answer, so nothing
@@ -651,8 +658,13 @@ in the translation column. During the stream the card keeps the whole original i
 translation beneath it, so blocks never re-pair mid-sentence; paragraph pairing happens once, when the
 translation is complete.
 
-### Code and formulas are not translated
+The translation is also copyable on its own: the language menu carries a `Copy the translation` row
+(`COPY_TRANSLATION_ROW`) whenever one is on screen, because the paired page is drawn for reading —
+pulling just the translated half out by hand is the one thing the pairing makes harder. The row sits
+under the way back to the original and before the languages, and `copyTranslation` writes
+`translationOf(state, turn).text`, never the visible pair.
 
+### Code and formulas are not translated
 Handing code to a translator is asking for it to be rewritten: an identifier gets translated, a fence gets
 re-indented, a LaTeX macro gets "corrected". So `translate` never sends it. `protectText()` walks the text with
 two pattern lists — `BLOCK_PATTERNS` (fences, `~~~`, `$$…$$`, `\[…\]`) and `INLINE_PATTERNS` (`` `…` ``, `$…$`,

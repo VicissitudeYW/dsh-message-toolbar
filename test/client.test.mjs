@@ -249,6 +249,9 @@ const statePayload = {
     { turn: 3, text: 'another question', time: 3, answered: true },
     { turn: 4, text: 'a question', time: 4, answered: true },
     { turn: 5, text: 'the last question', time: 5, answered: true },
+    // Turn 6 is the same question answered again, and that second answer failed:
+    // the app draws no action row for a turn without an answer, so the card has to.
+    { turn: 6, text: 'the last question', time: 6, answered: false, reason: 'error' },
   ],
   answers: { 1: { active: 'v-1', items: [{ id: 'v-1', kind: 'model', text: '另一个模型写的回答', at: 1 }] } },
   // Turn 2 was deleted and turn 4 is the replay of the question asked in turn 1.
@@ -256,7 +259,15 @@ const statePayload = {
   shown: {},
   origins: {},
   prompts: {},
-  runs: {},
+  // Two answers to the last question: the original turn, and the one the reader
+  // asked again in turn 6. Each remembers the model that wrote it.
+  runs: {
+    5: {
+      turns: [5, 6],
+      active: 6,
+      models: { 6: { provider: 'p', model: 'deepseek-flash' } },
+    },
+  },
   model: null,
 };
 
@@ -320,7 +331,23 @@ ReactDom.last = null;
 ReactDom.roots = [];
 
 const primitives = {
-  Menu(props) { return React.createElement('div', { 'data-native-menu': '', 'data-count': String((props.items || []).length) }); },
+  // The menu is recorded rather than drawn: what matters is which rows the plugin
+  // hands it, which one is ticked, and how it asked to be placed. The anchor is
+  // rendered as a child because the real menu draws it as its trigger — without it
+  // the count would be invisible to the test.
+  Menu(props) {
+    return React.createElement('div', {
+      'data-native-menu': '',
+      'data-count': String((props.items || []).length),
+      'data-open': props.open === true ? '1' : '0',
+      'data-items': JSON.stringify((props.items || []).map((item) => (item.type ? item.type + ':' + item.id : item.id + '=' + item.label))),
+      'data-selected': props.selectedId === undefined ? '' : String(props.selectedId),
+      'data-selection': props.selection === undefined ? '' : String(props.selection),
+      'data-side': props.side === undefined ? '' : String(props.side),
+      onSelect: props.onSelect,
+      onClose: props.onClose,
+    }, props.anchor === undefined ? null : props.anchor);
+  },
   FileTypeIcon(props) { return React.createElement('span', { 'data-file-icon': props.path }); },
   fileExtension(name) { const dot = String(name).lastIndexOf('.'); return dot < 0 ? '' : String(name).slice(dot + 1); },
   fileSizeText(bytes) { return bytes < 1024 ? bytes + 'B' : (bytes / 1024).toFixed(1) + 'KB'; },
@@ -548,6 +575,44 @@ if (run !== undefined) {
   check('the rail keeps the previews it did not touch', items[1].response, 'r3');
   check('the patched snapshot is cached for the same host frame', bound.getSnapshot(), patched);
   check('the untouched snapshot is left alone', chatTarget.getSnapshot(), chatSnapshot);
+}
+
+// 7. the count of an answer row opens the answers by name
+{
+  const answersEntry = registered.filter((entry) => entry.descriptor.id === 'message-toolbar-answers')[0];
+  check('the answer card is registered', answersEntry !== undefined, true);
+  const props = Object.assign({}, answersEntry.descriptor.inject('session-x'), { turn: 6, seq: 60 });
+  let card = render({ type: answersEntry.component, props });
+
+  // A group whose visible answer failed still gets a row of its own.
+  const row = findAll(card, (node) => typeof node.props.className === 'string' && node.props.className === 'mtt-tail-actions')[0];
+  check('the group row is drawn for a failed answer', row !== undefined, true);
+
+  const num = findAll(card, (node) => typeof node.props.className === 'string' && node.props.className.indexOf('mtt-ring-num') !== -1)[0];
+  check('the count is a button', num !== undefined, true);
+  check('the count reads the position', num === undefined ? null : textOf(num), '2/2');
+  const ringMenu = findAll(card, (node) => node.props && node.props['data-native-menu'] !== undefined)[0];
+  check('the count owns a menu', ringMenu !== undefined, true);
+  check('the menu starts closed', ringMenu === undefined ? null : ringMenu.props['data-open'], '0');
+
+  // Opening it lists the answers of this question, named after the model that
+  // wrote them, with the one on screen ticked.
+  num.props.onClick();
+  card = render({ type: answersEntry.component, props });
+  const openMenu = findAll(card, (node) => node.props && node.props['data-native-menu'] !== undefined && node.props['data-open'] === '1')[0];
+  check('the count opens the list', openMenu !== undefined, true);
+  check('every answer is a row', openMenu === undefined ? null : JSON.parse(openMenu.props['data-items']), [
+    '5=1. Answer 1',
+    '6=2. deepseek-flash',
+  ]);
+  check('the answer on screen is ticked', openMenu === undefined ? null : openMenu.props['data-selected'], '6');
+  check('the tick is a check, not a fill', openMenu === undefined ? null : openMenu.props['data-selection'], 'check');
+
+  // Picking a row jumps straight to it — no stepping through the ones between.
+  const postsBefore = calls.filter((call) => call.init.method === 'POST').length;
+  await openMenu.props.onSelect('5');
+  const jumped = calls.filter((call) => call.init.method === 'POST').slice(postsBefore).map((call) => JSON.parse(call.init.body));
+  check('picking an answer selects it', jumped, [{ action: 'run-select', sessionId: 'session-x', turn: 5, active: 5 }]);
 }
 
 console.log(failures === 0 ? '\nall good' : '\n' + failures + ' failure(s)');

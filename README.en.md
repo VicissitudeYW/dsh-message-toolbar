@@ -17,11 +17,11 @@ A message toolbar plugin for DSH (DeepSeek Harness).
 | Action | Where | What happens |
 | --- | --- | --- |
 | **Edit** | user messages | Rewrites that question — drop files into the editor and they leave with it. |
-| **Regenerate** | assistant messages | Answers again in place, without opening a new conversation. The fresh answer to the same question is stored as a variant of that turn and swapped in for the logged one. `‹ 1/2 ›` switches between them. |
+| **Regenerate** | assistant messages | Answers again in place, without opening a new conversation. The fresh answer to the same question is stored as a variant of that turn and swapped in for the logged one. `‹ 1/2 ›` switches between them, and the count in the middle opens the answers by name so you can jump straight to the one you want. |
 | **Switch model** | assistant messages | Every model's answer becomes a variant of the same turn; `‹ 2/3 ›` walks them without leaving the conversation. |
 | **Undo file edits** | before regenerate / switch model | If the answer being replaced edited files, the row lists them and asks first. Confirming puts every file back the way it was before that answer; switching a model then adds the new answer to the `‹ 1/3 ›` ring. |
 | **Edit answer** | assistant messages | The answer becomes an editor where it stands, holding the markdown source of its text. |
-| **Translate** | assistant messages | Pressing translate opens a dropdown of target languages; pick one and the answer is redrawn block by block, original and translation side by side. |
+| **Translate** | assistant messages | Pressing translate opens a dropdown of target languages; pick one and the answer is redrawn block by block, original and translation side by side. The same menu copies the translation on its own, or puts the answer back to the original. |
 | **Delete message / answer** | user messages / assistant messages | Removes a whole turn (message, answer, tool cards) or a single answer from the conversation. |
 | **Version tree** | conversation view | A turn-level branching tree of the whole conversation family, with the active path highlighted, model labels, timestamps, and restore/delete controls. |
 

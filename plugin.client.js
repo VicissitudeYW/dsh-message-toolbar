@@ -1899,6 +1899,13 @@ function LanguageMenu(props) {
         onClick: function () { props.onOriginal(); },
       }, props.originalLabel)
       : null,
+    props.copy === true
+      ? h('button', {
+        type: 'button',
+        className: 'mtt-pop-item',
+        onClick: function () { props.onCopy(); },
+      }, props.copyLabel)
+      : null,
     LANGS.map(function (lang) {
       return h('button', {
         key: lang.id, type: 'button',
@@ -1909,6 +1916,7 @@ function LanguageMenu(props) {
 }
 
 const ORIGINAL_ROW = 'message-toolbar/original';
+const COPY_TRANSLATION_ROW = 'message-toolbar/copy-translation';
 
 /**
  * The "translate" action: a menu of target languages, nothing else. It is the
@@ -1938,16 +1946,21 @@ function LanguageMenuHost(props) {
           original: props.original === true,
           originalLabel: props.originalLabel,
           onOriginal: props.onOriginal,
+          copy: props.copy === true,
+          copyLabel: props.copyLabel,
+          onCopy: props.onCopy,
           onPick: props.onPick,
         })
         : null);
   }
 
   // A translation replaces the answer, so the same menu has to offer the way
-  // back: "Show the original" is the first row whenever one is on screen.
+  // back: "Show the original" is the first row whenever one is on screen, and the
+  // translation's own text sits right under it so it can be copied on its own.
   const rows = (props.original === true
     ? [{ id: ORIGINAL_ROW, label: props.originalLabel }]
-    : []).concat(LANGS.map(function (lang) { return { id: lang.id, label: lang.label }; }));
+    : []).concat(props.copy === true ? [{ id: COPY_TRANSLATION_ROW, label: props.copyLabel }] : [])
+    .concat(LANGS.map(function (lang) { return { id: lang.id, label: lang.label }; }));
 
   // Picking a language is a command, not a setting: the reader is about to
   // choose one, so nothing in this list is "currently selected" and nothing is
@@ -1962,9 +1975,80 @@ function LanguageMenuHost(props) {
     closeOnPointerLeave: true,
     onSelect: function (id) {
       if (id === ORIGINAL_ROW) { props.onOriginal(); return; }
+      if (id === COPY_TRANSLATION_ROW) { props.onCopy(); return; }
       const picked = LANGS.find(function (lang) { return lang.id === id; });
       if (picked) props.onPick(picked.id);
     },
+    onClose: props.onClose,
+  });
+}
+
+/**
+ * The answers of one turn, as rows of a menu: `1. native`, `2. deepseek-flash`,
+ * and so on. Naming an answer by the model that wrote it is what makes the list
+ * worth opening — stepping through `1/3` tells a reader nothing about which
+ * model wrote what.
+ *
+ * Two shapes reach this function. A run keeps every answer as a turn of its own,
+ * so the rows are turns and the model of each one was recorded when the answer
+ * was made. An answer that never got a turn of its own (an in-place variant) is
+ * named by the provider and model the plugin asked.
+ */
+function ringChoices(run, ring) {
+  if (run !== null) {
+    const known = run.models && typeof run.models === 'object' ? run.models : {};
+    return {
+      selectedId: String(run.active),
+      items: run.turns.map(function (turnNumber, index) {
+        const model = known[String(turnNumber)];
+        const name = model && (model.model || model.provider)
+          ? (model.model || model.provider)
+          : t('answerNumber', { n: index + 1 });
+        return { id: String(turnNumber), label: (index + 1) + '. ' + name };
+      }),
+    };
+  }
+  if (ring === null) return null;
+  return {
+    selectedId: ring.alternatives[ring.index].id,
+    items: ring.alternatives.map(function (alternative, index) {
+      const name = alternative.kind === 'native'
+        ? t('nativeAnswer')
+        : (alternative.name || alternative.model || alternative.provider || t('answerNumber', { n: index + 1 }));
+      return { id: alternative.id, label: (index + 1) + '. ' + name };
+    }),
+  };
+}
+
+/**
+ * The ring count is a menu, not a label: clicking `2/3` opens the answers of this
+ * turn by name and jumps straight to the one picked. Two arrows alone cannot
+ * answer "which one is the deepseek answer", and a long ring makes stepping a
+ * chore. The arrows stay for quick flips.
+ */
+function RingMenuHost(props) {
+  const primitives = clientPrimitives();
+  const label = (props.index + 1) + '/' + props.count;
+  const trigger = h('button', {
+    type: 'button',
+    className: 'mtt-ring-btn mtt-ring-num',
+    disabled: props.disabled === true,
+    title: props.title,
+    onClick: props.onToggle,
+  }, label);
+
+  if (!primitives || props.choices === null) return trigger;
+
+  return h(primitives.Menu, {
+    open: props.open,
+    anchor: trigger,
+    items: props.choices.items,
+    selectedId: props.choices.selectedId,
+    selection: 'check',
+    align: 'end',
+    side: props.up ? 'top' : 'bottom',
+    portal: true,
+    onSelect: props.onPick,
     onClose: props.onClose,
   });
 }
@@ -3821,7 +3905,7 @@ function AssistantToolbar(props) {
   // them: it only closes our own popovers.
   const nativeMenus = clientPrimitives() !== null;
   useDismiss(
-    (menu !== null && !(nativeMenus && (menu === 'model' || menu === 'translate')))
+    (menu !== null && !(nativeMenus && (menu === 'model' || menu === 'translate' || menu === 'answers')))
       || confirmDelete || confirmAnswer || revert !== null,
     function () {
       setMenu(null);
@@ -3942,20 +4026,24 @@ function AssistantToolbar(props) {
     setBusy(false);
   }
 
-  /** Walk the ring of answers of this turn, native first. */
-  async function stepAnswer(delta) {
+  /**
+   * Show one answer of this turn. Both shapes land here, so the arrows and the
+   * menu cannot drift apart: a run re-points the group at another turn, an
+   * in-place variant re-points the slot at another item.
+   */
+  async function selectAnswer(id) {
     if (busy) return;
     // Answers kept as turns: switching is choosing which turn's rows the
     // transcript shows, so the answer the reader sees is always a real answer —
     // its own process card, its own tool calls, its own markdown.
     if (run !== null) {
-      const position = runPosition(run);
-      const next = run.turns[position.index + delta];
-      if (next === undefined) return;
+      const target = Number(id);
+      if (!Number.isFinite(target) || run.turns.indexOf(target) === -1) return;
+      if (target === run.active) return;
       setBusy(true);
       setError(null);
       try {
-        const result = await mutate({ action: 'run-select', sessionId: sessionId, turn: run.key, active: next });
+        const result = await mutate({ action: 'run-select', sessionId: sessionId, turn: run.key, active: target });
         // The route hands back every group it knows about, so the ring can flip
         // immediately instead of waiting for the next refetch of the payload.
         if (result && result.all) store.patchRuns(sessionId, result.all);
@@ -3968,18 +4056,34 @@ function AssistantToolbar(props) {
     }
     const current = answerRing(state ? state.answers : null, turn);
     if (current === null) return;
-    const next = current.alternatives[current.index + delta];
-    if (next === undefined) return;
+    const picked = current.alternatives.find(function (alternative) { return alternative.id === id; });
+    if (picked === undefined) return;
     setBusy(true);
     setError(null);
     try {
       await answerMutate({
-        action: 'answer-select', sessionId: sessionId, turn: turn, id: next.id,
+        action: 'answer-select', sessionId: sessionId, turn: turn, id: picked.id,
       });
     } catch (e) {
       setError(String((e && e.message) || e));
     }
     setBusy(false);
+  }
+
+  /** Walk the ring of answers of this turn, native first. */
+  async function stepAnswer(delta) {
+    if (run !== null) {
+      const position = runPosition(run);
+      const next = run.turns[position.index + delta];
+      if (next === undefined) return;
+      await selectAnswer(String(next));
+      return;
+    }
+    const current = answerRing(state ? state.answers : null, turn);
+    if (current === null) return;
+    const next = current.alternatives[current.index + delta];
+    if (next === undefined) return;
+    await selectAnswer(next.id);
   }
 
   /** The old behaviour, kept as an explicit choice: a real branch with tools. */
@@ -4073,6 +4177,18 @@ function AssistantToolbar(props) {
       showToast(failureText(e), 'error');
     }
     setBusy(false);
+  }
+
+  /** Copy the translation alone: the pair on screen is for reading, not for selecting by hand. */
+  function copyTranslation() {
+    setMenu(null);
+    const drawn = translationOf(state, turn);
+    if (drawn === null || typeof drawn.text !== 'string') return;
+    const g = realGlobal();
+    try {
+      if (g && g.navigator && g.navigator.clipboard) g.navigator.clipboard.writeText(drawn.text);
+    } catch (e) {}
+    showToast(t('translationCopied'));
   }
 
   async function removeVersion() {
@@ -4208,6 +4324,12 @@ function AssistantToolbar(props) {
         original: shownLang !== null,
         originalLabel: t('hideTranslation'),
         onOriginal: showOriginal,
+        // With a translation on screen the menu also offers its text: a reader who
+        // wants the translation somewhere else should not have to select the pair
+        // by hand in the transcript.
+        copy: shownLang !== null && translationOf(state, turn) !== null,
+        copyLabel: t('copyTranslation'),
+        onCopy: copyTranslation,
         onToggle: function (event) { toggleMenu('translate', event); },
         onPick: translate,
         onClose: function () { setMenu(null); },
@@ -4218,7 +4340,9 @@ function AssistantToolbar(props) {
     h('span', { className: 'mtt-menu-wrap' },
         h('span', { className: 'mtt-anchor', ref: answerAnchor },
           h(ActionButton, {
-            title: failed ? t('deleteMessage') : (deletingVariant ? t('deleteVariant') : t('deleteAnswer')),
+            title: working
+              ? t('deleteWhileWriting')
+              : (failed ? t('deleteMessage') : (deletingVariant ? t('deleteVariant') : t('deleteAnswer'))),
             active: confirmAnswer,
             disabled: working || typeof turn !== 'number',
             act: failed ? 'delete-turn' : 'delete-answer',
@@ -4236,12 +4360,25 @@ function AssistantToolbar(props) {
     // The answer ring sits in this row — always at the bottom of the turn, next
     // to the other controls — and only when there is something to switch to.
     ringView !== null && ringView.count > 1
-      ? h('span', { className: 'mtt-ring', title: t('variants') },
+      ? h('span', { className: 'mtt-ring' },
         h('button', {
           type: 'button', className: 'mtt-ring-btn', disabled: working || ringView.index <= 0,
           title: t('prevAnswer'), onClick: function () { stepAnswer(-1); },
         }, h(ChevronLeftIcon)),
-        h('span', { className: 'mtt-ring-count' }, (ringView.index + 1) + '/' + ringView.count),
+        // Answers are also kept as turns, so `2/3` names an answer worth picking:
+        // the count opens the list instead of only flipping one at a time.
+        h(RingMenuHost, {
+          title: t('pickAnswer'),
+          open: menu === 'answers',
+          up: popUp,
+          disabled: working,
+          index: ringView.index,
+          count: ringView.count,
+          choices: ringChoices(run, ring),
+          onToggle: function (event) { toggleMenu('answers', event); },
+          onPick: function (id) { setMenu(null); selectAnswer(id); },
+          onClose: function () { setMenu(null); },
+        }),
         h('button', {
           type: 'button', className: 'mtt-ring-btn',
           disabled: working || ringView.index >= ringView.count - 1,
@@ -4447,6 +4584,10 @@ const CSS = [
   // hover, so it reads as one more button in the row instead of a chip.
   '.mtt-ring{display:inline-flex;align-items:center;gap:0;height:calc(28px + var(--dsh-content-font-delta,0px));color:var(--mtt-fg-3);font:inherit;margin:0 0 0 2px}',
   '.mtt-ring-count{min-width:24px;text-align:center;font-size:calc(12px + var(--dsh-content-font-delta,0px));line-height:1;font-variant-numeric:tabular-nums}',
+  // The count of an answer row is a button that opens the answers by name, so it
+  // has to look like the two arrows beside it — same box, same hover — while
+  // staying wide enough for `12/12`.
+  '.mtt-ring-num{min-width:26px;padding:0 3px;font-size:calc(12px + var(--dsh-content-font-delta,0px));line-height:1;font-variant-numeric:tabular-nums;color:var(--mtt-fg-3)}',
   '.mtt-ring-btn{background:0 0;border:0;cursor:pointer;padding:6px;width:calc(28px + var(--dsh-content-font-delta,0px));height:calc(28px + var(--dsh-content-font-delta,0px));border-radius:var(--mtt-radius-sm);color:var(--mtt-fg-3);display:inline-flex;align-items:center;justify-content:center;font:inherit}',
   '.mtt-ring-btn:hover:not(:disabled){background:var(--mtt-hover);color:var(--mtt-fg-2)}',
   '.mtt-ring-btn svg{width:calc(17px + var(--dsh-content-font-delta,0px));height:calc(17px + var(--dsh-content-font-delta,0px));display:block}',
@@ -4630,6 +4771,8 @@ const I18N = {
     translated: 'Translated',
     translating: 'Translating…',
     translationTruncated: 'The translation was cut off by the model\'s length limit — the rest is untranslated.',
+    copyTranslation: 'Copy the translation',
+    translationCopied: 'Translation copied',
     close: 'Close',
     imagesKept: '{count} image(s) kept as-is',
     cancel: 'Cancel',
@@ -4662,6 +4805,8 @@ const I18N = {
     save: 'Save',
     prevAnswer: 'Previous answer',
     nextAnswer: 'Next answer',
+    pickAnswer: 'Pick an answer',
+    answerNumber: 'Answer {n}',
     deleteVariant: 'Delete this variant',
     deleteVariantConfirm: 'Delete this answer?',
     variantDeleted: 'Answer deleted',
@@ -4682,6 +4827,7 @@ const I18N = {
     deleteMessageConfirm: 'Delete this message?',
     deleteAnswer: 'Delete this answer',
     deleteAnswerConfirm: 'Delete this answer?',
+    deleteWhileWriting: 'Wait for the answer to finish, then delete it',
     turnHidden: 'Message deleted',
     answerHidden: 'Answer deleted',
     delete: 'Delete',
@@ -4716,6 +4862,8 @@ const I18N = {
     translated: '已翻译',
     translating: '正在翻译…',
     translationTruncated: '译文因为模型的长度上限被截断了，后半部分没有翻译。',
+    copyTranslation: '复制译文',
+    translationCopied: '已复制译文',
     close: '关闭',
     imagesKept: '{count} 张图片原样保留',
     cancel: '取消',
@@ -4748,6 +4896,8 @@ const I18N = {
     save: '保存',
     prevAnswer: '上一个回答',
     nextAnswer: '下一个回答',
+    pickAnswer: '选择回答',
+    answerNumber: '回答 {n}',
     deleteVariant: '删除这个备选',
     deleteVariantConfirm: '删除这条回答？',
     variantDeleted: '已删除这条回答',
@@ -4768,6 +4918,7 @@ const I18N = {
     deleteMessageConfirm: '删除这条消息？',
     deleteAnswer: '删除这条回答',
     deleteAnswerConfirm: '删除这条回答？',
+    deleteWhileWriting: '等这轮回答写完再删除',
     turnHidden: '已删除这条消息',
     answerHidden: '已删除这条回答',
     delete: '删除',
