@@ -229,6 +229,8 @@ function textOf(node) {
 /* --------------------------------------------------------- window + load -- */
 
 const calls = [];
+// Text the plugin handed to the clipboard, in order.
+const clipped = [];
 let captured = null;
 
 const uploadResponse = {
@@ -297,7 +299,7 @@ const fetchStub = async function (url, init) {
 const windowStub = {
   fetch: fetchStub,
   localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
-  navigator: { language: 'en', languages: ['en'], clipboard: { writeText: async () => {} } },
+  navigator: { language: 'en', languages: ['en'], clipboard: { writeText: async (text) => { clipped.push(String(text)); } } },
   addEventListener: () => {},
   removeEventListener: () => {},
   setTimeout: (fn) => setTimeout(fn, 0),
@@ -613,6 +615,24 @@ if (run !== undefined) {
   await openMenu.props.onSelect('5');
   const jumped = calls.filter((call) => call.init.method === 'POST').slice(postsBefore).map((call) => JSON.parse(call.init.body));
   check('picking an answer selects it', jumped, [{ action: 'run-select', sessionId: 'session-x', turn: 5, active: 5 }]);
+}
+
+// 8. a variant on screen is what copy copies
+{
+  const barEntry = registered.filter((entry) => entry.descriptor.id === 'message-toolbar'
+    && entry.descriptor.name === 'conversation.chat.assistant-actions')[0];
+  check('the action row is registered', barEntry !== undefined, true);
+  // The row normally learns its turn from the message index; a turn handed in is
+  // enough, which is also how the failed-answer row uses it.
+  const props = Object.assign({}, barEntry.descriptor.inject('session-x'), { turn: 1, messageId: 'm-1' });
+  const bar = render({ type: barEntry.component, props });
+  const copyButton = findAll(bar, (node) => node.props && node.props['data-mtt'] === 'copy-answer')[0];
+  check('a replaced answer offers its own copy', copyButton !== undefined, true);
+  if (copyButton !== undefined) {
+    const before = clipped.length;
+    copyButton.props.onClick();
+    check('it copies the answer on screen', clipped.slice(before), ['另一个模型写的回答']);
+  }
 }
 
 console.log(failures === 0 ? '\nall good' : '\n' + failures + ' failure(s)');

@@ -460,6 +460,13 @@ Consequences worth knowing: the log is untouched, so **later turns still see the
 in their model context; and if a future DSH renames those attributes the rule simply stops
 matching, leaving both answers visible instead of breaking the view.
 
+The app's own action row keeps its copy button, and that button reads the **logged** answer. While a
+variant, an override or a translation is on screen it would therefore copy text the reader cannot
+see, so the row adds a copy button of its own (`data-mtt="copy-answer"`) whenever `drawnCopy` is
+non-empty — the variant's text, the override's text, or the translation's — and it writes exactly
+that. The row in a run needs nothing: there the visible answer *is* a logged turn, so the app's copy
+is already right.
+
 ### Deleting rows without rewriting the log
 
 The transcript is append-only (see below), so a delete can only be a view decision. `hidden`

@@ -3840,6 +3840,9 @@ function AssistantToolbar(props) {
   // The turn is showing a translation when the host says which language, and the
   // button then reads as "on" and its menu offers the way back.
   const shownLang = shownLangOf(state, turn);
+  // The translation on screen, if any: what the paired page draws, and what
+  // "copy the translation" has to write.
+  const drawnTranslation = translationOf(state, turn);
 
   // Hiding the turn's rows is the answer card's job, not the toolbar's: the card
   // knows whether it is showing an answer of its own (in which case the deleted
@@ -3868,6 +3871,7 @@ function AssistantToolbar(props) {
   const [translating, setTranslating] = React.useState(false);
   const [error, setError] = React.useState(null);
   const [toastNode, showToast] = useToast();
+  const [copied, setCopied] = React.useState(false);
   const [catalog, setCatalog] = React.useState(null);
   const [catalogError, setCatalogError] = React.useState(null);
   const edit = useAnswerEdit(sessionId, turn);
@@ -4191,6 +4195,28 @@ function AssistantToolbar(props) {
     showToast(t('translationCopied'));
   }
 
+  /**
+   * The app's own copy button copies the *logged* answer. While a variant, an edit
+   * or a translation is on screen that is the wrong text, so the row offers the
+   * answer the reader is looking at instead of leaving the only copy button lying.
+   */
+  const drawnCopy = run !== null
+    ? ''
+    : ring !== null && ring.active.id !== 'native'
+      ? String(ring.active.text || '')
+      : override !== null
+        ? String(override.text || '')
+        : drawnTranslation !== null ? String(drawnTranslation.text || '') : '';
+
+  function copyDrawn() {
+    const g = realGlobal();
+    try {
+      if (g && g.navigator && g.navigator.clipboard) g.navigator.clipboard.writeText(drawnCopy);
+    } catch (e) {}
+    setCopied(true);
+    setTimeout(function () { setCopied(false); }, 1200);
+  }
+
   async function removeVersion() {
     setConfirmDelete(false);
     setBusy(true);
@@ -4288,6 +4314,13 @@ function AssistantToolbar(props) {
         onCancel: function () { setRevert(null); },
         onConfirm: confirmRevert,
       })),
+    failed || drawnCopy.length === 0
+      ? null
+      : h(ActionButton, {
+        title: copied ? t('copied') : t('copyThisAnswer'),
+        onClick: copyDrawn,
+        act: 'copy-answer',
+      }, copied ? h(CheckIcon) : h(CopyIcon)),
     failed
       ? null
       : h(ActionButton, {
@@ -4327,7 +4360,7 @@ function AssistantToolbar(props) {
         // With a translation on screen the menu also offers its text: a reader who
         // wants the translation somewhere else should not have to select the pair
         // by hand in the transcript.
-        copy: shownLang !== null && translationOf(state, turn) !== null,
+        copy: shownLang !== null && drawnTranslation !== null,
         copyLabel: t('copyTranslation'),
         onCopy: copyTranslation,
         onToggle: function (event) { toggleMenu('translate', event); },
@@ -4772,6 +4805,7 @@ const I18N = {
     translating: 'Translating…',
     translationTruncated: 'The translation was cut off by the model\'s length limit — the rest is untranslated.',
     copyTranslation: 'Copy the translation',
+    copyThisAnswer: 'Copy this answer',
     translationCopied: 'Translation copied',
     close: 'Close',
     imagesKept: '{count} image(s) kept as-is',
@@ -4863,6 +4897,7 @@ const I18N = {
     translating: '正在翻译…',
     translationTruncated: '译文因为模型的长度上限被截断了，后半部分没有翻译。',
     copyTranslation: '复制译文',
+    copyThisAnswer: '复制这条回答',
     translationCopied: '已复制译文',
     close: '关闭',
     imagesKept: '{count} 张图片原样保留',
