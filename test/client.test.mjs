@@ -82,6 +82,13 @@ let activeSlots = null;
 let hookIndex = 0;
 let pending = false;
 
+function freshMount() {
+  // Each case starts from a component that has never rendered: hook state is
+  // kept per component name, so without this a case would inherit the menu or
+  // the busy flag of the case before it.
+  hookStore.clear();
+}
+
 function slotKey(fn, ordinal) {
   return (fn.name || 'anon') + ':' + String(ordinal);
 }
@@ -619,6 +626,7 @@ if (run !== undefined) {
 
 // 8. a variant on screen is what copy copies
 {
+  freshMount();
   const barEntry = registered.filter((entry) => entry.descriptor.id === 'message-toolbar'
     && entry.descriptor.name === 'conversation.chat.assistant-actions')[0];
   check('the action row is registered', barEntry !== undefined, true);
@@ -633,6 +641,30 @@ if (run !== undefined) {
     copyButton.props.onClick();
     check('it copies the answer on screen', clipped.slice(before), ['另一个模型写的回答']);
   }
+}
+
+// 9. an ordinary answer still draws its whole row
+{
+  freshMount();
+  // The row that runs on every plain answer: no variant, no edit, no translation.
+  // It used to read a variable that only existed inside the translator's closure,
+  // so the whole slot threw and disappeared — which no assertion above noticed,
+  // because each of them short-circuited before reaching that line.
+  const barEntry = registered.filter((entry) => entry.descriptor.id === 'message-toolbar'
+    && entry.descriptor.name === 'conversation.chat.assistant-actions')[0];
+  const props = Object.assign({}, barEntry.descriptor.inject('session-x'), { turn: 3, messageId: 'm-3' });
+  const bar = render({ type: barEntry.component, props });
+  // Regenerate, edit, model, translate, trash — every button is an `.mtt-act`, and
+  // all of them are live on a finished answer.
+  const acts = findAll(bar, (node) => typeof node.props.className === 'string'
+    && node.props.className.split(' ').indexOf('mtt-act') !== -1);
+
+  check('a plain answer keeps its actions', acts.length, 5);
+  check('none of them is greyed out', acts.map((node) => node.props.disabled === true), [false, false, false, false, false]);
+  // Nothing was replaced and nothing was edited, so the app's own copy button is
+  // already copying the right thing — no second one.
+  const copyButton = findAll(bar, (node) => node.props && node.props['data-mtt'] === 'copy-answer')[0];
+  check('a plain answer needs no second copy', copyButton, undefined);
 }
 
 console.log(failures === 0 ? '\nall good' : '\n' + failures + ' failure(s)');

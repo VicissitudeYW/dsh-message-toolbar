@@ -3835,6 +3835,10 @@ function AssistantToolbar(props) {
   // have to be taken out of the flow.
   const run = runsOf(state ? state.runs : null, turn);
   const ring = answerRing(state ? state.answers : null, turn);
+  // The text the reader edited in place on the logged answer (no variant), if
+  // any. Both the copy button and the translator need it: what is on screen is
+  // not what the log says once an edit was saved.
+  const override = answerOverride(state ? state.answers : null, turn);
   const live = useLiveAnswer(sessionId, turn);
   // The trash deletes what is on screen: the selected variant when the answer
   // is a variant, the logged answer (a view-level hide) when it is the original.
@@ -4143,7 +4147,6 @@ function AssistantToolbar(props) {
     // translating is the host's default (the one that answered the turn).
     prefsStore.set({ lang: lang });
     const ringNow = answerRing(state ? state.answers : null, turn);
-    const override = answerOverride(state ? state.answers : null, turn);
     const onScreen = ringNow !== null && ringNow.active.id !== 'native'
       ? ringNow.active.text
       : override !== null ? override.text : '';
