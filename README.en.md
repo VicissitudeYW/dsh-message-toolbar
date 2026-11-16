@@ -27,8 +27,9 @@ A message toolbar plugin for DSH (DeepSeek Harness).
 | **Version tree** | conversation view | A turn-level branching tree of the whole conversation family, with the active path highlighted, model labels, timestamps, and restore/delete controls. |
 
 While editing a question, **files dropped into the editor** leave with it; the paperclip in its
-corner picks them too. They go through DSH's own upload route and land in the same attachment store
-as anything you attach in the composer — images stay images.
+corner picks them too, and so does **Ctrl+V** — a screenshot on the clipboard becomes an image
+attachment instead of a wall of pasted text. They go through DSH's own upload route and land in the
+same attachment store as anything you attach in the composer — images stay images.
 
 The editor is not its own design: it is the composer's. Same surface and panel radius, the rail above
 the text, pictures as 64px thumbnails and files as the app's 240×64 cards (type glyph, name, and a

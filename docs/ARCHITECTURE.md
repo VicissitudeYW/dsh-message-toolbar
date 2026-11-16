@@ -222,6 +222,14 @@ Errors: `TypeError` → `400 {error}`, anything else → `409 {error}`.
 
 The editor of a question accepts files, and they leave with the answer:
 
+0. Three doors lead to the same list: the paperclip (`pickFiles`), the drop target (`onDrop`), and
+   `onPaste`. Paste reads `clipboardData.items` for `kind === 'file'` and falls back to
+   `clipboardData.files` only when the item list gave nothing, so a screenshot copied out of a
+   snipping tool becomes one image — and a paste of plain text is left to the field (`preventDefault`
+   is called only when at least one file came out of the clipboard), which keeps undo and the
+   browser's own text handling intact. The handler sits on the box, not on the `textarea`, so it
+   still works when focus is on the paperclip.
+
 1. The client posts each dropped file, unchanged, to the app's own upload route
    (`POST /api/session/uploadFileBinary?sessionId=…&name=…[&mediaType=…]`, body
    `application/octet-stream`). That is the route the composer itself uses, so nothing is stored

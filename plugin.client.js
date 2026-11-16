@@ -3482,6 +3482,38 @@ function UserRow(props) {
     if (transfer && transfer.files && transfer.files.length > 0) addFiles(transfer.files);
   }
 
+  // Ctrl+V is a third door into the same list, next to the picker and the drop
+  // target: a screenshot on the clipboard arrives as a file, not as text, and
+  // there is no reason to make the reader save it to disk first. Text pastes are
+  // left alone — the field keeps its own editing behaviour, including undo.
+  function pastedFiles(event) {
+    const clip = event && event.clipboardData;
+    if (!clip) return [];
+    const found = [];
+    const items = clip.items;
+    if (items !== null && items !== undefined && items.length > 0) {
+      for (const item of Array.from(items)) {
+        if (item === null || typeof item !== 'object' || item.kind !== 'file') continue;
+        const file = typeof item.getAsFile === 'function' ? item.getAsFile() : null;
+        if (file !== null && file !== undefined) found.push(file);
+      }
+    }
+    // Some platforms only fill the files list; only consulted when the item list
+    // gave nothing, so a paste never adds the same picture twice.
+    if (found.length === 0 && clip.files !== null && clip.files !== undefined && clip.files.length > 0) {
+      for (const file of Array.from(clip.files)) found.push(file);
+    }
+    return found;
+  }
+
+  function onPaste(event) {
+    const found = pastedFiles(event);
+    if (found.length === 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    addFiles(found);
+  }
+
   // Saving a question rewrites nothing but the row's own text: the answer that
   // is already there stays, the conversation does not move, no model is called.
   // `send` is the same write followed by the row's own regenerate, so the reader
@@ -3672,6 +3704,9 @@ function UserRow(props) {
       onDragEnter: onDragOver,
       onDragLeave: onDragLeave,
       onDrop: onDrop,
+      // On the box rather than the field so a paste works wherever the caret's
+      // focus sits inside it.
+      onPaste: onPaste,
     },
     h('div', { className: 'mtt-answer-edit-head' },
       h('span', { className: 'mtt-answer-edit-label' }, t('editing')),

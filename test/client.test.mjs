@@ -473,6 +473,7 @@ check('the editor opened', editor !== undefined, true);
 const area = findAll(tree, (node) => node.props && node.props.className === 'mtt-answer-edit-input')[0];
 check('the editor holds the question', area !== undefined ? area.props.value : null, 'a question');
 check('the editor accepts drops', typeof editor.props.onDrop, 'function');
+check('the editor accepts pastes', typeof editor.props.onPaste, 'function');
 check('the editor shows the drop hint', textOf(editor).indexOf('Drop files here') !== -1, true);
 
 // 2. dropping a file uploads it through the app's own endpoint
@@ -517,6 +518,50 @@ const picture = findAll([tiles[0]], (node) => node.type === 'img')[0];
 check('the thumbnail carries the dropped bytes', picture === undefined ? null : picture.props.src, 'blob:preview-1');
 check('both attachments are listed', findAll(tree, (node) => typeof node.props.className === 'string'
   && (node.props.className === 'mtt-file' || node.props.className === 'mtt-tile')).length, 2);
+
+// 3b. a picture on the clipboard arrives the same way, through Ctrl+V
+{
+  const pasted = { name: 'image.png', type: 'image/png', size: 5120 };
+  let prevented = false;
+  editor.props.onPaste({
+    clipboardData: {
+      items: [{ kind: 'file', type: 'image/png', getAsFile: () => pasted }],
+      files: [],
+    },
+    preventDefault() { prevented = true; },
+    stopPropagation() {},
+  });
+  check('a pasted picture takes over the keystroke', prevented, true);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  tree = render(mount);
+  const pasteUpload = calls.filter((call) => call.url.indexOf('name=image.png') !== -1)[0];
+  check('the paste uploads it as a picture', pasteUpload === undefined ? null : pasteUpload.url,
+    '/api/session/uploadFileBinary?sessionId=session-x&name=image.png&mediaType=image%2Fpng');
+  check('the pasted picture joins the rail', findAll(tree, (node) => typeof node.props.className === 'string'
+    && node.props.className === 'mtt-tile').length, 2);
+
+  // Text pastes are none of our business: the field keeps its own handling.
+  let textPrevented = false;
+  const uploadsBefore = calls.filter((call) => call.url.indexOf('/api/session/uploadFileBinary') === 0).length;
+  editor.props.onPaste({
+    clipboardData: { items: [{ kind: 'string', type: 'text/plain', getAsFile: () => null }], files: [] },
+    preventDefault() { textPrevented = true; },
+    stopPropagation() {},
+  });
+  check('a text paste is left to the field', textPrevented, false);
+  check('a text paste uploads nothing',
+    calls.filter((call) => call.url.indexOf('/api/session/uploadFileBinary') === 0).length, uploadsBefore);
+
+  // Take it back out, so the cases below keep looking at the two attachments a
+  // drop left behind.
+  const removeTile = findAll(tree, (node) => typeof node.props.className === 'string'
+    && node.props.className === 'mtt-tile-remove').slice(-1)[0];
+  check('the pasted picture can be taken back out', removeTile !== undefined, true);
+  if (removeTile !== undefined) removeTile.props.onClick({ preventDefault() {}, stopPropagation() {} });
+  tree = render(mount);
+  check('the rail is back to the two the drop left',
+    findAll(tree, (node) => typeof node.props.className === 'string' && node.props.className === 'mtt-tile').length, 1);
+}
 
 // 4. sending replays the question with the files attached
 const sendButton = findAll(tree, (node) => typeof node.props.className === 'string' && node.props.className.indexOf('mtt-btn-primary') !== -1)[0];
