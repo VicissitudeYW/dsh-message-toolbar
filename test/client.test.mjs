@@ -604,7 +604,7 @@ if (run !== undefined) {
   const openMenu = findAll(card, (node) => node.props && node.props['data-native-menu'] !== undefined && node.props['data-open'] === '1')[0];
   check('the count opens the list', openMenu !== undefined, true);
   check('every answer is a row', openMenu === undefined ? null : JSON.parse(openMenu.props['data-items']), [
-    '5=1. Answer 1',
+    '5=1. model’s own answer',
     '6=2. deepseek-flash',
   ]);
   check('the answer on screen is ticked', openMenu === undefined ? null : openMenu.props['data-selected'], '6');
