@@ -4622,7 +4622,7 @@ const CSS = [
   // The count of an answer row is a button that opens the answers by name, so it
   // has to look like the two arrows beside it — same box, same hover — while
   // staying wide enough for `12/12`.
-  '.mtt-ring-num{min-width:26px;padding:0 3px;font-size:calc(12px + var(--dsh-content-font-delta,0px));line-height:1;font-variant-numeric:tabular-nums;color:var(--mtt-fg-3)}',
+  '.mtt-ring-num{min-width:26px;padding:0 3px;height:calc(28px + var(--dsh-content-font-delta,0px));display:inline-flex;align-items:center;justify-content:center;font-size:calc(12px + var(--dsh-content-font-delta,0px));line-height:1;font-variant-numeric:tabular-nums;color:var(--mtt-fg-3)}',
   '.mtt-ring-btn{background:0 0;border:0;cursor:pointer;padding:6px;width:calc(28px + var(--dsh-content-font-delta,0px));height:calc(28px + var(--dsh-content-font-delta,0px));border-radius:var(--mtt-radius-sm);color:var(--mtt-fg-3);display:inline-flex;align-items:center;justify-content:center;font:inherit}',
   '.mtt-ring-btn:hover:not(:disabled){background:var(--mtt-hover);color:var(--mtt-fg-2)}',
   '.mtt-ring-btn svg{width:calc(17px + var(--dsh-content-font-delta,0px));height:calc(17px + var(--dsh-content-font-delta,0px));display:block}',

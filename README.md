@@ -57,6 +57,12 @@ DSH（DeepSeek Harness）消息工具栏插件。
 
 - DSH `0.2.0-rc.2` … `0.2.x`
 
+## 设计笔记
+
+- [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md)：插槽、路由、状态、样式表的来龙去脉。
+- [`docs/cherry-studio-comparison.md`](./docs/cherry-studio-comparison.md)：和 Cherry Studio 消息区的逐项对照，
+  以及 1.7.0 那几处改动是照着哪一点改的。
+
 ## 安装
 
 从仓库直接装：

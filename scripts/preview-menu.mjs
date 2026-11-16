@@ -37,7 +37,7 @@ const markup = `
     <div class="mtt-actions">
       <span class="mtt-toolbar">
         <button class="mtt-act">copy</button><button class="mtt-act">✎</button>
-        <span class="mtt-ring"><button class="mtt-ring-btn"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 4L6.70711 7.29289C6.31658 7.68342 6.31658 8.31658 6.70711 8.70711L10 12"></path></svg></button><span class="mtt-ring-count">1/1</span><button class="mtt-ring-btn"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12L9.29289 8.70711C9.68342 8.31658 9.68342 7.68342 9.29289 7.29289L6 4"></path></svg></button></span>
+        <span class="mtt-ring"><button class="mtt-ring-btn"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 4L6.70711 7.29289C6.31658 7.68342 6.31658 8.31658 6.70711 8.70711L10 12"></path></svg></button><button class="mtt-ring-btn mtt-ring-num">1/1</button><button class="mtt-ring-btn"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12L9.29289 8.70711C9.68342 8.31658 9.68342 7.68342 9.29289 7.29289L6 4"></path></svg></button></span>
       </span>
     </div>
   </div>
@@ -61,7 +61,7 @@ const markup = `
       </span>
       <button class="mtt-act" title="translate">文A</button>
       <button class="mtt-act" title="delete">🗑</button>
-      <span class="mtt-ring"><button class="mtt-ring-btn"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 4L6.70711 7.29289C6.31658 7.68342 6.31658 8.31658 6.70711 8.70711L10 12"></path></svg></button><span class="mtt-ring-count">2/2</span><button class="mtt-ring-btn"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12L9.29289 8.70711C9.68342 8.31658 9.68342 7.68342 9.29289 7.29289L6 4"></path></svg></button></span>
+      <span class="mtt-ring"><button class="mtt-ring-btn"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 4L6.70711 7.29289C6.31658 7.68342 6.31658 8.31658 6.70711 8.70711L10 12"></path></svg></button><button class="mtt-ring-btn mtt-ring-num">2/2</button><button class="mtt-ring-btn"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 12L9.29289 8.70711C9.68342 8.31658 9.68342 7.68342 9.29289 7.29289L6 4"></path></svg></button></span>
     </span>
   </div>
 
