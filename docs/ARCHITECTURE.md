@@ -484,7 +484,21 @@ records it and the same generated stylesheet applies it:
 | --- | --- | --- |
 | `turn` | `[data-chat-turn="N"]{display:none}` | the turn's user row, its answer and its tail row all go: a deleted prompt leaves no orphan answer behind, and no placeholder either |
 | `prompt` | `[data-chat-flow-kind="user"][data-chat-turn="N"]` is hidden (the question row, nothing else) | a prompt replayed by `answer-run`: the question it re-asks must not appear twice; its rail entry is dropped too. Two forces hide it: the decorator sets that row's own `display: none` (it runs for every row, including a turn that failed or is still running and therefore has no tail row yet), and `AnswerCard` writes the same rule into the sheet as a fallback |
-| `answer` | one rule per kind in `DELETED_ANSWER_KINDS` (`assistant-step`, `turn-process`, `tool`, `turn-error`, `turn-max-tokens`, `model-retry`, `turn-tail`), each scoped to `[data-chat-turn="N"]` | everything the answer owns goes, including the tail row (which carries the action row and the file-change card); the user row stays, with its own toolbar, so the turn can be answered again |
+| `answer` | one rule per kind in `DELETED_ANSWER_KINDS` (`assistant-step`, `turn-process`, `tool`, `turn-error`, `turn-max-tokens`, `model-retry`, `turn-tail`, `context`, `turn-trigger`), each scoped to `[data-chat-turn="N"]` | everything the answer owns goes, including the tail row (which carries the action row and the file-change card); the user row stays, with its own toolbar, so the turn can be answered again |
+
+### Notices the frame cannot place in a turn
+
+"Context injected" and "asked to keep going" are messages of their own in the log, and the frame writes
+`data-chat-turn` on a row only when that node's location resolved to a turn. A notice sitting between
+turns resolves to nothing, so it carries no turn number, no stylesheet rule can name it, and deleting
+the answer used to leave it standing on its own.
+
+`syncStrayNotices()` reads the order of the flow instead of its labels: a notice row without a turn is
+hidden when the next row that *does* name a turn is a turn whose answer (or whole turn) is gone — a
+notice always describes the turn it opens. Two details make it work in practice: the panel is swept
+again whenever the store changes, because a deletion mutates `hidden` and nothing in the DOM, so no
+observer callback would fire; and the sweep resolves its session from `store.lastSession` (the last
+session any component asked about) when the chat view has not told us which one it draws yet.
 
 A failed turn has no `assistant-step` row at all — only an error banner and the action row — which is why
 the answer scope hides by *kind list* rather than by "the assistant row": deleting a failed answer removes

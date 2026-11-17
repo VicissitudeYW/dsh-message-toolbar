@@ -23,7 +23,7 @@ A message toolbar plugin for DSH (DeepSeek Harness).
 | **Edit answer** | assistant messages | The answer becomes an editor where it stands, holding the markdown source of its text. |
 | **Copy** | assistant messages | Once an answer has been replaced, edited or translated, the row carries a copy button of its own: it copies the answer on screen, while the app's copy button keeps copying the one in the log. |
 | **Translate** | assistant messages | Pressing translate opens a dropdown of target languages; pick one and the answer is redrawn block by block, original and translation side by side. The same menu copies the translation on its own, or puts the answer back to the original. |
-| **Delete message / answer** | user messages / assistant messages | Removes a whole turn (message, answer, tool cards) or a single answer from the conversation. |
+| **Delete message / answer** | user messages / assistant messages | Removes a whole turn (message, answer, tool cards, and the notices above the answer) or a single answer from the conversation. |
 | **Version tree** | conversation view | A turn-level branching tree of the whole conversation family, with the active path highlighted, model labels, timestamps, and restore/delete controls. |
 
 While editing a question, **files dropped into the editor** leave with it; the paperclip in its

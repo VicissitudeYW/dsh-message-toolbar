@@ -393,6 +393,28 @@ bubbleStub.className = 'abc_bubble';
 rowStub.querySelector = (selector) => (selector.indexOf('_userStack') !== -1 ? stackStub : selector.indexOf('_bubble') !== -1 ? bubbleStub : null);
 document.querySelectorAll = (selector) => (String(selector).indexOf('data-chat-flow-kind="user"') !== -1 ? [rowStub] : []);
 
+// A notice the app could not place in a turn: "context injected" and "asked to
+// keep going" are rows of their own, and the frame only writes `data-chat-turn`
+// when the node's location resolved. It sits above turn 2, which the fixture has
+// deleted, so it has to leave with that turn.
+const noticeRow = makeElement('div');
+noticeRow.attrs['data-chat-flow-kind'] = 'context';
+const turnTwoRow = makeElement('div');
+turnTwoRow.attrs['data-chat-flow-kind'] = 'assistant-step';
+turnTwoRow.attrs['data-chat-turn'] = '2';
+// The same shape in front of a turn that is still there: it must stay.
+const keptNotice = makeElement('div');
+keptNotice.attrs['data-chat-flow-kind'] = 'turn-trigger';
+const turnThreeRow = makeElement('div');
+turnThreeRow.attrs['data-chat-flow-kind'] = 'assistant-step';
+turnThreeRow.attrs['data-chat-turn'] = '3';
+document.querySelectorAll = (selector) => {
+  const text = String(selector);
+  if (text.indexOf('data-chat-flow-kind="user"') !== -1) return [rowStub];
+  if (text === '[data-chat-flow-kind]') return [noticeRow, turnTwoRow, keptNotice, turnThreeRow];
+  return [];
+};
+
 // The host's projection store: one face per key, exactly as the app's own
 // `ProjectionValueStore` answers them — a class instance whose `faceOf` lives on
 // the prototype, because that is where the plugin's filter is installed.
@@ -712,5 +734,14 @@ if (run !== undefined) {
   check('a plain answer needs no second copy', copyButton, undefined);
 }
 
-console.log(failures === 0 ? '\nall good' : '\n' + failures + ' failure(s)');
-process.exit(failures === 0 ? 0 : 1);
+// 10. a notice the frame could not place in a turn leaves with that turn
+{
+  // Turn 2 is deleted in the fixture. The notice above it carries no
+  // `data-chat-turn`, so no stylesheet rule can name it; the sweep reads the
+  // order of the flow instead, and the store subscription is what makes it run
+  // when a deletion changes nothing in the DOM.
+  check('the notice is hidden with the turn it opens', noticeRow.style.display, 'none');
+  check('a notice in front of a live turn stays', keptNotice.style.display === 'none', false);
+}
+
+console.log(failures === 0 ? '\nall good' : '\n' + failures + ' failure(s)');process.exit(failures === 0 ? 0 : 1);
