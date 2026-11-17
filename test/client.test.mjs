@@ -261,6 +261,11 @@ const statePayload = {
     // Turn 6 is the same question answered again, and that second answer failed:
     // the app draws no action row for a turn without an answer, so the card has to.
     { turn: 6, text: 'the last question', time: 6, answered: false, reason: 'error' },
+    // Turn 7 references a file — the app turns `@path` into a highlighted chip.
+    // Turn 8 is markdown with no reference, which is the only case this plugin
+    // draws its own body for.
+    { turn: 7, text: 'the crash is here @C:\\Users\\ADMIN\\Desktop\\crash-2026-11-17.ips', time: 7, answered: true },
+    { turn: 8, text: '## a heading\n\n- one\n- two', time: 8, answered: true },
   ],
   answers: { 1: { active: 'v-1', items: [{ id: 'v-1', kind: 'model', text: '另一个模型写的回答', at: 1 }] } },
   // Turn 2 was deleted and turn 4 is the replay of the question asked in turn 1.
@@ -750,6 +755,40 @@ if (run !== undefined) {
   check('a notice trailing a deleted turn goes with it', trailingNotice.style.display, 'none');
   check('a notice opening a live turn stays', openingNotice.style.display === 'none', false);
   check('a notice opening a deleted turn goes with it', openingGone.style.display, 'none');
+}
+
+// 11. a question that references a file keeps the app's own chip
+{
+  // `@C:\…\crash.ips` contains dots, so a naive "looks like markdown" test calls
+  // it markdown and covers the app's bubble with a copy of the characters — and
+  // the chip, its icon and its hover card go with it. The copy is only worth
+  // drawing where it adds something.
+  freshMount();
+  const userRow = ReactDom.roots
+    .map((slot) => slot.element)
+    .filter((element) => element !== null && element.type && element.type.name === 'UserRow')[0];
+  check('the question row is mounted', userRow !== undefined, true);
+
+  const draw = (turn) => {
+    const bubble = makeElement('div');
+    bubble.className = 'abc_bubble';
+    freshMount();
+    const tree = render({
+      type: userRow.type,
+      props: Object.assign({}, userRow.props, { sessionId: 'session-x', turn: turn, bubble: bubble }),
+    });
+    const overlay = findAll(tree, (node) => typeof node.props.className === 'string'
+      && node.props.className.split(' ').indexOf('mtt-bubble-md') !== -1);
+    return { overlay: overlay.length, display: bubble.style.display };
+  };
+
+  const referenced = draw(7);
+  check('a question that references a file is not covered', referenced.overlay, 0);
+  check('the app keeps drawing that bubble', referenced.display, '');
+
+  const markdown = draw(8);
+  check('markdown without a reference is still drawn here', markdown.overlay, 1);
+  check('and the app bubble steps aside for it', markdown.display, 'none');
 }
 
 console.log(failures === 0 ? '\nall good' : '\n' + failures + ' failure(s)');process.exit(failures === 0 ? 0 : 1);

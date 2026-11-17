@@ -362,8 +362,14 @@ So it no longer shadows the slot at all. `installUserRows()` decorates the app's
    (`[data-mtt-row]:hover .mtt-actions`).
 4. The overlay is used for two cases only: the question is being edited (the textarea), or the
    question contains markdown (`markdownish()` — `$…$`, `**…**`, fences, headings, lists, tables)
-   and/or has been rewritten (`prompt-save`). Plain questions are left exactly as the app draws
-   them: `projectUserText`, no markdown, `$std(w)$` stays literal — which is what DSH does.
+   **and carries no `@` reference** (`mentionish()`), and/or has been rewritten (`prompt-save`).
+   Plain questions are left exactly as the app draws them: `projectUserText`, no markdown,
+   `$std(w)$` stays literal — which is what DSH does.
+5. A reference is exactly why that second condition exists. `@C:\Users\…\crash.ips` is plain text in
+   the log; the app's own user-text rules turn it into a highlighted chip with a file icon and a
+   hover card. The path is full of dots, so `markdownish()` alone calls it markdown and a markdown
+   copy of those characters would replace the chip with `@C:\…` — the copy has to earn its place,
+   and for a reference it does not.
 
 Everything else about the question — attachments, images, references — is the app's own markup,
 untouched.
