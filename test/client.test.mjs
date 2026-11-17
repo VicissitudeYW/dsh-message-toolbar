@@ -397,21 +397,28 @@ document.querySelectorAll = (selector) => (String(selector).indexOf('data-chat-f
 // keep going" are rows of their own, and the frame only writes `data-chat-turn`
 // when the node's location resolved. It sits above turn 2, which the fixture has
 // deleted, so it has to leave with that turn.
-const noticeRow = makeElement('div');
-noticeRow.attrs['data-chat-flow-kind'] = 'context';
-const turnTwoRow = makeElement('div');
-turnTwoRow.attrs['data-chat-flow-kind'] = 'assistant-step';
-turnTwoRow.attrs['data-chat-turn'] = '2';
-// The same shape in front of a turn that is still there: it must stay.
-const keptNotice = makeElement('div');
-keptNotice.attrs['data-chat-flow-kind'] = 'turn-trigger';
-const turnThreeRow = makeElement('div');
-turnThreeRow.attrs['data-chat-flow-kind'] = 'assistant-step';
-turnThreeRow.attrs['data-chat-turn'] = '3';
+function flowRow(kind, turn) {
+  const row = makeElement('div');
+  row.attrs['data-chat-flow-kind'] = kind;
+  if (turn !== undefined) row.attrs['data-chat-turn'] = String(turn);
+  return row;
+}
+// Turn 2 is deleted in the fixture, turn 3 is not.
+const turnTwoRow = flowRow('assistant-step', 2);
+// "Context injected" trailing the turn it was injected into: it belongs to turn 2.
+const trailingNotice = flowRow('context');
+// "Asked to keep going" opens the turn below it, and turn 3 is still there.
+const openingNotice = flowRow('turn-trigger');
+const turnThreeRow = flowRow('assistant-step', 3);
+// The same notice in front of a turn that is gone has to leave with it.
+const openingGone = flowRow('turn-trigger');
+const turnTwoAgain = flowRow('assistant-step', 2);
 document.querySelectorAll = (selector) => {
   const text = String(selector);
   if (text.indexOf('data-chat-flow-kind="user"') !== -1) return [rowStub];
-  if (text === '[data-chat-flow-kind]') return [noticeRow, turnTwoRow, keptNotice, turnThreeRow];
+  if (text === '[data-chat-flow-kind]') {
+    return [turnTwoRow, trailingNotice, openingNotice, turnThreeRow, openingGone, turnTwoAgain];
+  }
   return [];
 };
 
@@ -736,12 +743,13 @@ if (run !== undefined) {
 
 // 10. a notice the frame could not place in a turn leaves with that turn
 {
-  // Turn 2 is deleted in the fixture. The notice above it carries no
-  // `data-chat-turn`, so no stylesheet rule can name it; the sweep reads the
-  // order of the flow instead, and the store subscription is what makes it run
-  // when a deletion changes nothing in the DOM.
-  check('the notice is hidden with the turn it opens', noticeRow.style.display, 'none');
-  check('a notice in front of a live turn stays', keptNotice.style.display === 'none', false);
+  // Turn 2 is deleted in the fixture. These rows carry no `data-chat-turn`, so no
+  // stylesheet rule can name them; the sweep reads the order of the flow instead,
+  // and the store subscription is what makes it run when a deletion changes
+  // nothing in the DOM.
+  check('a notice trailing a deleted turn goes with it', trailingNotice.style.display, 'none');
+  check('a notice opening a live turn stays', openingNotice.style.display === 'none', false);
+  check('a notice opening a deleted turn goes with it', openingGone.style.display, 'none');
 }
 
 console.log(failures === 0 ? '\nall good' : '\n' + failures + ' failure(s)');process.exit(failures === 0 ? 0 : 1);
