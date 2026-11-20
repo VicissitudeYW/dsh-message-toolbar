@@ -11,6 +11,7 @@ process.env.HOME = home;
 const root = new URL('../lib/index.js', import.meta.url).href.replace(/lib\/index\.js$/, '');
 const { apply, MESSAGE_TOOLBAR_PATH } = await import(root + 'lib/index.js');
 const { flushState, reloadState, promptFiles } = await import(root + 'lib/state-store.js');
+const { recordRun, runsForSession, setHidden, reconcileRuns } = await import(root + 'lib/state-store.js');
 
 // Every case starts from an empty plugin state: attachments a reader dropped are
 // remembered across replays, which is exactly what makes one case leak into the
@@ -67,6 +68,14 @@ function makeContext(events) {
     webServer: { register(route) { routes.set(route.path, route.handler); return () => {}; } },
     agents: { get: (id) => (id === 'session-attach-1' ? agent : undefined) },
     sessions: { get: () => undefined },
+    // `hide` checks that the turn exists before it records the flag, so the
+    // harness has to answer with the same log the agent holds.
+    sessionQuery: {
+      async observeSession(id) {
+        if (id !== 'session-attach-1') throw new Error('unknown session');
+        return { header: { id, cwd: 'D:/work' }, events };
+      },
+    },
     llm: { listProviders: () => [], listModels: async () => [], stream: async function* () {} },
   };
   apply(ctx);
@@ -171,6 +180,48 @@ async function replay(events, body) {
   const noId = await run(log('second'), { action: 'answer-run', sessionId: 'session-attach-1', turn: 2, files: [{ type: 'file', attachment: { name: 'x' } }] });
   check('refuses a reference without an id', noId.status, 400);
   check('nothing was queued', noId.queued.length, 0);
+}
+
+// 6. deleting an answer also takes it out of the group that counts it
+//
+// A group keeps `active` pointing at the answer on screen. If a deleted answer
+// stayed in `turns` / active, the surviving card stood down (its component
+// returns null for every turn that is not the active one) and that answer lost
+// its toolbar while its rows were still there — the report this covers.
+{
+  const events = log('second').concat([
+    { seq: 8, type: 'turn/start', data: { turn: 3 } },
+    { seq: 9, type: 'user/message', data: userMessage('u3', 'third', undefined) },
+    { seq: 10, type: 'assistant/message', data: { turn: 3, step: 1, message: assistantMessage('a3'), stream: [] } },
+    { seq: 11, type: 'turn/end', data: { turn: 3, reason: { kind: 'error' } } },
+  ]);
+  resetState();
+  const { handler } = makeContext(events);
+  const post = async (body) => {
+    const res = response();
+    await handler(request(body), res);
+    return { status: res.status, payload: JSON.parse(res.body || '{}') };
+  };
+  recordRun('session-attach-1', 1, 2, { provider: 'p', model: 'm2' });
+  recordRun('session-attach-1', 1, 3, { provider: 'p', model: 'm3' });
+  const dropped = await post({ action: 'hide', sessionId: 'session-attach-1', turn: 3, scope: 'answer', hidden: true });
+  check('status', dropped.status, 200);
+  check('the group forgets the deleted answer', dropped.payload.runs['1'].turns, [1, 2]);
+  check('the answer before it takes the screen', dropped.payload.runs['1'].active, 2);
+  check('its model label goes too', dropped.payload.runs['1'].models['3'], undefined);
+  const last = await post({ action: 'hide', sessionId: 'session-attach-1', turn: 2, scope: 'answer', hidden: true });
+  check('a group of one is no group', last.payload.runs, {});
+
+  // State written before the repair: a group that still lists a deleted answer
+  // is healed when the payload is built, so the survivor's card comes back.
+  resetState();
+  recordRun('session-attach-1', 1, 2, { provider: 'p', model: 'm2' });
+  recordRun('session-attach-1', 1, 3, { provider: 'p', model: 'm3' });
+  setHidden('session-attach-1', 'answer', 3, true);
+  check('a stale group still names it', runsForSession('session-attach-1')['1'].active, 3);
+  reconcileRuns('session-attach-1');
+  check('healed turns', runsForSession('session-attach-1')['1'].turns, [1, 2]);
+  check('healed active', runsForSession('session-attach-1')['1'].active, 2);
 }
 
 rmSync(home, { recursive: true, force: true });
