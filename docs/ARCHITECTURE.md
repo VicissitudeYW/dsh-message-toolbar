@@ -321,9 +321,18 @@ layer: a failure to persist never fails the operation.
 lands in that turn, `reasoning` when that message carries a reasoning block, `tools` counts the
 `tool/call` events of the turn, `reason` comes from the `turn/end` payload (`error`, `aborted`,
 `completed`, …), `open: true` for a turn that never ended. The chat view draws its action row only for
-a turn with a *closing message*, so a turn that failed has no toolbar at all; the answer card uses
-`answered: false && !open` to draw one itself (`.mtt-tail-actions`, `AssistantToolbar` with
-`failed: true` → retry / model switch / delete only).
+a turn with a *closing message*, so a turn that failed has no toolbar at all; the answer card draws one
+itself (`.mtt-tail-actions`, `AssistantToolbar` with `failed: true` → retry / model switch / delete
+only).
+
+Deciding that from state alone is not enough, because state lags: a turn that opened a moment ago — or
+failed after the last refetch — is not in `turns` yet, and a stale payload must not cost the reader the
+retry button. So `failedAnswer(state, turn)` prefers what the payload says (`answered: false` → failed,
+`answered: true` → fine) and otherwise looks at the page: `nativeAnswerRow(turn)` asks whether the app
+drew an action row inside that turn's `turn-tail` row, and no row means the toolbar is ours to draw.
+`answered: false` alone is enough — a turn that ended is not running, so the old `!open` condition only
+created a hole. Regenerating also calls `store.follow(sessionId)`, which re-reads the session a few
+times over the next ~16 s, so the new turn and its failure reach the card without a reload.
 
 ### The turn a replay opened is machinery
 
