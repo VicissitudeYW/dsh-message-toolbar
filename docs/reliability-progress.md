@@ -15,3 +15,5 @@ Plan: `docs/superpowers/plans/2026-11-21-reliability.md`
 
 - 最终验证：npm test 既有 host/client 全通过；新增 108 项，107 通过、1 项文件 symlink 权限跳过、0 失败。语法检查 21 个 JS 文件及客户端 factory，通过；bundle 包含完整当前源，重复 build hash 一致。npm pack --dry-run（含 prepack）成功，8 个运行模块齐全，无个人会话、状态、测试或临时 CSV。
 - 固定 tag 的公开搜索无可直接采用结果，已用 Context7 与官方 raw 源码交叉核对；本轮不声称真实 GUI 或模型调用验收。
+
+- 已快进合并 main 并推送；实现提交 5a7a08300db31e4317dc97e1d9542258b258a8e8 与 GitHub refs/heads/main 逐字一致。最终文档收尾同步提交；本轮未执行 profile 同步、npm 发布或 DSH 重启。

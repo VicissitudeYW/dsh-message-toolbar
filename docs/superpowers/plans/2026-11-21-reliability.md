@@ -59,4 +59,4 @@ Files: 中英文 README、`docs/ARCHITECTURE.md`、修复报告和 package 元�
 - [x] 独立审查最终差异，针对发现补回归与修复。
 - [x] 更新中英文说明及真实兼容限制，修正过时的协议文档。
 - [x] `npm test`、`npm run build`、`npm pack --dry-run`、语法与 diff 检查。
-- [ ] 核对脱敏、清理临时 CSV，fast-forward main、推送并验证远端 SHA。
+- [x] 核对脱敏、清理临时 CSV，fast-forward main、推送并验证远端 SHA。
