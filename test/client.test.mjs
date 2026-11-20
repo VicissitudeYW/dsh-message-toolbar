@@ -264,7 +264,7 @@ const statePayload = {
     // Turn 7 references a file — the app turns `@path` into a highlighted chip.
     // Turn 8 is markdown with no reference, which is the only case this plugin
     // draws its own body for.
-    { turn: 7, text: 'the crash is here @C:\\Users\\ADMIN\\Desktop\\crash-2026-11-17.ips', time: 7, answered: true },
+    { turn: 7, text: 'the report is here @C:\\workspace\\report.ips', time: 7, answered: true },
     { turn: 8, text: '## a heading\n\n- one\n- two', time: 8, answered: true },
   ],
   answers: { 1: { active: 'v-1', items: [{ id: 'v-1', kind: 'model', text: '另一个模型写的回答', at: 1 }] } },
@@ -709,7 +709,7 @@ if (run !== undefined) {
   const face = store.faceOf('turnOutline');
   const first = face.getSnapshot();
   check('the outline drops the deleted turn and the replay', first.map((entry) => entry.turn), [1, 3, 5]);
-  check('the outline keeps its keepers', first.map((entry) => entry.prompt), ['p1', 'p3', 'p5']);
+  check('the outline also follows the saved question', first.map((entry) => entry.prompt), ['a question', 'p3', 'p5']);
   check('the filtered value keeps its identity', face.getSnapshot(), first);
   check('a plain key is passed through', store.faceOf('title').getSnapshot(), undefined);
 

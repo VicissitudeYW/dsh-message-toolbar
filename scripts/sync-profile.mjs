@@ -38,7 +38,7 @@ fs.mkdirSync(path.join(target, 'lib'), { recursive: true });
 fs.mkdirSync(path.join(target, 'scripts'), { recursive: true });
 fs.mkdirSync(path.join(target, 'docs'), { recursive: true });
 
-for (const file of ['package.json', 'cordis.patch.yml', 'plugin.client.js', 'README.md', 'README.en.md', 'CHANGELOG.md', 'LICENSE']) {
+for (const file of ['package.json', 'cordis.patch.yml', 'plugin.client.js', 'README.md', 'README.en.md', 'LICENSE']) {
   fs.copyFileSync(path.join(root, file), path.join(target, file));
 }
 for (const file of fs.readdirSync(path.join(root, 'lib'))) {

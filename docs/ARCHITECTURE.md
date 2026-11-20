@@ -10,6 +10,9 @@ lib/index.js          host: /message-toolbar HTTP route + version branching engi
 lib/toolbar-logic.js  pure functions: family walk, version ring, turn tree
 lib/session-record.js session log reading with the same fallback chain DSH uses
 lib/state-store.js    plugin-owned durable state (deleted cards, translation cache)
+lib/durable-state.js  isolated mutations, validated reads, fsync + atomic rename
+lib/model-selection.js native pending/lastUsed projection fold
+lib/workspace-revert.js validated inverse hunks, staging and rollback
 lib/client.js         GENERATED browser bundle (window.__ModuleLoader__ factory)
 plugin.client.js      source of lib/client.js: UI, actions, version tree view
 scripts/build-client.mjs  plugin.client.js -> lib/client.js
@@ -18,11 +21,10 @@ test/*.test.mjs       node:test suites (host HTTP contract, pure tree logic)
 
 ## Why branches are sessions
 
-DSH session logs are append-only: a message cannot be rewritten in place. So the answer-side
-buttons never mutate a transcript: regenerating or switching a model stores a variant in the
-plugin's own state (see *In-session answer variants*), and the two buttons that really need a
-new transcript — the version picker's branch row and the `edit` action below — create a
-**child session**:
+DSH session logs are append-only: a message cannot be rewritten in place. The normal regenerate
+and model-switch buttons append real agent turns to the same session and retain their grouping
+in plugin state. The explicit new-answer-card choice and the legacy `edit`/`retry` APIs instead
+create a **child session**:
 
 1. resolves the boundary — the `turn/start` seq of the turn being replaced, minus one;
 2. creates a **child session** seeded with the parent's events up to that boundary;
@@ -161,9 +163,9 @@ from `llm.listProviders()` + `llm.listModels(provider)`.
 | `answer-delete` | `sessionId, turn, answerId` | drops a variant; if it was visible, the one before it in the ring (`native` first) takes over |
 | `answer-restore` | `sessionId, turn` | drops the `override`, so the model's logged answer shows again |
 | `run-select` | `sessionId, turn, active` | shows another turn of the same question: `{runs, all}` from `selectRun`. `turn` is the group key (the turn the question was asked in); a turn that never answered that question is a `TypeError` → 400 |
-| `answer-run` | `sessionId, turn, model?, stopPrevious?, hidePrompt?` | answers a turn again **in the same session** with a real agent turn: replays its prompt as a new turn and returns `{sessionId, turn, replayedFrom, inPlace: true}`. `hidePrompt` marks the replayed prompt hidden in the same call, because that turn is not in the log yet and a later `hide` would be rejected as "第 N 轮不存在" |
+| `answer-run` | `sessionId, turn, model?, stopPrevious?, hidePrompt?, group?, files?` | answers a turn again **in the same session** with a real agent turn. `group: false` starts over after deletion; otherwise earlier live answers stay in the group. Replays resolve the edited original question and its attachments. Returns `{sessionId, turn, replayedFrom, inPlace: true, runs}`. |
 | `changes` | `sessionId, turn` | `{ turn, supported, cwd?, files: [{path, display, added, deleted, kind, revertable, before, after}], total, added, deleted }` — what that turn changed on disk, read from `workspaceChanges`; `supported: false` carries `reason: "no-service" \| "not-recorded"` |
-| `revert` | `sessionId, turn` | undoes those changes; `{ turn, reverted: [{path, display, action}], skipped: [{path, reason}], cwd }`. All-or-nothing: one file whose current content no longer matches what the turn left behind means **nothing** is written, and the 409 names the conflicts |
+| `revert` | `sessionId, turn` | `{ turn, reverted: [{path, display, action}], skipped: [{path, reason}], cwd }`. A preflight conflict prevents all writes. Unverifiable files may be skipped while safe files are reverted. The client stops regeneration unless all skips are `unchanged` or `already-gone`. I/O failures attempt rollback and expose `code`, `rollbackComplete`, `recoveryFiles`. |
 | `hide` | `sessionId, turn, scope: "turn"\|"answer"\|"prompt", hidden: bool` | hides/restores one turn, one answer, or the replayed prompt of a turn in the transcript view; returns the new lists |
 | `models` | — | same catalog as `?models=1` |
 
@@ -175,7 +177,7 @@ same session (`answer-run`), so the fresh answer has the agent's tools, its thin
 card and DSH's own streaming page. There is no second, cheaper path in the UI; `answer-generate`
 survives only for API callers and for text variants stored by older versions.
 
-The two differ in one flag, and the flag is the whole difference in what the reader sees:
+Both normal actions use the same grouping semantics:
 
 | row action | `group` | result on screen |
 | --- | --- | --- |
@@ -188,9 +190,10 @@ answer was deleted**. The question is then waiting for its first answer again, a
 answer plus one deleted answer would read as "nothing was deleted at all" — so it starts over with
 a single answer. Every other regenerate joins the group: the reader decides when an answer goes
 away, not the button.
-Regenerating in place cannot give a clean context either — the log is append-only, so the replaced
-answer stays in it and therefore in the next request. The branch is the honest way to get that, and
-it is one menu row away.
+Regenerating in place currently does not isolate earlier answers from model context. The append-only
+log and model-visible surface are distinct; the available surface replacement is persistent and
+would hide later legitimate context too. This plugin does not use that unsafe workaround. The
+explicit branch action remains available; see `RELIABILITY-2026-11-21.md` for the unresolved requirement.
 
 When turns do form a group, only the plugin knows it — the log cannot say so.
 `runs[sessionId][turn]` groups them:
@@ -213,15 +216,15 @@ group that is down to one member. The payload path also calls `reconcileRuns`, w
 whose turn is already hidden — state written before this repair heals on the next read, and it
 costs a write only when something was actually stale.
 
-A model chosen for one answer is pinned through the session controller —
-`selectForNextRequest(agent, {provider, model})`, which appends `model/selection` and sets the
-pending selection in memory. The request the replayed turn assembles carries it, and that request's
-own header retires it, so the choice lasts exactly one turn and the conversation keeps its model.
+A model is selected through `agent.model.select({provider, model})` when available, with the older
+session controller API as a compatibility fallback. A matching request header retires `pending`
+into `lastUsed`; this does **not** restore the previous model. On DSH `0.2.2-rc.5`, later requests
+continue to use that selection until another selection changes it.
 
 The model a row *offers* when no explicit choice was made (`state.model`, and `resolveAnswerModel`'s
 fallback) is read by `sessionModel(events)` — the same fold `dsh-agent` uses for its selection
-projection: the last `model/selection` (the composer's pending choice) before the last
-`request/header` (what the last finished request used). A failed turn leaves no header, so reading
+projection: fold all selection/header events, retire pending only on a matching header, then use
+`pending ?? lastUsed`. A failed turn leaves no header, so reading
 only the header would name the model the user had already moved away from; the pending selection is
 what "regenerate this failed answer" should use, and now does.
 
@@ -297,6 +300,7 @@ app's `app.asar`, which no path can reach, and a pinned extract keeps the previe
   "translations": { "<sessionId>": { "<eventSeq|turn:n>": { "<lang>": { "text": "...", "at": 0 } } } },
   "prompts": { "<sessionId>": { "<turn>": { "text": "...", "at": 0, "files": [{ "type": "file", "attachment": { "attachmentId": "..." } }] } } },
   "runs": { "<sessionId>": { "<turn>": { "turns": [2, 5], "active": 5, "models": { "5": { "provider": "...", "model": "..." } } } } },
+  "replays": { "<sessionId>": { "<replayedTurn>": 2 } },
   "shown": { "<sessionId>": { "<turn>": "<lang>" } },
   "origins": { "<sessionId>": { "<turn>": "<text the reader saw>" } } }
 ```
@@ -310,13 +314,22 @@ versions before 1.2.0 and still readable; `active: "native"` means the logged an
 visible one. `runs` holds the groups of *real* turns that answer one question (see *Answering
 again is a turn of its own*), which is what `regenerate` and `switch model` use now.
 
-Writes are debounced (200 ms) and atomic (temp file + rename). The store is a convenience
-layer: a failure to persist never fails the operation.
+`replays` preserves replay-to-question identity even when deletion removes a singleton group.
+It is used for subsequent regeneration, cascading question deletion and outline previews. Existing
+groups seed this map when old schema-1 state is loaded; identity already lost by an older version
+cannot be inferred safely from text alone.
+
+`durable-state.js` and the store validate JSON/schema/nested state dictionaries, preserve corrupt input, mutate a detached
+draft, and writes through an exclusive temporary file, fsync and rename. Background writes remain
+debounced (200 ms), but successful HTTP mutations and stream `done` frames flush before acknowledgement.
+Failed flushes surface to the caller and remain dirty for retry. This is a single-process store;
+there is no cross-process lock or merge. A host side effect already queued cannot be rolled back merely
+because the later state flush failed.
 
 ### Turns without an answer
 
 `GET ?sessionId=` also carries the per-turn facts the transcript itself does not expose: `turns` is
-`[{ turn, text, time, answered, reasoning, tools, reason, open? }]`, derived from the log by
+`[{ turn, text, time, answered, answerText, reasoning, tools, reason, open? }]`, derived from the log by
 `extractTurns` — `answered` once a durable `assistant/message` with `surfaceOp: 'append'` (or none)
 lands in that turn, `reasoning` when that message carries a reasoning block, `tools` counts the
 `tool/call` events of the turn, `reason` comes from the `turn/end` payload (`error`, `aborted`,
@@ -566,10 +579,10 @@ A failed turn has no `assistant-step` row at all — only an error banner and th
 the answer scope hides by *kind list* rather than by "the assistant row": deleting a failed answer removes
 the error banner and its action row, and still leaves the prompt alone.
 
-The `deleted` mark is not absolute: it is applied only while nothing of ours stands in the answer's place
-(`answerGone = hidden.answer && !showingVariant`). The moment a variant is chosen, a stream starts or an edit
-is saved, the card switches to the `answer` mark, which keeps the tail row — the row the card itself is
-rendered in. Without that, a fresh answer to a just-deleted turn would be hidden by the hole it is filling.
+The `deleted` mark takes precedence over stale overrides, editors and streams. Hiding an answer retires
+its client transient state and host translation task. Regeneration creates another real turn, so it does
+not need to resurrect content inside a deleted one. Deleting a question cascades through its `replays`
+membership even when there is no multi-answer group left.
 
 Answering a turn again is **one action**, whichever row it is pressed on: the question's button and the
 answer's button both run `rerunTurnInPlace()` → `answer-run`, so a new answer is a *turn of its own* in the
@@ -615,15 +628,17 @@ answer changed files takes a different route — `changes` → ask → `revert` 
    the file-tool copies alone, so shell edits outside a repository are not recorded. The summaries live only
    as long as the host process that recorded them: after a restart the older turns answer `not-recorded`,
    and the row behaves as it always did.
-2. `revert` applies those hunks **backwards**, per file, after checking that the file still contains exactly
-   what the turn left there (`+`/` ` side at `newStart`). A file that no longer matches is a conflict, and a
-   conflict means nothing is written at all — a half-reverted working tree is worse than an untouched one.
-   A file the turn created is deleted; a file the turn deleted is recreated; binary and oversized files are
-   skipped and reported (`skipped`), never guessed at.
-3. Answering again: **regenerate** calls `answer-run`, so the new answer is a real agent turn with tools and
-   DSH's own streaming page, and the answer being replaced is hidden (`hide` scope `answer`) — one question,
-   one answer, replaced. **Switching a model** instead keeps the comparison semantics: `answer-generate`
-   stores the new answer as a variant, so the ring grows to `‹ 1/3 ›` and the earlier answers stay reachable.
+2. `workspace-revert.js` validates all files, stages replacements, then rechecks every path and content
+   before applying inverse hunks. Later edits outside matched hunks and mixed line endings are preserved.
+   A detected preflight conflict prevents writes. New/deleted files require an exact snapshot or complete
+   diff with explicit EOF evidence; normalized host diffs cannot prove nonempty EOF bytes, so these may
+   return `missing-exact-snapshot`. Binary/oversized/unknown files and unanchored insertions are reported
+   in `skipped`. Safe files may already have been reverted when other files are skipped.
+3. I/O failure triggers best-effort rollback, preserving concurrent edits and retained recovery backups.
+   This is not a filesystem transaction; process death or concurrent path replacement can defeat it.
+   Symlinks/junctions and escaping paths are rejected, but this is not a boundary against a hostile OS process.
+4. The client reports incomplete reverts and stops. On complete safe reverts, both **regenerate** and
+   **switch model** call `answer-run`, retaining real answers in the comparison ring.
 
 Several components want the same turn hidden (the answer card for an active variant, the assistant
 toolbar for a deleted answer, the tail row for a deleted turn), so `nativeHideStyle` keeps a `marks` map
@@ -701,9 +716,10 @@ The session log cannot hold two answers for one turn. `dsh-session`'s invariant 
 increase, so a settled turn can never receive a second answer in place. Surface replacements
 (`surfaceOp: { op: 'replace' }`) are model-only by design — they never rewrite the human
 transcript (`dsh-session/lib/types/surface.js`: "the wrong source for a human transcript").
-Branching is therefore the only way to keep an alternative answer with tools attached.
+An alternative with tools therefore needs another real turn, either in the same session (normal
+regeneration) or in a child session (the explicit branch action).
 
-To keep the sidebar from filling with near-identical conversations, every switch calls
+For explicit child-session navigation, every version switch calls
 `focus`: the target is un-archived and every other family member is archived, so one
 conversation stays visible while the rest remain one click away in the version ring.
 `focus` runs from the *target's* first mounted toolbar, because archiving the session that

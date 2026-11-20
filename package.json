@@ -1,6 +1,6 @@
 {
   "name": "dsh-message-toolbar",
-  "version": "1.8.8",
+  "version": "1.9.0",
   "description": "DSH message toolbar: copy, regenerate and switch models in place, edit answers, bilingual translation, edit user turns, delete and a version tree",
   "license": "MIT",
   "repository": {
@@ -66,6 +66,7 @@
   "scripts": {
     "build": "node scripts/build-client.mjs",
     "sync": "node scripts/build-client.mjs && node scripts/sync-profile.mjs",
-    "test": "node test/host.test.mjs && node test/client.test.mjs"
+    "test": "npm run build && node test/host.test.mjs && node test/client.test.mjs && node --test test/state-store.test.mjs test/host-regressions.test.mjs test/client-regressions.test.mjs test/workspace-revert.test.mjs test/sync-profile.test.mjs",
+    "prepack": "npm run build"
   }
 }

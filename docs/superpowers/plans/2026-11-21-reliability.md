@@ -28,10 +28,10 @@
 
 Files: `lib/index.js`, `lib/session-record.js`, `test/host.test.mjs` 及必要独立行为测试。
 
-- [ ] 对 group=false、非法模型/轮号和重叠重放补充失败用例。
-- [ ] 修复字段转发与副作用前验证，确保删除后重新回答无旧备选。
-- [ ] 调查官方 surface 能力；只实施与已安装版本契约一致且有回归证据的上下文隔离。
-- [ ] 运行 host 及全量测试，记录结果并提交。
+- [x] 对 group=false、非法模型/轮号和重叠重放补充失败用例。
+- [x] 修复字段转发与副作用前验证，确保删除后重新回答无旧备选。
+- [x] 调查官方 surface 能力；只实施与已安装版本契约一致且有回归证据的上下文隔离。
+- [x] 运行 host 及全量测试，记录结果并提交。
 
 ## Task 2: 文件回退
 
@@ -39,24 +39,24 @@ Files: `lib/workspace-revert.js`（新增）、`lib/index.js`、`test/workspace-
 
 Interfaces: 从 `revertTurn` 提取 `revertWorkspacePlan(plan)`；消费原 `collectTurnChanges` 结果，返回原 `{turn,reverted,skipped,cwd}`。
 
-- [ ] 真实临时目录复现新增文件被误删、删除文件无法重建、零行 hunk 等错误。
-- [ ] 实现预检与安全回退，保护用户后续修改；处理异常并说明非事务性磁盘限制。
-- [ ] 运行回归及全量测试并提交。
+- [x] 真实临时目录复现新增文件被误删、删除文件无法重建、零行 hunk 等错误。
+- [x] 实现预检与安全回退，保护用户后续修改；处理异常并说明非事务性磁盘限制。
+- [x] 运行回归及全量测试并提交。
 
 ## Task 3: 持久化与客户端竞态
 
 Files: `lib/state-store.js`、`plugin.client.js`、必要独立模块及 `test/*`。
 
-- [ ] 先复现状态损坏/部分 mutation、刷新竞态、流中断等明确问题。
-- [ ] 以小模块和确定性的请求版本处理修复根因，保持旧状态兼容。
-- [ ] 更新构建与测试脚本，让测试检验当前源生成的 bundle。
-- [ ] 全量回归，提交。
+- [x] 先复现状态损坏/部分 mutation、刷新竞态、流中断等明确问题。
+- [x] 以小模块和确定性的请求版本处理修复根因，保持旧状态兼容。
+- [x] 更新构建与测试脚本，让测试检验当前源生成的 bundle。
+- [x] 全量回归，提交。
 
 ## Task 4: 审查与交付
 
 Files: 中英文 README、`docs/ARCHITECTURE.md`、修复报告和 package 元数据。
 
-- [ ] 独立审查最终差异，针对发现补回归与修复。
-- [ ] 更新中英文说明及真实兼容限制，修正过时的协议文档。
-- [ ] `npm test`、`npm run build`、`npm pack --dry-run`、语法与 diff 检查。
+- [x] 独立审查最终差异，针对发现补回归与修复。
+- [x] 更新中英文说明及真实兼容限制，修正过时的协议文档。
+- [x] `npm test`、`npm run build`、`npm pack --dry-run`、语法与 diff 检查。
 - [ ] 核对脱敏、清理临时 CSV，fast-forward main、推送并验证远端 SHA。
