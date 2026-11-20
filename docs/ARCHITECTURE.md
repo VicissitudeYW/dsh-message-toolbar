@@ -204,6 +204,15 @@ every other member by kind (`assistant-step`, `turn-process`, `tool`, `turn-erro
 question row of the original turn stays where the reader asked it. `run-select` walks the group;
 deleting the answer on screen also steps the group back.
 
+Deleting has to keep the group honest, or the picture lies in a way that is hard to read from
+the transcript: a card stands down (`return null`) for every turn that is not the group's
+`active` one, so a group still naming a deleted answer leaves the *surviving* answer drawn by the
+app alone — no ring, no toolbar, and nothing on screen saying why. So `hide` takes the turn out of
+its group in the same step (`removeRunMember`), hands `active` to the answer before it, and drops a
+group that is down to one member. The payload path also calls `reconcileRuns`, which drops members
+whose turn is already hidden — state written before this repair heals on the next read, and it
+costs a write only when something was actually stale.
+
 A model chosen for one answer is pinned through the session controller —
 `selectForNextRequest(agent, {provider, model})`, which appends `model/selection` and sets the
 pending selection in memory. The request the replayed turn assembles carries it, and that request's
