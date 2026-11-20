@@ -791,4 +791,19 @@ if (run !== undefined) {
   check('and the app bubble steps aside for it', markdown.display, 'none');
 }
 
+// 12. a replayed turn does not announce the context it injected
+{
+  // Answering again makes the agent inject fresh time and runtime context, and the
+  // app draws that as one process row titled "已注入上下文". That is plumbing of a
+  // turn this plugin opened, not part of the conversation.
+  freshMount();
+  const tailEntry = registered.filter((entry) => entry.descriptor.id === 'message-toolbar-answers')[0];
+  check('the answer card is registered', tailEntry !== undefined, true);
+  render({ type: tailEntry.component, props: Object.assign({}, tailEntry.descriptor.inject('session-x'), { turn: 4 }) });
+  const rules = styleTags.map((tag) => tag.textContent).join('\n');
+  check('the replay hides its process group', rules.indexOf('[data-step-process][data-chat-turn="4"]{display:none}') !== -1, true);
+  check('and the context rows that feed it', rules.indexOf('[data-chat-flow-kind="context"][data-chat-turn="4"]{display:none}') !== -1, true);
+  check('a turn the reader asked keeps its group', rules.indexOf('[data-step-process][data-chat-turn="1"]') === -1, true);
+}
+
 console.log(failures === 0 ? '\nall good' : '\n' + failures + ' failure(s)');process.exit(failures === 0 ? 0 : 1);

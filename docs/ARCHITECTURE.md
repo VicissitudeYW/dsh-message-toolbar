@@ -307,12 +307,32 @@ layer: a failure to persist never fails the operation.
 ### Turns without an answer
 
 `GET ?sessionId=` also carries the per-turn facts the transcript itself does not expose: `turns` is
-`[{ turn, text, time, answered, reason, open? }]`, derived from the log by `extractTurns` — `answered`
-once a durable `assistant/message` with `surfaceOp: 'append'` (or none) lands in that turn, `reason`
-from the `turn/end` payload (`error`, `aborted`, `completed`, …), `open: true` for a turn that never
-ended. The chat view draws its action row only for a turn with a *closing message*, so a turn that
-failed has no toolbar at all; the answer card uses `answered: false && !open` to draw one itself
-(`.mtt-tail-actions`, `AssistantToolbar` with `failed: true` → retry / model switch / delete only).
+`[{ turn, text, time, answered, reasoning, tools, reason, open? }]`, derived from the log by
+`extractTurns` — `answered` once a durable `assistant/message` with `surfaceOp: 'append'` (or none)
+lands in that turn, `reasoning` when that message carries a reasoning block, `tools` counts the
+`tool/call` events of the turn, `reason` comes from the `turn/end` payload (`error`, `aborted`,
+`completed`, …), `open: true` for a turn that never ended. The chat view draws its action row only for
+a turn with a *closing message*, so a turn that failed has no toolbar at all; the answer card uses
+`answered: false && !open` to draw one itself (`.mtt-tail-actions`, `AssistantToolbar` with
+`failed: true` → retry / model switch / delete only).
+
+### The turn a replay opened is machinery
+
+Answering a question again is a real turn (`answer-run` → `agent.followup`), and the agent opens it by
+injecting a fresh time context and runtime context before it writes anything. The app groups those
+messages into one process row whose title is composed from their kinds — `已注入上下文`. The reader
+typed nothing of that, so for a turn the plugin opened (`hidden.prompts` holds it) the stylesheet also
+takes that group away:
+
+```css
+[data-step-process][data-chat-turn="N"] { display: none }
+[data-chat-flow-kind="context"][data-chat-turn="N"] { display: none }
+```
+
+`data-step-process` is the group row; it carries `data-chat-turn` but **no** `data-chat-flow-kind`, so
+a rule keyed on the flow kind cannot name it. The rule is skipped when the turn did real work —
+`tools > 0` or `reasoning: true` — because there the group *is* the record of that work, and hiding it
+would hide the answer's own process. That is why the host reports `reasoning` and `tools` per turn.
 
 ## Client side
 
