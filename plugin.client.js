@@ -1020,6 +1020,11 @@ const nativeHideStyle = {
         if (modes.has('noise')) {
           css.push('[data-step-process][data-chat-turn="' + turn + '"]{display:none}');
           css.push('[data-chat-flow-kind="context"][data-chat-turn="' + turn + '"]{display:none}');
+          // And the disclosure that opens onto the same nothing. A turn with no
+          // tools and no thinking has no steps to list, so its card reads "已完成 ·
+          // Ns" and, opened, shows an empty box — one row that promises detail and
+          // cannot deliver it.
+          css.push('[data-chat-flow-kind="turn-process"][data-chat-turn="' + turn + '"]{display:none}');
         }
         if (modes.has('deleted')) {
           for (let k = 0; k < DELETED_ANSWER_KINDS.length; k++) {

@@ -803,6 +803,9 @@ if (run !== undefined) {
   const rules = styleTags.map((tag) => tag.textContent).join('\n');
   check('the replay hides its process group', rules.indexOf('[data-step-process][data-chat-turn="4"]{display:none}') !== -1, true);
   check('and the context rows that feed it', rules.indexOf('[data-chat-flow-kind="context"][data-chat-turn="4"]{display:none}') !== -1, true);
+  // The card that opens onto the same nothing: "已完成 · Ns" with an empty body,
+  // because the turn has no tools and no thinking to list.
+  check('and the disclosure that opens onto nothing', rules.indexOf('[data-chat-flow-kind="turn-process"][data-chat-turn="4"]{display:none}') !== -1, true);
   check('a turn the reader asked keeps its group', rules.indexOf('[data-step-process][data-chat-turn="1"]') === -1, true);
 }
 

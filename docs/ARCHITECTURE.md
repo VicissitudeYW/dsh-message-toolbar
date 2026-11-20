@@ -327,12 +327,17 @@ takes that group away:
 ```css
 [data-step-process][data-chat-turn="N"] { display: none }
 [data-chat-flow-kind="context"][data-chat-turn="N"] { display: none }
+[data-chat-flow-kind="turn-process"][data-chat-turn="N"] { display: none }
 ```
 
 `data-step-process` is the group row; it carries `data-chat-turn` but **no** `data-chat-flow-kind`, so
-a rule keyed on the flow kind cannot name it. The rule is skipped when the turn did real work —
-`tools > 0` or `reasoning: true` — because there the group *is* the record of that work, and hiding it
-would hide the answer's own process. That is why the host reports `reasoning` and `tools` per turn.
+a rule keyed on the flow kind cannot name it. The third rule is the process card itself: with the
+context rows gone and nothing else in the turn, its body has no steps to list, so it would be a
+"已完成 · Ns" disclosure that opens onto an empty box.
+
+All three are skipped when the turn did real work — `tools > 0` or `reasoning: true` — because there
+the card and its group *are* the record of that work, and hiding them would hide the answer's own
+process. That is why the host reports `reasoning` and `tools` per turn.
 
 ## Client side
 
