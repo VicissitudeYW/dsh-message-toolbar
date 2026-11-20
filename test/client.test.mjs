@@ -500,6 +500,10 @@ statePayload.turns.push(
 );
 statePayload.runs[9] = { turns: [9, 10], active: 10, models: {} };
 statePayload.hidden.answers.push(10);
+// Turn 11 is a replayed prompt whose turn did real work (tools and thinking), so
+// its process group has something to list and must not be dropped wholesale.
+statePayload.turns.push({ turn: 11, text: 'an edited question', time: 11, answered: true, tools: 2, reasoning: true });
+statePayload.hidden.prompts.push(11);
 
 const mount = { type: rowElement.type, props: Object.assign({}, rowElement.props, { sessionId: 'session-x', turn: 1 }) };
 let tree = render(mount);
@@ -862,7 +866,19 @@ if (run !== undefined) {
   // The card that opens onto the same nothing: "已完成 · Ns" with an empty body,
   // because the turn has no tools and no thinking to list.
   check('and the disclosure that opens onto nothing', rules.indexOf('[data-chat-flow-kind="turn-process"][data-chat-turn="4"]{display:none}') !== -1, true);
+  // Even a replay that did real work must not head the answer with "已完成分析":
+  // the question row is gone, so the group's own title reads as a stray heading.
+  check('the replay drops the group title', rules.indexOf('[data-step-process][data-chat-turn="4"] > div:first-child{display:none}') !== -1, true);
+  check('and keeps its steps reachable', rules.indexOf('[data-step-process][data-chat-turn="4"] [data-step-process-body]{max-height:none;overflow:visible}') !== -1, true);
   check('a turn the reader asked keeps its group', rules.indexOf('[data-step-process][data-chat-turn="1"]') === -1, true);
+  check('and keeps its title', rules.indexOf('[data-step-process][data-chat-turn="1"] > div:first-child') === -1, true);
+
+  // A replay that ran tools and thought about it: the group keeps its steps (so
+  // the answer still shows its process), and loses only the title heading it.
+  render({ type: tailEntry.component, props: Object.assign({}, tailEntry.descriptor.inject('session-x'), { turn: 11 }) });
+  const worked = styleTags.map((tag) => tag.textContent).join('\n');
+  check('a replay with steps keeps its group', worked.indexOf('[data-step-process][data-chat-turn="11"]{display:none}') === -1, true);
+  check('but not its title', worked.indexOf('[data-step-process][data-chat-turn="11"] > div:first-child{display:none}') !== -1, true);
 }
 
 console.log(failures === 0 ? '\nall good' : '\n' + failures + ' failure(s)');process.exit(failures === 0 ? 0 : 1);

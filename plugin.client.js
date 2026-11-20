@@ -1054,6 +1054,14 @@ const nativeHideStyle = {
         // is in the log (the log cannot rewrite itself) but must not read as a
         // second, identical question above the answer it produced.
         css.push('[data-chat-flow-kind="user"][data-chat-turn="' + turn + '"]{display:none}');
+        // The turn's process group announces itself with a full-width title —
+        // "已完成分析" and friends — that belongs to a turn the reader never asked
+        // for: its question row is gone, so the title reads as a stray heading
+        // above the answer. The steps underneath are the answer's own process and
+        // stay; only the title goes, and the body is uncapped so nothing the title
+        // used to reveal becomes unreachable.
+        css.push('[data-step-process][data-chat-turn="' + turn + '"] > div:first-child{display:none}');
+        css.push('[data-step-process][data-chat-turn="' + turn + '"] [data-step-process-body]{max-height:none;overflow:visible}');
         // Answering again makes the agent inject a fresh time and runtime context
         // before it says anything, and the app groups those into one row whose
         // title reads "已注入上下文". Nobody asked to see the plumbing, so a turn
