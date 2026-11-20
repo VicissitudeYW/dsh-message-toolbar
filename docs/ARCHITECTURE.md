@@ -357,6 +357,19 @@ All three are skipped when the turn did real work — `tools > 0` or `reasoning:
 the card and its group *are* the record of that work, and hiding them would hide the answer's own
 process. That is why the host reports `reasoning` and `tools` per turn.
 
+The group still draws its own **title** row, and that one is not skipped: a turn this plugin replayed
+has no question row, so a title composed from the step kinds reads as a stray heading — "已完成分析"
+over an answer the reader asked for. Only the title goes; the steps stay, and the body is uncapped so
+whatever the title used to reveal stays reachable:
+
+```css
+[data-step-process][data-chat-turn="N"] > div:first-child { display: none }
+[data-step-process][data-chat-turn="N"] [data-step-process-body] { max-height: none; overflow: visible }
+```
+
+The header is the seat's first child (`ChatGroupSeat.tsx`: header `<div>`, then the
+`data-step-process-body` div), which is why the rule is structural rather than keyed on a class name.
+
 ## Client side
 
 `plugin.client.js` is an IIFE body returning `{ inject, apply }`; the build wraps it in the
