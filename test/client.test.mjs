@@ -491,11 +491,37 @@ const rowElement = ReactDom.last;
 if (rowElement === null) { console.log('FAIL the row was never decorated'); process.exit(1); }
 check('the app row is decorated with the plugin row', typeof rowElement.type, 'function');
 
+// Turn 9 asked a question that was answered twice, the second answer (turn 10)
+// failed, and the reader deleted it: the group is down to the answer in turn 9,
+// which is the one that has to keep its action row.
+statePayload.turns.push(
+  { turn: 9, text: 'a question', time: 9, answered: false },
+  { turn: 10, text: 'a question', time: 10, answered: false, reason: 'error' },
+);
+statePayload.runs[9] = { turns: [9, 10], active: 10, models: {} };
+statePayload.hidden.answers.push(10);
+
 const mount = { type: rowElement.type, props: Object.assign({}, rowElement.props, { sessionId: 'session-x', turn: 1 }) };
 let tree = render(mount);
 // The state of the turn arrives through the store, which loads it asynchronously.
 await new Promise((resolve) => setTimeout(resolve, 10));
 tree = render(mount);
+
+// 0. deleting an answer does not strand the one that is left
+//
+// A group lists its members and names the one on screen. If a deleted answer
+// stayed in that list, `active` could still name it — and a card stands down for
+// every turn that is not the active one, so the surviving answer kept its rows
+// and lost its toolbar, with nothing on screen saying why.
+{
+  const answersEntry = registered.filter((entry) => entry.descriptor.id === 'message-toolbar-answers')[0];
+  const props = Object.assign({}, answersEntry.descriptor.inject('session-x'), { turn: 9, seq: 90 });
+  const card = render({ type: answersEntry.component, props });
+  const row = findAll(card, (node) => node.props && node.props.className === 'mtt-tail-actions')[0];
+  check('the surviving answer keeps its action row', row !== undefined, true);
+  const num = findAll(card, (node) => typeof node.props.className === 'string' && node.props.className.indexOf('mtt-ring-num') !== -1)[0];
+  check('the deleted answer is not counted any more', num, undefined);
+}
 
 // 1. the edit button opens the editor
 const editButton = findAll(tree, (node) => node.props && node.props['data-mtt'] === 'edit')[0];
