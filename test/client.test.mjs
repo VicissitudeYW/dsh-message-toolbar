@@ -523,6 +523,36 @@ tree = render(mount);
   check('the deleted answer is not counted any more', num, undefined);
 }
 
+// 0b. a turn whose answer never arrived always keeps a toolbar
+//
+// The app draws its action row only for a turn that produced an answer, so a
+// failed answer has none — and the payload can lag behind a turn that opened a
+// moment ago. The card therefore believes the page: no native row, draw ours.
+{
+  const answersEntry = registered.filter((entry) => entry.descriptor.id === 'message-toolbar-answers')[0];
+  const savedQuery = document.querySelectorAll;
+  const tailRow = makeElement('div');
+  const mountTail = (hasNativeRow) => {
+    tailRow.querySelector = () => (hasNativeRow ? makeElement('button') : null);
+    document.querySelectorAll = (selector) => (String(selector).indexOf('turn-tail') !== -1 ? [tailRow] : savedQuery(selector));
+  };
+  const props = Object.assign({}, answersEntry.descriptor.inject('session-x'), { turn: 42, seq: 420 });
+
+  mountTail(false);
+  const withoutRow = render({ type: answersEntry.component, props });
+  document.querySelectorAll = savedQuery;
+  const drawn = findAll(withoutRow, (node) => node.props && node.props.className === 'mtt-tail-actions')[0];
+  check('a failed answer still gets the row', drawn !== undefined, true);
+
+  // ...and a turn the app *did* draw a row for is left alone, so a healthy
+  // answer never grows a second toolbar.
+  mountTail(true);
+  const withRow = render({ type: answersEntry.component, props });
+  document.querySelectorAll = savedQuery;
+  const duplicate = findAll(withRow, (node) => node.props && node.props.className === 'mtt-tail-actions')[0];
+  check('an answered turn keeps only the app row', duplicate, undefined);
+}
+
 // 1. the edit button opens the editor
 const editButton = findAll(tree, (node) => node.props && node.props['data-mtt'] === 'edit')[0];
 check('the row has an edit button', editButton !== undefined, true);
