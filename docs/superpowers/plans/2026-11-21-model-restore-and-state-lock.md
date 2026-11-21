@@ -68,5 +68,5 @@
 - [x] **Step 1: 更新运行限制与实现说明**，记录状态文件锁行为、模型自动恢复及无法保证的真实运行环境边界。
 - [x] **Step 2: 审查整个差异与状态生命周期**，重点检查失败清理、锁竞态、删除/追加语义及包文件范围。
 - [x] **Step 3: 运行完整 `npm test`、`npm run build`、`npm pack --dry-run`、`git diff --check`**。`npm test` 136 项（135 通过、1 跳过）；build 通过；dry-run 包清单 29 项，无测试/用户状态/临时文件。
-- [ ] **Step 4: 删除临时 TODO CSV、提交文档并核验提交差异**。
+- [x] **Step 4: 删除临时 TODO CSV、提交文档并核验提交差异**。实现与说明已分别提交；临时清单在交付前移除。
 - [ ] **Step 5: 将分支 fast-forward 到 `main` 并推送已配置 GitHub remote，核对远端 SHA**。
