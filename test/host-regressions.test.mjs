@@ -29,15 +29,34 @@ function history(count = 2) {
   });
 }
 
-function harness(events = history()) {
+function harness(events = history(), { followupError } = {}) {
   let handler;
   const sent = [], selected = [], requests = [];
+  const listeners = new Map();
   let cancelled = 0;
-  const session = { header: { id: 'session-test', cwd: home }, events, append(type, data) { events.push({ seq: events.length, type, data }); } };
+  let currentSelection = { provider: 'p', model: 'original', reasoningEffort: 'medium' };
+  const dispatch = (subject, event) => {
+    for (const listener of listeners.get('session/event') ?? []) listener(subject, event);
+  };
+  const session = { header: { id: 'session-test', cwd: home }, events, append(type, data) {
+    const event = { seq: events.length, type, data };
+    events.push(event);
+    dispatch(session, event);
+  } };
+  const agentContext = { on(type, listener) {
+    const bucket = listeners.get(type) ?? new Set();
+    bucket.add(listener);
+    listeners.set(type, bucket);
+    return () => bucket.delete(listener);
+  } };
   const agent = {
+    ctx: agentContext,
     session,
-    model: { select(selection) { selected.push(selection); } },
-    followup(message) { sent.push(message); },
+    model: {
+      current() { return currentSelection && { ...currentSelection }; },
+      select(selection) { selected.push(selection); currentSelection = { ...selection }; session.append('model/selection', selection); },
+    },
+    followup(message) { if (followupError) throw followupError; sent.push(message); },
     runMaintenance(fn) { return fn(); },
     cancel() { cancelled++; },
     async whenIdle() {},
@@ -71,8 +90,16 @@ function harness(events = history()) {
     await handler(request, response);
     return { status: response.status, payload: JSON.parse(response.body) };
   }
-  return { post, handle: handler, events, ctx, agent, sent, selected, requests, cancelled: () => cancelled };
+  return { post, handle: handler, events, ctx, agent, session, dispatch, sent, selected, requests, cancelled: () => cancelled };
 }
+
+function appendReplayTurn(h, turn, messageId, reason = { kind: 'completed' }) {
+  h.session.append('turn/start', { turn });
+  h.session.append('user/message', { id: messageId, role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: 'replayed question' }] });
+  h.session.append('turn/end', { turn, reason });
+}
+
+const eventTurnSettled = () => new Promise((resolve) => setImmediate(resolve));
 
 test('answer-run honors group=false after the original answer was removed', async () => {
   reset();
@@ -113,6 +140,72 @@ test('model switching uses the modern public agent.model.select API', async () =
   const result = await h.post({ action: 'answer-run', turn: 1, model: { provider: 'p', model: 'other' } });
   assert.equal(result.status, 200);
   assert.deepEqual(h.selected, [{ provider: 'p', model: 'other' }]);
+});
+
+test('a model-switch replay restores the previous selection after its matching turn ends', async () => {
+  reset(); const h = harness();
+  const result = await h.post({ action: 'answer-run', turn: 1, model: { provider: 'p', model: 'other' } });
+  assert.equal(result.status, 200);
+  assert.deepEqual(h.selected, [{ provider: 'p', model: 'other' }]);
+  appendReplayTurn(h, result.payload.turn, h.sent[0].id);
+  await eventTurnSettled();
+  assert.deepEqual(h.selected, [
+    { provider: 'p', model: 'other' },
+    { provider: 'p', model: 'original', reasoningEffort: 'medium' },
+  ]);
+});
+
+test('a model-switch replay waits for its own message when another prompt opens first', async () => {
+  reset(); const h = harness();
+  const result = await h.post({ action: 'answer-run', turn: 1, model: { provider: 'p', model: 'other' } });
+  h.session.append('turn/start', { turn: result.payload.turn });
+  h.session.append('user/message', { id: 'unrelated-user-message', role: 'user', source: { kind: 'user' }, content: [] });
+  h.session.append('turn/end', { turn: result.payload.turn, reason: { kind: 'completed' } });
+  await eventTurnSettled();
+  assert.equal(h.selected.length, 1);
+  const replayTurn = result.payload.turn + 1;
+  appendReplayTurn(h, replayTurn, h.sent[0].id);
+  await eventTurnSettled();
+  assert.deepEqual(h.selected.at(-1), { provider: 'p', model: 'original', reasoningEffort: 'medium' });
+});
+
+for (const reason of [{ kind: 'error' }, { kind: 'aborted', reason: { kind: 'user' } }]) {
+  test(`a model-switch replay restores the previous selection after ${reason.kind}`, async () => {
+    reset(); const h = harness();
+    const result = await h.post({ action: 'answer-run', turn: 1, model: { provider: 'p', model: 'other' } });
+    appendReplayTurn(h, result.payload.turn, h.sent[0].id, reason);
+    await eventTurnSettled();
+    assert.deepEqual(h.selected.at(-1), { provider: 'p', model: 'original', reasoningEffort: 'medium' });
+  });
+}
+
+test('model restoration leaves a newer user selection untouched', async () => {
+  reset(); const h = harness();
+  const result = await h.post({ action: 'answer-run', turn: 1, model: { provider: 'p', model: 'other' } });
+  h.agent.model.select({ provider: 'p', model: 'chosen-later' });
+  appendReplayTurn(h, result.payload.turn, h.sent[0].id);
+  await eventTurnSettled();
+  assert.deepEqual(h.selected, [
+    { provider: 'p', model: 'other' },
+    { provider: 'p', model: 'chosen-later' },
+  ]);
+});
+
+test('a replay queue failure restores the prior model and removes its watcher', async () => {
+  reset(); const h = harness(history(), { followupError: new Error('queue unavailable') });
+  const result = await h.post({ action: 'answer-run', turn: 1, model: { provider: 'p', model: 'other' } });
+  assert.equal(result.status, 409);
+  await eventTurnSettled();
+  assert.deepEqual(h.selected, [
+    { provider: 'p', model: 'other' },
+    { provider: 'p', model: 'original', reasoningEffort: 'medium' },
+  ]);
+  const foreignSession = { header: { id: 'another-session' } };
+  h.dispatch(foreignSession, { type: 'turn/start', data: { turn: 3 } });
+  h.dispatch(foreignSession, { type: 'user/message', data: { id: 'not-a-replay', source: { kind: 'user' } } });
+  h.dispatch(foreignSession, { type: 'turn/end', data: { turn: 3 } });
+  await eventTurnSettled();
+  assert.equal(h.selected.length, 2);
 });
 
 test('two replay requests cannot reserve the same future turn', async () => {
