@@ -69,4 +69,4 @@
 - [x] **Step 2: 审查整个差异与状态生命周期**，重点检查失败清理、锁竞态、删除/追加语义及包文件范围。
 - [x] **Step 3: 运行完整 `npm test`、`npm run build`、`npm pack --dry-run`、`git diff --check`**。`npm test` 136 项（135 通过、1 跳过）；build 通过；dry-run 包清单 29 项，无测试/用户状态/临时文件。
 - [x] **Step 4: 提交文档并核验提交差异**。实现与说明分别提交；临时清单在交付完成后按状态规则清理。
-- [ ] **Step 5: 将分支 fast-forward 到 `main` 并推送已配置 GitHub remote，核对远端 SHA**。
+- [x] **Step 5: 将分支 fast-forward 到 `main` 并推送已配置 GitHub remote，核对远端 SHA**。快进后推送 `origin/main`；远端和本地都为 `8957c877a5399ccffb371b76d1cfc96c736ff9f9`。
