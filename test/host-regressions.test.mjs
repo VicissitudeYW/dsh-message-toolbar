@@ -306,6 +306,58 @@ test('native model switching restores the prior selection after its exact genera
   assert.equal(child.model.current().model, 'original'); assert.equal(h.listenerCount(), 0);
 });
 
+test('a completed alternate-model version keeps its model label after composer restoration', async () => {
+  reset(); const h = harness();
+  const response = await h.post({ action: 'context-branch', operation: 'retry', turn: 1,
+    model: { provider: 'p', model: 'other' } });
+  assert.equal(response.status, 200, response.payload.error);
+  const child = h.children[0];
+  child.session.append('assistant/message', {
+    turn: 1,
+    step: 1,
+    message: {
+      id: 'alternate-answer',
+      role: 'assistant',
+      source: { kind: 'model', provider: 'p', model: 'other' },
+      content: [{ type: 'text', text: 'answer from alternate' }],
+    },
+  });
+  child.session.append('turn/end', { turn: 1, reason: { kind: 'completed' } });
+  await eventTurnSettled();
+  assert.equal(child.model.current().model, 'original');
+
+  const state = await h.get(response.payload.sessionId);
+  assert.equal(state.status, 200, state.payload.error);
+  const version = state.payload.versions.find(item => item.sessionId === response.payload.sessionId);
+  assert.equal(version.model.model, 'other');
+  const choice = state.payload.contextChoices['1'].items.find(item => item.sessionId === response.payload.sessionId);
+  assert.equal(choice.model, 'other');
+});
+
+test('a version without an explicit model uses the session model as its label', async () => {
+  reset(); const h = harness();
+  const response = await h.post({ action: 'context-branch', operation: 'retry', turn: 1 });
+  assert.equal(response.status, 200, response.payload.error);
+  const child = h.children[0];
+  child.session.append('assistant/message', {
+    turn: 1,
+    step: 1,
+    message: {
+      id: 'default-answer',
+      role: 'assistant',
+      source: { kind: 'model', provider: 'p', model: 'original' },
+      content: [{ type: 'text', text: 'answer from default' }],
+    },
+  });
+  child.session.append('turn/end', { turn: 1, reason: { kind: 'completed' } });
+  await eventTurnSettled();
+
+  const state = await h.get(response.payload.sessionId);
+  assert.equal(state.status, 200, state.payload.error);
+  const version = state.payload.versions.find(item => item.sessionId === response.payload.sessionId);
+  assert.equal(version.model.model, 'original');
+});
+
 test('native restoration preserves a newer user model selection', async () => {
   reset(); const h = harness();
   await h.post({ action: 'context-branch', operation: 'retry', turn: 1, model: { provider: 'p', model: 'other' } });
