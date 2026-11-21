@@ -28,229 +28,296 @@ function appendReplayTurn(h, turn, messageId, reason = { kind: 'completed' }) {
 
 const eventTurnSettled = () => new Promise((resolve) => setImmediate(resolve));
 
-test('answer-run honors group=false after the original answer was removed', async () => {
-  reset();
-  const h = harness();
-  const result = await h.post({ action: 'answer-run', turn: 1, group: false });
-  assert.equal(result.status, 200);
-  assert.deepEqual(result.payload.runs, {});
-});
-
-test('regenerating a replay uses the edited original question and its attachments', async () => {
-  reset(); store.recordRun('session-test', 1, 2);
-  const file = { type: 'file', attachment: { attachmentId: 'edited-file' } };
-  store.setPromptOverride('session-test', 1, 'edited original', [file]);
-  const h = harness();
-  const result = await h.post({ action: 'answer-run', turn: 2 });
-  assert.equal(result.status, 200);
-  assert.deepEqual(h.sent[0].content, [{ type: 'text', text: 'edited original' }, file]);
-});
-
-test('invalid models are rejected before cancellation or followup side effects', async () => {
+test('native question-answer actions are routed through public session branches and never queue the source agent', async () => {
   reset(); const h = harness();
-  const result = await h.post({ action: 'answer-run', turn: 1, model: {}, stopPrevious: true });
-  assert.equal(result.status, 400);
-  assert.equal(h.cancelled(), 0);
+  const result = await h.post({ action: 'context-branch', operation: 'retry', turn: 1 });
+  assert.equal(result.status, 200);
+  assert.equal(typeof result.payload.sessionId, 'string');
+  assert.notEqual(result.payload.sessionId, 'session-test');
   assert.equal(h.sent.length, 0);
+  assert.equal(h.children[0].sent.length, 1);
+  assert.deepEqual(h.children[0].sent[0].content, [{ type: 'text', text: 'question 1' }]);
+  assert.ok(h.flushed.includes(result.payload.sessionId));
 });
 
-test('nonexistent replay targets are rejected before cancelling the running agent', async () => {
-  reset(); const h = harness();
-  const result = await h.post({ action: 'answer-run', turn: 999, stopPrevious: true });
-  assert.equal(result.status, 400);
-  assert.equal(h.cancelled(), 0);
-  assert.equal(h.sent.length, 0);
-});
-
-test('model switching uses the modern public agent.model.select API', async () => {
-  reset(); const h = harness();
-  const result = await h.post({ action: 'answer-run', turn: 1, model: { provider: 'p', model: 'other' } });
-  assert.equal(result.status, 200);
-  assert.deepEqual(h.selected, [{ provider: 'p', model: 'other' }]);
-});
-
-test('a model-switch replay restores the previous selection after its matching turn ends', async () => {
-  reset(); const h = harness();
-  const result = await h.post({ action: 'answer-run', turn: 1, model: { provider: 'p', model: 'other' } });
-  assert.equal(result.status, 200);
-  assert.deepEqual(h.selected, [{ provider: 'p', model: 'other' }]);
-  appendReplayTurn(h, result.payload.turn, h.sent[0].id);
-  await eventTurnSettled();
-  assert.deepEqual(h.selected, [
-    { provider: 'p', model: 'other' },
-    { provider: 'p', model: 'original', reasoningEffort: 'medium' },
-  ]);
-});
-
-test('a model-switch replay waits for its own message when another prompt opens first', async () => {
-  reset(); const h = harness();
-  const result = await h.post({ action: 'answer-run', turn: 1, model: { provider: 'p', model: 'other' } });
-  h.session.append('turn/start', { turn: result.payload.turn });
-  h.session.append('user/message', { id: 'unrelated-user-message', role: 'user', source: { kind: 'user' }, content: [] });
-  h.session.append('turn/end', { turn: result.payload.turn, reason: { kind: 'completed' } });
-  await eventTurnSettled();
-  assert.equal(h.selected.length, 1);
-  const replayTurn = result.payload.turn + 1;
-  appendReplayTurn(h, replayTurn, h.sent[0].id);
-  await eventTurnSettled();
-  assert.deepEqual(h.selected.at(-1), { provider: 'p', model: 'original', reasoningEffort: 'medium' });
-});
-
-for (const reason of [{ kind: 'error' }, { kind: 'aborted', reason: { kind: 'user' } }]) {
-  test(`a model-switch replay restores the previous selection after ${reason.kind}`, async () => {
-    reset(); const h = harness();
-    const result = await h.post({ action: 'answer-run', turn: 1, model: { provider: 'p', model: 'other' } });
-    appendReplayTurn(h, result.payload.turn, h.sent[0].id, reason);
-    await eventTurnSettled();
-    assert.deepEqual(h.selected.at(-1), { provider: 'p', model: 'original', reasoningEffort: 'medium' });
+test('a retry response waits until its queued question is appended to the child session', async () => {
+  reset(); const h = harness(history(), { deferFollowupMessage: true });
+  let settled = false;
+  const pending = h.post({ action: 'context-branch', operation: 'retry', turn: 1 }).then(result => {
+    settled = true;
+    return result;
   });
-
-  test(`a replay restores the previous model after ${reason.kind} before its user message is recorded`, async () => {
-    reset(); const h = harness();
-    const result = await h.post({ action: 'answer-run', turn: 1, model: { provider: 'p', model: 'other' } });
-    const turn = result.payload.turn;
-    h.session.append('turn/start', { turn });
-    h.emit('agent/inbox/claimed', { agent: h.agent, message: h.sent[0], turn });
-    h.session.append('turn/end', { turn, reason });
-    await eventTurnSettled();
-    assert.deepEqual(h.selected.at(-1), { provider: 'p', model: 'original', reasoningEffort: 'medium' });
-    assert.equal(h.listenerCount(), 0, 'the completed replay leaves no lifecycle watchers');
-  });
-}
-
-test('discarding a queued model-switch replay restores the previous selection', async () => {
-  reset(); const h = harness();
-  await h.post({ action: 'answer-run', turn: 1, model: { provider: 'p', model: 'other' } });
-  h.emit('agent/inbox/discarded', { agent: h.agent, message: h.sent[0] });
   await eventTurnSettled();
-  assert.deepEqual(h.selected.at(-1), { provider: 'p', model: 'original', reasoningEffort: 'medium' });
-  assert.equal(h.listenerCount(), 0);
+  assert.equal(settled, false, 'an HTTP success must not acknowledge an inbox-only prompt');
+  h.children[0].appendQueuedMessage();
+  const result = await pending;
+  assert.equal(result.status, 200, result.payload.error);
+  assert.equal(h.children[0].session.events.some(event => event.type === 'user/message'
+    && event.data.id === h.children[0].sent[0].id), true);
+  assert.equal(h.flushed.filter(id => id === result.payload.sessionId).length, 2,
+    'the branch and its appended prompt are both durably flushed before success');
 });
 
-test('model restoration leaves a newer user selection untouched', async () => {
-  reset(); const h = harness();
-  const result = await h.post({ action: 'answer-run', turn: 1, model: { provider: 'p', model: 'other' } });
-  h.agent.model.select({ provider: 'p', model: 'chosen-later' });
-  appendReplayTurn(h, result.payload.turn, h.sent[0].id);
-  await eventTurnSettled();
-  assert.deepEqual(h.selected, [
-    { provider: 'p', model: 'other' },
-    { provider: 'p', model: 'chosen-later' },
-  ]);
+test('an unfinished retry branch keeps prior choices but has no active answer until one is written', async () => {
+  reset(); const h = harness(history());
+  const result = await h.post({ action: 'context-branch', operation: 'retry', turn: 1 });
+  assert.equal(result.status, 200, result.payload.error);
+  const child = h.children[0];
+  child.session.append('turn/end', { turn: 1, reason: { kind: 'error', message: 'provider unavailable' } });
+  const state = await h.get(result.payload.sessionId);
+  assert.equal(state.status, 200, state.payload.error);
+  assert.deepEqual(state.payload.contextChoices['1'].items.map(item => item.preview), ['answer 1']);
+  assert.equal(state.payload.contextChoices['1'].active, null);
 });
 
-test('a replay queue failure restores the prior model and removes its watcher', async () => {
-  reset(); const h = harness(history(), { followupError: new Error('queue unavailable') });
-  const result = await h.post({ action: 'answer-run', turn: 1, model: { provider: 'p', model: 'other' } });
-  assert.equal(result.status, 409);
-  await eventTurnSettled();
-  assert.deepEqual(h.selected, [
-    { provider: 'p', model: 'other' },
-    { provider: 'p', model: 'original', reasoningEffort: 'medium' },
-  ]);
-  const foreignSession = { header: { id: 'another-session' } };
-  h.dispatch(foreignSession, { type: 'turn/start', data: { turn: 3 } });
-  h.dispatch(foreignSession, { type: 'user/message', data: { id: 'not-a-replay', source: { kind: 'user' } } });
-  h.dispatch(foreignSession, { type: 'turn/end', data: { turn: 3 } });
-  await eventTurnSettled();
-  assert.equal(h.selected.length, 2);
+test('context saves and deletes change only a flushed child, never the source events', async () => {
+  for (const operation of ['edit-prompt', 'edit-answer', 'delete-answer', 'delete-question']) {
+    reset(); const h = harness(); const before = structuredClone(h.events);
+    const response = await h.post({ action: 'context-branch', operation, turn: 1, text: 'edited' });
+    assert.equal(response.status, 200, response.payload.error);
+    assert.deepEqual(h.events, before); assert.equal(h.sent.length, 0);
+    assert.equal(h.children[0].sent.length, 0);
+    const texts = h.children[0].session.events.filter(e => ['user/message', 'assistant/message'].includes(e.type))
+      .map(e => (e.data.message ?? e.data).content.map(b => b.text).join(''));
+    assert.deepEqual(texts, ({ 'edit-prompt': ['edited', 'answer 1'], 'edit-answer': ['question 1', 'edited'],
+      'delete-answer': ['question 1'], 'delete-question': [] })[operation]);
+  }
 });
 
-for (const failure of ['current', 'select', 'history']) {
-  test(`a model restoration ${failure} error is reported without crashing the host`, () => {
-    const childHome = fs.mkdtempSync(path.join(os.tmpdir(), 'mtt-restore-error-'));
-    try {
-      const result = spawnSync(process.execPath, ['--input-type=module', '--eval', `
-        import { harness } from ${JSON.stringify(new URL('./helpers/host-harness.mjs', import.meta.url).href)};
-        const h = harness();
-        const response = await h.post({ action: 'answer-run', turn: 1, model: { provider: 'p', model: 'other' } });
-        if (response.status !== 200) throw new Error(JSON.stringify(response));
-        const fail = () => { throw new Error('restore dependency unavailable'); };
-        if (${JSON.stringify(failure)} === 'history') {
-          h.agent.model.current = undefined;
-          Object.defineProperty(h.session, 'events', { get: fail });
-        } else h.agent.model[${JSON.stringify(failure)}] = fail;
-        h.session.append('turn/start', { turn: response.payload.turn });
-        h.session.append('user/message', { id: h.sent[0].id, source: { kind: 'user' } });
-        h.session.append('turn/end', { turn: response.payload.turn, reason: { kind: 'completed' } });
-        await new Promise(resolve => setImmediate(resolve));
-        console.log(JSON.stringify({ listeners: h.listenerCount() }));
-      `], { encoding: 'utf8', timeout: 15000, env: { ...process.env, HOME: childHome, USERPROFILE: childHome } });
-      assert.equal(result.status, 0, result.stderr);
-      assert.match(result.stderr, /restore dependency unavailable/);
-      assert.deepEqual(JSON.parse(result.stdout.trim()), { listeners: 0 });
-    } finally {
-      fs.rmSync(childHome, { recursive: true, force: true });
-    }
-  });
-}
+test('a failed branch flush leaves the source available and never queues it', async () => {
+  reset(); const h = harness(history(), { flushError: new Error('disk full') });
+  const result = await h.post({ action: 'context-branch', operation: 'retry', turn: 1 });
+  assert.equal(result.status, 409); assert.match(result.payload.error, /disk full/);
+  assert.deepEqual(h.sent, []); assert.equal(h.children[0].sent.length, 0);
+  assert.equal(h.archived.includes('session-test'), false); assert.equal(h.disposed.length, 1);
+});
 
-test('a failed model restoration does not replace the original queue error', async (t) => {
-  const diagnostic = t.mock.method(console, 'error', () => {});
+test('a missing persistence listener cannot acknowledge or queue a durable branch', async () => {
   reset(); const h = harness();
-  h.agent.followup = () => {
-    h.agent.model.select = () => { throw new Error('restore unavailable'); };
-    throw new Error('queue unavailable');
+  h.ctx.sessions.flush = async () => false;
+  const response = await h.post({ action: 'context-branch', operation: 'retry', turn: 1 });
+  assert.equal(response.status, 409);
+  assert.equal(h.children[0].sent.length, 0);
+  assert.equal(h.archived.includes('session-test'), false);
+  assert.equal(h.disposed.length, 1);
+});
+
+test('preparing navigation rejects unrelated conversations without persisting a focus job', async () => {
+  reset(); const h = harness();
+  await h.ctx.agents.create({ sessionId: 'native-fork', seed: h.events,
+    meta: { parentSession: 'session-test', cwd: os.homedir(), isSeeded: true }, inheritedEventCount: h.events.length });
+  const response = await h.post({ action: 'prepare-focus', sessionId: 'native-fork', sourceSessionId: 'session-test' });
+  assert.equal(response.status, 409);
+  assert.equal(store.navigationFor('native-fork'), undefined);
+});
+
+test('deleting the current version waits for its parent composer before archiving it', async () => {
+  reset(); const h = harness();
+  const created = await h.post({ action: 'context-branch', operation: 'edit-answer', turn: 1, text: 'edited' });
+  const response = await h.post({ action: 'delete-version', sessionId: created.payload.sessionId });
+  assert.equal(response.status, 200, response.payload.error);
+  assert.equal(response.payload.sessionId, 'session-test');
+  assert.equal(h.archived.includes(created.payload.sessionId), false);
+  const focused = await h.post({ action: 'focus', sessionId: response.payload.sessionId, token: response.payload.navigationToken });
+  assert.equal(focused.status, 200, focused.payload.error);
+  assert.equal(h.archived.includes(created.payload.sessionId), true);
+  assert.equal(h.archived.includes('session-test'), false);
+});
+
+test('a new navigation cannot race an in-flight archive from the previous focus', async () => {
+  reset(); const h = harness();
+  const first = await h.post({ action: 'context-branch', operation: 'edit-answer', turn: 1, text: 'first' });
+  const registry = h.ctx.get('workspaceRegistry');
+  const archive = registry.archiveSession.bind(registry);
+  let release, entered;
+  const blocked = new Promise(resolve => { release = resolve; });
+  const started = new Promise(resolve => { entered = resolve; });
+  registry.archiveSession = async id => { entered(); await blocked; return archive(id); };
+  const focusing = h.post({ action: 'focus', sessionId: first.payload.sessionId, token: first.payload.navigationToken });
+  await started;
+  let prepared = false;
+  const next = h.post({ action: 'prepare-focus', sessionId: 'session-test', sourceSessionId: first.payload.sessionId })
+    .then(result => { prepared = true; return result; });
+  await eventTurnSettled();
+  const overlapped = prepared;
+  release();
+  await focusing;
+  const job = await next;
+  assert.equal(overlapped, false, 'preparation must wait until the old archive has settled');
+  const result = await h.post({ action: 'focus', sessionId: 'session-test', token: job.payload.token });
+  assert.equal(result.status, 200, result.payload.error);
+  assert.equal(h.archived.includes('session-test'), false);
+});
+
+test('leaving a target session cancels its in-flight focus and restores its source', async () => {
+  reset(); const h = harness();
+  const branch = await h.post({ action: 'context-branch', operation: 'edit-answer', turn: 1, text: 'edited' });
+  const registry = h.ctx.get('workspaceRegistry');
+  const archive = registry.archiveSession.bind(registry);
+  let release, entered;
+  const blocked = new Promise(resolve => { release = resolve; });
+  const started = new Promise(resolve => { entered = resolve; });
+  registry.archiveSession = async id => {
+    if (id === 'session-test') { entered(); await blocked; }
+    return archive(id);
   };
-  const result = await h.post({ action: 'answer-run', turn: 1, model: { provider: 'p', model: 'other' } });
-  assert.equal(result.status, 409);
-  assert.match(result.payload.error, /queue unavailable/);
-  assert.equal(h.listenerCount(), 0);
-  assert.match(diagnostic.mock.calls[0].arguments[1].message, /restore unavailable/);
+  const focusing = h.post({ action: 'focus', sessionId: branch.payload.sessionId, token: branch.payload.navigationToken });
+  await started;
+  const cancelled = await h.post({ action: 'cancel-focus', sessionId: branch.payload.sessionId, token: branch.payload.navigationToken });
+  assert.equal(cancelled.status, 200, cancelled.payload.error);
+  assert.equal(cancelled.payload.cancelled, true);
+  release();
+  const focused = await focusing;
+  assert.equal(focused.status, 409);
+  assert.equal(h.archived.includes('session-test'), false);
+  assert.equal(h.archived.includes(branch.payload.sessionId), false);
 });
 
-test('two replay requests cannot reserve the same future turn', async () => {
+test('an unsupported unarchive API never mutates private workspace state', async () => {
   reset(); const h = harness();
-  const results = await Promise.all([
-    h.post({ action: 'answer-run', turn: 1 }), h.post({ action: 'answer-run', turn: 1 }),
-  ]);
-  assert.deepEqual(results.map((r) => r.status).sort(), [200, 409]);
-  assert.equal(h.sent.length, 1);
+  const registry = h.ctx.get('workspaceRegistry');
+  registry.archivedSessionIds.push('session-test');
+  delete registry.unarchiveSession;
+  let usedPrivate = false;
+  registry.enqueueOperation = async fn => { usedPrivate = true; await fn(); };
+  registry.requireState = () => ({ archivedSessionIds: ['session-test'] });
+  registry.setState = async () => {};
+  const response = await h.post({ action: 'activate' });
+  assert.equal(response.status, 409);
+  assert.equal(usedPrivate, false);
 });
 
-test('a queued replay remains reserved until its actual turn is visible', async () => {
+test('native answer choices deduplicate edits and inherited copies and retain the selected continuation', async () => {
   reset(); const h = harness();
-  assert.equal((await h.post({ action: 'answer-run', turn: 1 })).status, 200);
-  assert.equal((await h.post({ action: 'answer-run', turn: 1 })).status, 409);
-  assert.equal(h.sent.length, 1);
+  const retried = await h.post({ action: 'context-branch', operation: 'retry', turn: 1 });
+  const child = h.children[0];
+  child.session.append('assistant/message', { turn: 1, step: 1, message: { id: 'new-a1', role: 'assistant', content: [{ type: 'text', text: 'new answer' }] } });
+  child.session.append('turn/end', { turn: 1, reason: { kind: 'completed' } });
+  const edited = await h.post({ action: 'context-branch', operation: 'edit-answer', sessionId: retried.payload.sessionId, turn: 1, text: 'edited answer' });
+  const result = await h.get(edited.payload.sessionId);
+  assert.equal(result.status, 200, result.payload.error);
+  assert.equal(result.payload.contextChoices['1'].items.length, 2);
+  assert.deepEqual(result.payload.contextChoices['1'].items.map(item => item.preview), ['answer 1', 'edited answer']);
+  assert.equal(result.payload.contextChoices['1'].items[1].sessionId, edited.payload.sessionId);
 });
 
-test('deleting a nonexistent run does not leave phantom hidden flags', async () => {
+test('focus excludes unrelated native forks and rejects a superseded navigation token', async () => {
   reset(); const h = harness();
-  const result = await h.post({ action: 'run-delete', turn: 999 });
-  assert.equal(result.status, 400);
-  assert.deepEqual(store.hiddenForSession('session-test').answers, []);
+  const first = await h.post({ action: 'context-branch', operation: 'edit-answer', turn: 1, text: 'first edit' });
+  const second = await h.post({ action: 'context-branch', operation: 'edit-answer', turn: 1, text: 'second edit' });
+  const stale = await h.post({ action: 'focus', sessionId: first.payload.sessionId, token: first.payload.navigationToken });
+  assert.equal(stale.status, 409);
+  assert.deepEqual(h.archived, []);
+  const focused = await h.post({ action: 'focus', sessionId: second.payload.sessionId, token: second.payload.navigationToken });
+  assert.equal(focused.status, 200, focused.payload.error);
+  assert.equal(h.archived.includes('session-test'), true);
+  assert.equal(h.archived.includes(second.payload.sessionId), false);
 });
 
-for (const singleton of [false, true]) {
-  test('deleting a question hides all its replayed answers' + (singleton ? ' after the group became a singleton' : ''), async () => {
-    reset(); const h = harness(history(3));
-    store.recordRun('session-test', 1, 2);
-    store.recordRun('session-test', 1, 3);
-    if (singleton) {
-      await h.post({ action: 'run-delete', turn: 1 });
-      await h.post({ action: 'run-delete', turn: 2 });
-      assert.deepEqual(store.runsForSession('session-test'), {});
-    }
-    const result = await h.post({ action: 'hide', turn: 1, scope: 'turn' });
-    assert.equal(result.status, 200);
-    assert.deepEqual(result.payload.hidden.turns, [1, 2, 3]);
-    assert.deepEqual(result.payload.runs, {});
-  });
-}
-
-test('deleting a real answer cancels its pending translation', async () => {
+test('successive edits record operation time so later versions sort after their source', async () => {
   reset(); const h = harness();
-  store.recordRun('session-test', 1, 2);
-  const token = store.beginTranslation('session-test', 2);
-  const result = await h.post({ action: 'run-delete', turn: 2 });
-  assert.equal(result.status, 200);
-  assert.equal(store.currentTranslation('session-test', 2, token), false);
+  const first = await h.post({ action: 'context-branch', operation: 'edit-answer', turn: 1, text: 'edit one' });
+  const second = await h.post({ action: 'context-branch', operation: 'edit-answer', sessionId: first.payload.sessionId, turn: 1, text: 'edit two' });
+  const firstVersion = (await h.get(first.payload.sessionId)).payload.versions.find(version => version.sessionId === first.payload.sessionId);
+  const secondVersion = (await h.get(second.payload.sessionId)).payload.versions.find(version => version.sessionId === second.payload.sessionId);
+  assert.ok(secondVersion.createdAt > firstVersion.createdAt,
+    `new edit time ${secondVersion.createdAt} must follow prior edit time ${firstVersion.createdAt}`);
+});
+
+test('deleting an alternative removes it from every live choice while preserving the prompt', async () => {
+  reset(); const h = harness();
+  const first = await h.post({ action: 'context-branch', operation: 'retry', turn: 1 });
+  const child = h.children[0];
+  child.session.append('assistant/message', { turn: 1, step: 1, message: { id: 'new', role: 'assistant', content: [{ type: 'text', text: 'new answer' }] } });
+  child.session.append('turn/end', { turn: 1, reason: { kind: 'completed' } });
+  const removed = await h.post({ action: 'context-branch', operation: 'delete-answer', sessionId: first.payload.sessionId, turn: 1 });
+  assert.equal(removed.status, 200, removed.payload.error);
+  assert.equal(removed.payload.sessionId, 'session-test');
+  const state = (await h.get()).payload;
+  assert.equal(state.contextChoices['1'].items.length, 1);
+  assert.equal(state.contextChoices['1'].items[0].preview, 'answer 1');
+});
+
+test('legacy answer selection materializes only the chosen answer in a native session', async () => {
+  reset(); const h = harness(history(3));
+  store.recordRun('session-test', 1, 3);
+  store.setPromptOverride('session-test', 1, 'edited old question', []);
+  const initial = (await h.get()).payload;
+  assert.equal(initial.contextChoices['1'].items.length, 2);
+  const target = initial.contextChoices['1'].items.find(item => item.preview === 'answer 1');
+  const selected = await h.post({ action: 'context-select', turn: 1, id: target.id });
+  assert.equal(selected.status, 200, selected.payload.error);
+  assert.deepEqual(h.children[0].session.events.filter(e => e.type === 'assistant/message').map(e => e.data.message.content[0].text), ['answer 1']);
+  assert.equal(h.sent.length, 0);
+});
+
+test('stale display-only mutation clients are rejected before changing history or state', async () => {
+  reset(); const h = harness();
+  for (const action of ['answer-run', 'answer-generate', 'prompt-save', 'answer-save', 'answer-select', 'run-select', 'run-delete', 'answer-delete', 'hide']) {
+    const response = await h.post({ action, turn: 1, text: 'edited', scope: 'answer', hidden: true, active: 2, id: 'native' });
+    assert.equal(response.status, 409, action);
+    assert.match(response.payload.error, /更新.*重启/);
+  }
+  assert.equal(h.children.length, 0); assert.equal(h.sent.length, 0);
+  assert.equal(store.answerEntry('session-test', 1), undefined);
+});
+
+test('native fork navigation never archives an unrelated source conversation', async () => {
+  reset(); const h = harness();
+  const native = await h.ctx.agents.create({ sessionId: 'native-fork', seed: h.events, meta: { parentSession: 'session-test', cwd: os.homedir(), isSeeded: true }, inheritedEventCount: h.events.length });
+  const focus = await h.post({ action: 'prepare-focus', sessionId: 'native-fork', sourceSessionId: 'native-fork' });
+  assert.equal(focus.status, 200, focus.payload.error);
+  const result = await h.post({ action: 'focus', sessionId: 'native-fork', token: focus.payload.token });
+  assert.equal(result.status, 200, result.payload.error);
+  assert.equal(h.archived.includes('session-test'), false);
+  assert.equal(native.agent.session.header.parentSession, 'session-test');
+});
+
+test('invalid models, attachments and missing targets have no cancellation or queue effects', async () => {
+  for (const body of [{ model: {} }, { files: 'bad' }, { files: [{ type: 'text' }] }, { turn: 999 }]) {
+    reset(); const h = harness();
+    const result = await h.post({ action: 'context-branch', operation: 'retry', turn: 1, stopPrevious: true, ...body });
+    assert.equal(result.status, 400, result.payload.error);
+    assert.equal(h.cancelled(), 0); assert.equal(h.children.length, 0); assert.equal(h.sent.length, 0);
+  }
+});
+
+test('simultaneous context requests cannot both create branches from one source', async () => {
+  reset(); const h = harness();
+  const responses = await Promise.all([1, 2].map(() => h.post({ action: 'context-branch', operation: 'retry', turn: 1 })));
+  assert.deepEqual(responses.map(r => r.status).sort(), [200, 409]);
+  assert.equal(h.children.length, 1);
+});
+
+test('a native followup queue failure disposes the child without selecting or queuing the source', async () => {
+  reset(); const h = harness(history(), { followupError: new Error('queue failed') });
+  const response = await h.post({ action: 'context-branch', operation: 'retry', turn: 1, model: { provider: 'p', model: 'other' } });
+  assert.equal(response.status, 409); assert.match(response.payload.error, /queue failed/);
+  assert.equal(h.disposed.length, 1); assert.deepEqual(h.selected, []); assert.deepEqual(h.sent, []);
+});
+
+test('native model switching restores the prior selection after its exact generated turn', async () => {
+  reset(); const h = harness();
+  await h.post({ action: 'context-branch', operation: 'retry', turn: 1, model: { provider: 'p', model: 'other' } });
+  const child = h.children[0];
+  assert.equal(child.model.current().model, 'other');
+  child.session.append('turn/end', { turn: 1, reason: { kind: 'completed' } });
+  await eventTurnSettled();
+  assert.equal(child.model.current().model, 'original'); assert.equal(h.listenerCount(), 0);
+});
+
+test('native restoration preserves a newer user model selection', async () => {
+  reset(); const h = harness();
+  await h.post({ action: 'context-branch', operation: 'retry', turn: 1, model: { provider: 'p', model: 'other' } });
+  const child = h.children[0];
+  child.model.select({ provider: 'p', model: 'newer' });
+  child.session.append('turn/end', { turn: 1, reason: { kind: 'completed' } });
+  await eventTurnSettled(); assert.equal(child.model.current().model, 'newer');
 });
 
 test('reserved session object keys cannot corrupt shared dictionaries', async () => {
   reset(); const h = harness();
-  const result = await h.post({ action: 'prompt-save', sessionId: '__proto__', turn: 1, text: 'x' });
+  const result = await h.post({ action: 'context-branch', operation: 'edit-prompt', sessionId: '__proto__', turn: 1, text: 'x' });
   const polluted = Object.prototype['1'];
   delete Object.prototype['1'];
   assert.equal(result.status, 400);
@@ -260,7 +327,7 @@ test('reserved session object keys cannot corrupt shared dictionaries', async ()
 test('all inherited session dictionary keys are rejected before state mutation', async () => {
   for (const sessionId of ['toString', 'valueOf', 'hasOwnProperty', '__defineGetter__']) {
     reset(); const h = harness();
-    const result = await h.post({ action: 'prompt-save', sessionId, turn: 1, text: 'x' });
+    const result = await h.post({ action: 'context-branch', operation: 'edit-prompt', sessionId, turn: 1, text: 'x' });
     delete Object.prototype[sessionId]['1'];
     assert.equal(result.status, 400, sessionId);
   }
@@ -332,6 +399,7 @@ test('disconnecting a streaming translation aborts the provider signal without c
 test('a translation disconnected before session loading never starts a provider request', async () => {
   reset(); const h = harness(); let release;
   const loading = new Promise((resolve) => { release = resolve; });
+  h.ctx.sessions.get = () => undefined;
   h.ctx.sessionQuery.observeSession = () => loading;
   const stream = h.postStream({ action: 'translate', eventSeq: 2, lang: 'zh', stream: true });
   stream.close();
@@ -371,6 +439,7 @@ test('a slow session lookup cannot supersede a newer translation of the same tur
   let releaseFirst;
   const firstRead = new Promise((resolve) => { releaseFirst = resolve; });
   let count = 0;
+  h.ctx.sessions.get = () => undefined;
   h.ctx.sessionQuery.observeSession = () => ++count === 1 ? firstRead : h.session;
   const earlier = h.postStream({ action: 'translate', eventSeq: 2, lang: 'zh', stream: true });
   const later = h.postStream({ action: 'translate', turn: 1, text: 'answer 1', lang: 'fr', stream: true });
@@ -386,6 +455,7 @@ test('a slow session lookup cannot supersede a newer translation of the same tur
 test('closing a translation invalidates the pending session lookup for that turn', async () => {
   reset(); const h = harness();
   let release;
+  h.ctx.sessions.get = () => undefined;
   h.ctx.sessionQuery.observeSession = () => new Promise((resolve) => { release = resolve; });
   const stream = h.postStream({ action: 'translate', eventSeq: 2, lang: 'zh', stream: true });
   const off = await h.post({ action: 'translate-off', turn: 1 });
@@ -465,7 +535,7 @@ test('translation cache cannot reuse the previous answer under the same turn key
 });
 
 for (const kind of ['error', 'aborted']) {
-  for (const action of ['translate', 'answer-generate']) {
+  for (const action of ['translate']) {
     test(`${action} rejects a DSH ${kind} finish even after receiving partial text`, async () => {
       reset(); const h = harness();
       h.ctx.llm.stream = async function* () {
@@ -493,19 +563,13 @@ test('translation marks the DSH max-tokens finish as truncated', async () => {
   assert.equal(store.translationFor('session-test', 'turn:1', 'zh')?.truncated, true);
 });
 
-test('answer generation rejects a failed stream even after receiving partial text', async () => {
-  reset(); const h = harness();
-  h.ctx.llm.stream = async function* () { yield { type: 'text-delta', text: 'partial' }; throw new Error('connection lost'); };
-  const result = await h.post({ action: 'answer-generate', turn: 1 });
-  assert.equal(result.status, 409);
-  assert.equal(store.answerEntry('session-test', 1), undefined);
-});
-
 test('successful mutation acknowledgement already has durable state on disk', async () => {
   reset(); const h = harness();
-  assert.equal((await h.post({ action: 'prompt-save', turn: 1, text: 'durable' })).status, 200);
+  const result = await h.post({ action: 'context-branch', operation: 'edit-prompt', turn: 1, text: 'durable' });
+  assert.equal(result.status, 200, result.payload.error);
   assert.equal(fs.existsSync(stateFile), true);
-  assert.equal(JSON.parse(fs.readFileSync(stateFile, 'utf8')).prompts['session-test']['1'].text, 'durable');
+  assert.equal(JSON.parse(fs.readFileSync(stateFile, 'utf8')).navigation['session-test'].target, result.payload.sessionId);
+  assert.ok(h.flushed.includes(result.payload.sessionId));
 });
 
 test('editing an answer while translation streams prevents stale translation writeback', async () => {
@@ -518,7 +582,7 @@ test('editing an answer while translation streams prevents stale translation wri
   };
   const pending = h.post({ action: 'translate', turn: 1, text: 'answer 1', lang: 'zh' });
   await started;
-  await h.post({ action: 'answer-save', turn: 1, text: 'changed answer' });
+  await h.post({ action: 'context-branch', operation: 'edit-answer', turn: 1, text: 'changed answer' });
   release();
   assert.equal((await pending).status, 409);
   assert.equal(store.shownForSession('session-test')['1'], undefined);
@@ -534,9 +598,9 @@ test('folding model selection retires a consumed pending choice before later hea
     { seq: 10, type: 'request/header', data: { header: { config: { provider: 'p', model: 'current' } } } },
   );
   const h = harness(events);
-  const result = await h.post({ action: 'answer-generate', turn: 1 });
-  assert.equal(result.status, 200);
-  assert.equal(h.requests[0].model, 'current');
+  const result = await h.post({ action: 'context-branch', operation: 'retry', turn: 1 });
+  assert.equal(result.status, 200, result.payload.error);
+  assert.equal(h.children[0].model.current().model, 'current');
 });
 
 test('an aborted JSON request terminates instead of waiting forever for end', async () => {

@@ -50,12 +50,10 @@ test('canceling a translation aborts its request and releases the live translati
 
 test('answer choice rows identify their reply alongside the model label', () => {
   const h = clientHarness();
-  const choices = h.ringChoices({ active: 2, turns: [1, 2], models: {
-    1: { provider: 'p', model: 'alpha' }, 2: { provider: 'p', model: 'beta' },
-  } }, null, [
-    { turn: 1, answerText: 'first answer preview' },
-    { turn: 2, answerText: 'selected answer preview' },
-  ]);
+  const choices = h.contextRingChoices({ active: '2', items: [
+    { id: '1', model: 'alpha', preview: 'first answer preview' },
+    { id: '2', model: 'beta', preview: 'selected answer preview' },
+  ] });
   assert.match(h.render(() => choices.items[0].label, {}).map(textOf).join(''), /alpha.*first answer preview/);
   assert.match(h.render(() => choices.items[1].label, {}).map(textOf).join(''), /beta.*selected answer preview/);
   assert.equal(choices.selectedId, '2');
@@ -66,7 +64,10 @@ test('the answer menu previews each edited reply and does not label an empty ans
   h.store.set('s', state({ turns: [
     { turn: 1, answerText: 'original source' }, { turn: 2, answerText: 'old source' }, { turn: 3, text: 'question without reply' },
   ], runs: { 1: { turns: [1, 2, 3], active: 2 } },
-  answers: { 2: { active: 'native', items: [], override: { text: 'edited second answer' } } } }));
+  answers: { 2: { active: 'native', items: [], override: { text: 'edited second answer' } } },
+  contextChoices: { '1': { active: '2', items: [
+    { id: '1', preview: 'original source' }, { id: '2', preview: 'edited second answer' }, { id: '3', preview: '' },
+  ] } } }));
   const ringMenu = openAnswerMenu(h, 2);
   const rowText = ringMenu.props.items.map((item) => h.render(() => item.label, {}).map(textOf).join(''));
   assert.match(rowText[1], /edited second answer/);
@@ -87,7 +88,10 @@ test('an answer group shows the selected legacy variant and bounds its menu prev
   const longReply = 'visible legacy answer ' + '段落 '.repeat(5000);
   h.store.set('s', state({ runs: { 1: { turns: [1, 2], active: 2, models: { 1: { model: 'native-model' } } } },
     answers: { 1: { active: 'v1', items: [{ id: 'v1', model: 'legacy-model', text: longReply }],
-      override: { text: 'hidden native edit' } } } }));
+      override: { text: 'hidden native edit' } } },
+    contextChoices: { '1': { active: '2', items: [
+      { id: '1', model: 'legacy-model', preview: longReply }, { id: '2', preview: 'second' },
+    ] } } }));
 
   const menu = openAnswerMenu(h, 2);
   const first = h.render(() => menu.props.items[0].label, {});
@@ -171,11 +175,11 @@ test('unchanged and already removed files do not block regeneration after a safe
     const body = JSON.parse(init.body); actions.push(body.action);
     return jsonResponse(body.action === 'revert'
       ? { reverted: [{ path: 'safe.txt' }], skipped: [{ reason: 'unchanged' }, { reason: 'already-gone' }] }
-      : { turn: 2 });
+      : { sessionId: 'target', navigationToken: 'token' });
   };
   const result = await h.rerunAfterRevert({ sessionId: 's', turn: 1 });
   assert.equal(result.revertedCount, 1);
-  assert.deepEqual(actions, ['revert', 'answer-run']);
+  assert.deepEqual(actions, ['revert', 'context-branch']);
 });
 
 test('a grouped visible answer renders its editor and saved override', () => {
@@ -329,19 +333,6 @@ test('old hosts keep the native original visible until its source is known', () 
   assert.equal(h.nativeHideStyle.node.textContent.includes('assistant-step'), false);
 });
 
-for (const action of ['answer-save', 'answer-select', 'answer-delete', 'answer-restore']) {
-  test(action + ' immediately removes the previous translation from the client', async () => {
-    const h = clientHarness();
-    h.store.set('s', state({ shown: { 1: 'zh' }, origins: { 1: 'old answer' },
-      translations: { 5: { zh: { turn: 1, text: 'old translation' } } } }));
-    h.window.fetch = async () => jsonResponse({ turn: 1, active: 'native', items: [], override: { text: 'new answer' } });
-    await h.answerMutate({ action, sessionId: 's', turn: 1 });
-    const tree = h.render(h.AnswerCard, props);
-    assert.equal(byClass(tree, 'mtt-pair-tr').length, 0);
-    assert.equal(byClass(tree, 'native-md').map(textOf).join(''), 'new answer');
-  });
-}
-
 test('a local mutation during GET discards the old snapshot and settles after one refresh', async () => {
   const h = clientHarness();
   h.store.set('s', state());
@@ -468,7 +459,7 @@ test('pending attachments block both Send and the keyboard shortcut until upload
       const body = JSON.parse(init.body); sent.push(body);
       if (body.action === 'prompt-save') return jsonResponse({ prompts: { 1: { text: body.text, files: body.files } } });
       if (body.action === 'changes') return jsonResponse({ supported: false });
-      return jsonResponse({ turn: 2 });
+      return jsonResponse({ sessionId: 'target', navigationToken: 'token' });
     }
     return jsonResponse(state());
   };
@@ -477,12 +468,12 @@ test('pending attachments block both Send and the keyboard shortcut until upload
   assert.equal(button(tree, 'Send').props.disabled, true);
   // Invoke the handler captured before React could render the pending upload.
   byClass(beforeDrop, 'mtt-answer-edit-input')[0].props.onKeyDown({ key: 'Enter', ctrlKey: true, preventDefault() {} });
-  await flush(); assert.equal(sent.some((body) => body.action === 'answer-run'), false);
+  await flush(); assert.equal(sent.some((body) => body.action === 'context-branch' && body.operation === 'retry'), false);
   pending.resolve(jsonResponse({ ok: true, value: { file: { attachmentId: 'file-1', name: 'report.pdf' } } }));
   await flush(); tree = draw();
   assert.equal(button(tree, 'Send').props.disabled, false);
   await button(tree, 'Send').props.onClick();
-  assert.equal(sent.find((body) => body.action === 'answer-run').files[0].attachment.attachmentId, 'file-1');
+  assert.equal(sent.find((body) => body.action === 'context-branch' && body.operation === 'retry').files[0].attachment.attachmentId, 'file-1');
 });
 
 test('a failed upload stays explicit and prevents sending an incomplete question', async () => {
@@ -495,7 +486,7 @@ test('a failed upload stays explicit and prevents sending an incomplete question
   await flush(); let tree = draw();
   assert.match(tree.map(textOf).join(''), /upload offline/);
   await button(tree, 'Send').props.onClick(); await flush(); tree = draw();
-  assert.equal(sent.some((body) => body.action === 'answer-run'), false);
+  assert.equal(sent.some((body) => body.action === 'context-branch' && body.operation === 'retry'), false);
   assert.match(tree.map(textOf).join(''), /upload offline/);
 });
 
@@ -510,13 +501,13 @@ for (const retry of [false, true]) {
       }
       const body = JSON.parse(init.body); sent.push(body);
       if (body.action === 'prompt-save') return jsonResponse({ prompts: { 1: { text: body.text, files: body.files } } });
-      return jsonResponse({ supported: false, turn: 2 });
+      return jsonResponse({ supported: false, sessionId: 'target', navigationToken: 'token' });
     };
     const draw = editor(h);
     drop(draw(), [{ name: 'report.pdf', type: 'application/pdf' }]); await flush();
     drop(draw(), [{ name: retry ? 'report.pdf' : 'other.pdf', type: 'application/pdf' }]); await flush();
     await button(draw(), 'Send').props.onClick(); await flush();
-    const replay = sent.find((body) => body.action === 'answer-run');
+    const replay = sent.find((body) => body.action === 'context-branch' && body.operation === 'retry');
     assert.equal(Boolean(replay), retry);
     if (retry) assert.equal(replay.files[0].attachment.attachmentId, 'file-2');
     else assert.match(draw().map(textOf).join(''), /upload offline/);

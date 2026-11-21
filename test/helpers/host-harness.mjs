@@ -14,7 +14,7 @@ export function history(count = 2) {
   });
 }
 
-export function harness(events = history(), { followupError } = {}) {
+export function harness(events = history(), { followupError, flushError, createError, deferFollowupMessage = false } = {}) {
   let handler;
   const sent = [], selected = [], requests = [];
   const listeners = new Map();
@@ -23,7 +23,7 @@ export function harness(events = history(), { followupError } = {}) {
   const dispatch = (subject, event) => {
     for (const listener of listeners.get('session/event') ?? []) listener(subject, event);
   };
-  const session = { header: { id: 'session-test', cwd: os.homedir() }, events, append(type, data) {
+  const session = { header: { id: 'session-test', cwd: os.homedir(), isSeeded: false }, events, append(type, data) {
     const event = { seq: events.length, type, data };
     events.push(event);
     dispatch(session, event);
@@ -35,6 +35,7 @@ export function harness(events = history(), { followupError } = {}) {
     return () => bucket.delete(listener);
   } };
   const agent = {
+    options: { provider: 'p', model: 'original', reasoningEffort: 'medium' },
     ctx: agentContext,
     session,
     model: {
@@ -46,13 +47,49 @@ export function harness(events = history(), { followupError } = {}) {
     cancel() { cancelled++; },
     async whenIdle() {},
   };
+  const children = [], flushed = [], disposed = [], archived = [];
+  const sessions = new Map([['session-test', session]]), agents = new Map([['session-test', agent]]);
+  const registry = { archivedSessionIds: archived,
+    async archiveSession(id) { if (!archived.includes(id)) archived.push(id); },
+    async unarchiveSession(id) { const at = archived.indexOf(id); if (at >= 0) archived.splice(at, 1); },
+    list() { return []; },
+  };
   const ctx = {
     effect(fn) { fn(); },
     webServer: { register(route) { handler = route.handler; return () => {}; } },
-    sessions: { get() { return undefined; } },
-    agents: { get(id) { return id === 'session-test' ? agent : undefined; } },
-    sessionQuery: { async observeSession(id) { if (id !== 'session-test') throw new Error('missing'); return session; } },
-    get() { return undefined; },
+    sessions: { get(id) { return sessions.get(id); }, async flush(subject) { if (flushError) throw flushError; flushed.push(subject.header.id); return true; } },
+    agents: { get(id) { return agents.get(id); }, async create(options) {
+      if (createError) throw createError;
+      const childEvents = structuredClone(options.seed);
+      const childSession = { header: { id: options.sessionId, ...options.meta }, events: childEvents,
+        inheritedEventCount: options.inheritedEventCount,
+        append(type, data) { const event = { type, seq: childEvents.length, time: Date.now(), data }; childEvents.push(event); dispatch(childSession, event); },
+      };
+      childSession.append('session/end-seed', { inherited: true });
+      let selection = options.agentOptions;
+      const child = { session: childSession, ctx: agentContext, options: options.agentOptions,
+        inbox: { clear() {} },
+        model: { current() { return selection; }, select(value) { selection = value; childSession.append('model/selection', value); } },
+        sent: [], followup(message) { if (followupError) throw followupError; this.sent.push(message);
+          this.queuedMessage = message;
+          if (!deferFollowupMessage) this.appendQueuedMessage(); },
+        appendQueuedMessage() {
+          if (this.queuedMessage === undefined) throw new Error('no queued message');
+          const turn = 1;
+          childSession.append('turn/start', { turn });
+          childSession.append('user/message', structuredClone(this.queuedMessage));
+          this.queuedMessage = undefined;
+        },
+        async whenIdle() {}, cancel() {}, runMaintenance(fn) { return fn(); },
+      };
+      await options.setup?.(ctx, child);
+      sessions.set(options.sessionId, childSession); agents.set(options.sessionId, child);
+      children.push(child);
+      return { agent: child, async dispose() { disposed.push(options.sessionId); agents.delete(options.sessionId); } };
+    } },
+    sessionQuery: { async observeSession(id) { if (!sessions.has(id)) throw new Error('missing'); return sessions.get(id); },
+      async listSessions() { return [...sessions.values()].map(value => ({ header: value.header, events: value.events })); } },
+    get(name) { return name === 'workspaceRegistry' ? registry : undefined; },
     llm: {
       listProviders() { return [{ id: 'p' }]; },
       async listModels() { return [{ id: 'm' }]; },
@@ -95,6 +132,13 @@ export function harness(events = history(), { followupError } = {}) {
     for (const listener of listeners.get(type) ?? []) listener(payload);
   };
   const listenerCount = () => [...listeners.values()].reduce((total, bucket) => total + bucket.size, 0);
-  return { post, postStream, handle: handler, events, ctx, agent, session, dispatch, emit, listenerCount, sent, selected, requests, cancelled: () => cancelled };
+  async function get(id = 'session-test') {
+    let body = '', status;
+    await handler({ method: 'GET', url: `/message-toolbar?sessionId=${encodeURIComponent(id)}` },
+      { writeHead(value) { status = value; }, end(value) { body += value; } });
+    return { status, payload: JSON.parse(body) };
+  }
+  return { post, get, postStream, handle: handler, events, ctx, agent, session, dispatch, emit, listenerCount, sent, selected, requests,
+    children, flushed, disposed, archived, cancelled: () => cancelled };
 }
 

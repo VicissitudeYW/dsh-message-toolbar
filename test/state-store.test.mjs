@@ -97,6 +97,30 @@ test('state maps cannot silently serialize as arrays and lose session properties
   assert.deepEqual(result, { error: true, contents: initial });
 });
 
+test('invalid pending navigation is rejected without replacing the saved state', () => {
+  const valid = { token: 'job-1', root: 'root', source: 'source', target: 'target', completed: false, archived: true };
+  for (const patch of [{ token: '' }, { root: 'unrelated-root' }, { target: 42 }, { completed: 'false' }, { archived: null }]) {
+    const initial = JSON.stringify({ schema: 1, navigation: { root: { ...valid, ...patch } } });
+    const result = isolated(`
+      let error=false;try{store.markDeleted('other',{});store.flushState()}catch{error=true}
+      console.log(JSON.stringify({error,contents:fs.readFileSync(file,'utf8')}));
+    `, initial);
+    assert.deepEqual(result, { error: true, contents: initial }, JSON.stringify(patch));
+  }
+});
+
+test('a durable navigation retains its token and target across reload and completion', () => {
+  const result = isolated(`
+    const job={token:'job-1',root:'root',source:'source',target:'target',completed:false,archived:true};
+    store.recordNavigation('root',job);store.flushState();store.reloadState();
+    const pending=store.pendingNavigationFor('target');
+    store.recordNavigation('root',{...pending,completed:true});store.flushState();store.reloadState();
+    console.log(JSON.stringify({pending,completed:store.pendingNavigationFor('target')===undefined}));
+  `);
+  assert.deepEqual(result, { pending: { token: 'job-1', root: 'root', source: 'source', target: 'target',
+    completed: false, archived: true }, completed: true });
+});
+
 for (const maps of [
   { hidden: { s: [] } }, { translations: { s: [] } },
   { translations: { s: { 'turn:1': [] } } }, { answers: { s: { 1: [] } } },

@@ -282,8 +282,14 @@ const statePayload = {
       models: { 6: { provider: 'p', model: 'deepseek-flash' } },
     },
   },
+  contextChoices: { '5': { active: '6', items: [
+    { id: '5', sessionId: 'alternate-5', model: 'model’s own answer', preview: '' },
+    { id: '6', sessionId: 'session-x', model: 'deepseek-flash', preview: '' },
+  ] } },
   model: null,
 };
+const branchStates = new Map();
+const openedSessions = [];
 
 const fetchStub = async function (url, init) {
   calls.push({ url: String(url), init: init || {} });
@@ -294,18 +300,20 @@ const fetchStub = async function (url, init) {
   if ((init && init.method) === 'POST') {
     let sent = {};
     try { sent = JSON.parse(String(init.body)); } catch (e) {}
-    if (sent.action === 'prompt-save') {
-      const entry = { text: sent.text, at: 1 };
-      if (Array.isArray(sent.files) && sent.files.length > 0) entry.files = sent.files;
-      // The save is durable: a later GET has to answer with it too.
-      statePayload.prompts[String(sent.turn)] = entry;
-      return { ok: true, status: 200, json: async () => ({ prompts: statePayload.prompts }) };
+    if (sent.action === 'context-branch') {
+      const target = structuredClone(statePayload);
+      target.sessionId = 'context-target'; target.answers = {}; target.runs = {}; target.hidden = { turns: [], answers: [], prompts: [] };
+      target.prompts = {}; target.promptAttachments = { [sent.turn]: sent.files || [] };
+      target.turns = [{ turn: sent.turn, text: sent.text || 'a question', answered: false }];
+      branchStates.set('context-target', target);
+      return { ok: true, status: 200, json: async () => ({ sessionId: 'context-target', navigationToken: 'branch-token' }) };
     }
-    // The real host answers a run with its runs only: it never sends an empty
-    // prompt table, which would read as "this question has no attachments".
-    return { ok: true, status: 200, json: async () => ({ runs: {} }) };
+    if (sent.action === 'context-select') return { ok: true, status: 200,
+      json: async () => ({ sessionId: 'alternate-5', navigationToken: 'select-token' }) };
+    return { ok: true, status: 200, json: async () => ({ supported: false }) };
   }
-  return { ok: true, status: 200, json: async () => statePayload };
+  const id = new URL(String(url), 'http://test').searchParams.get('sessionId');
+  return { ok: true, status: 200, json: async () => branchStates.get(id) || statePayload };
 };
 
 const windowStub = {
@@ -457,7 +465,7 @@ class ProjectionStore {
 const projection = new ProjectionStore();
 
 const sessionsStub = {
-  list: { getSnapshot: () => ({ byId: { 'session-x': { id: 'session-x', running: false } } }), subscribe: () => () => {} },
+  list: { getSnapshot: () => ({ byId: { 'session-x': { id: 'session-x', running: false }, 'context-target': { id: 'context-target' }, 'alternate-5': { id: 'alternate-5' } } }), subscribe: () => () => {} },
   // The app reaches a session's projections through its binding, never through a
   // store lookup on the service: this is the shape the filter has to hook.
   binding: () => ({ session: { id: 'session-x', projections: projection } }),
@@ -483,7 +491,7 @@ const ctx = {
     if (name === 'slots') return slots;
     if (name === 'sessions') return sessionsStub;
     if (name === 'uiConversation') return uiConversationStub;
-    if (name === 'uiWorkspace') return { openSession: () => {} };
+    if (name === 'uiWorkspace') return { openSession: id => { openedSessions.push(id); } };
     if (name === 'locale') return { register: () => () => {}, subscribe: () => () => {}, getLocale: () => ({ active: 'en' }) };
     return undefined;
   },
@@ -673,11 +681,12 @@ const posts = calls.filter((call) => call.init.method === 'POST' && call.url.ind
 const saved = posts.filter((call) => {
   try { return JSON.parse(call.init.body).action === 'prompt-save'; } catch (e) { return false; }
 }).pop();
-check('saving the question also saves the rail', saved === undefined ? null : JSON.parse(saved.init.body).files.length, 2);
+check('Send has no preliminary display save', saved, undefined);
 const run = posts.filter((call) => {
-  try { return JSON.parse(call.init.body).action === 'answer-run'; } catch (e) { return false; }
+  try { return JSON.parse(call.init.body).action === 'context-branch'; } catch (e) { return false; }
 }).pop();
-check('the question was replayed', run !== undefined, true);
+check('the question creates a context branch', run !== undefined, true);
+check('the native composer opens the created branch', openedSessions.includes('context-target'), true);
 if (run !== undefined) {
   const body = JSON.parse(run.init.body);
   check('the run carries both attachments', body.files, [
@@ -687,22 +696,18 @@ if (run !== undefined) {
   check('the run names the turn', body.turn, 1);
 }
 
-// 5. the question keeps showing its attachments, above the bubble
+// 5. the created branch editor reads its native attachments; the source stays unchanged.
 {
-  const mounted = ReactDom.roots.map((slot) => slot.element).filter((element) => element !== null);
-  // The row reads the plugin state through the store, which reloads the session
-  // payload after a run: let that land, then draw again.
-  await new Promise((resolve) => setTimeout(resolve, 30));
-  const rows = mounted.flatMap((element) => {
-    const one = render({ type: element.type, props: Object.assign({}, element.props, { sessionId: 'session-x', turn: 1 }) });
-    return findAll(one, (node) => typeof node.props.className === 'string' && node.props.className === 'mtt-attach-row');
-  });
-  check('the question row draws its attachments', rows.length, 1);
-  if (rows.length === 1) {
-    check('the row shows the file card', findAll(rows, (node) => typeof node.props.className === 'string' && node.props.className === 'mtt-file').length, 1);
-    check('the row shows the picture', findAll(rows, (node) => typeof node.props.className === 'string' && node.props.className === 'mtt-tile').length, 1);
-    check('the row offers no remove button', findAll(rows, (node) => typeof node.props.className === 'string' && node.props.className === 'mtt-file-remove').length, 0);
-  }
+  const targetMount = { type: mount.type, props: Object.assign({}, mount.props, { sessionId: 'context-target', turn: 1 }) };
+  render(targetMount);
+  await new Promise(resolve => setTimeout(resolve, 20));
+  let targetTree = render(targetMount);
+  const edit = findAll(targetTree, node => node.props['data-mtt'] === 'edit')[0];
+  check('the target branch has its own editor', !!edit, true);
+  edit.props.onClick(); targetTree = render(targetMount);
+  check('the new editor retains the file', findAll(targetTree, node => node.props.className === 'mtt-file').length, 1);
+  check('the new editor retains the image', findAll(targetTree, node => node.props.className === 'mtt-tile').length, 1);
+  check('source prompt state was not modified by Send', statePayload.prompts, {});
 }
 
 // 6. the right-hand rail lists the turns the transcript shows — and only those
@@ -714,7 +719,7 @@ if (run !== undefined) {
   const face = store.faceOf('turnOutline');
   const first = face.getSnapshot();
   check('the outline drops the deleted turn and the replay', first.map((entry) => entry.turn), [1, 3, 5]);
-  check('the outline also follows the saved question', first.map((entry) => entry.prompt), ['a question', 'p3', 'p5']);
+  check('the source outline keeps its original prompts', first.map((entry) => entry.prompt), ['p1', 'p3', 'p5']);
   check('the filtered value keeps its identity', face.getSnapshot(), first);
   check('a plain key is passed through', store.faceOf('title').getSnapshot(), undefined);
 
@@ -765,7 +770,7 @@ if (run !== undefined) {
   const postsBefore = calls.filter((call) => call.init.method === 'POST').length;
   await openMenu.props.onSelect('5');
   const jumped = calls.filter((call) => call.init.method === 'POST').slice(postsBefore).map((call) => JSON.parse(call.init.body));
-  check('picking an answer selects it', jumped, [{ action: 'run-select', sessionId: 'session-x', turn: 5, active: 5 }]);
+  check('picking an answer selects it', jumped, [{ action: 'context-select', sessionId: 'session-x', turn: 6, id: '5' }]);
 }
 
 // 8. a variant on screen is what copy copies

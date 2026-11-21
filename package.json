@@ -1,7 +1,7 @@
 {
   "name": "dsh-message-toolbar",
-  "version": "1.10.0",
-  "description": "DSH message toolbar: copy, regenerate and switch models in place, edit answers, bilingual translation, edit user turns, delete and a version tree",
+  "version": "1.11.0",
+  "description": "DSH message toolbar with native context branches, answer switching, editing, deletion, bilingual translation and a version tree",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -42,10 +42,10 @@
     "version-tree"
   ],
   "peerDependencies": {
-    "@deepseek-ai/dsh": ">=0.2.0-rc.2 <0.3.0-0"
+    "@deepseek-ai/dsh": ">=0.2.2-rc.5 <0.3.0-0"
   },
   "engines": {
-    "dsh": ">=0.2.0-rc.2 <0.3.0-0"
+    "dsh": ">=0.2.2-rc.5 <0.3.0-0"
   },
   "dsh": {
     "bundle": {
@@ -66,7 +66,7 @@
   "scripts": {
     "build": "node scripts/build-client.mjs",
     "sync": "node scripts/build-client.mjs && node scripts/sync-profile.mjs",
-    "test": "npm run build && node test/host.test.mjs && node test/client.test.mjs && node --test test/state-store.test.mjs test/host-regressions.test.mjs test/client-regressions.test.mjs test/workspace-revert.test.mjs test/sync-profile.test.mjs",
+    "test": "npm run build && node test/host.test.mjs && node test/client.test.mjs && node --test test/state-store.test.mjs test/host-regressions.test.mjs test/client-regressions.test.mjs test/context-branches.test.mjs test/context-client.test.mjs test/workspace-revert.test.mjs test/sync-profile.test.mjs",
     "prepack": "npm run build"
   }
 }

@@ -1,828 +1,148 @@
 # Architecture
 
-`dsh-message-toolbar` is one DSH plugin with two halves that ship together:
+`dsh-message-toolbar` ships a dependency-free ESM host and a browser client. Version 1.11.0 uses native DSH sessions for every consequential message operation. Display overlays remain for translation and for reading old plugin state before migration.
 
-```
-package.json          dsh.bundle.patch -> cordis.patch.yml   (host plugin insert)
-                      dsh.client        -> platform web      (client bundle)
-cordis.patch.yml      - insert: [{ id: message-toolbar, name: dsh-message-toolbar }]
-lib/index.js          host: /message-toolbar HTTP route + version branching engine
-lib/toolbar-logic.js  pure functions: family walk, version ring, turn tree
-lib/session-record.js session log reading with the same fallback chain DSH uses
-lib/state-store.js    plugin-owned durable state (deleted cards, translation cache)
-lib/durable-state.js  process locking, mutation deltas, validated reads, atomic rename
-lib/model-selection.js native pending/lastUsed projection fold
-lib/workspace-revert.js validated inverse hunks, staging and rollback
-lib/client.js         GENERATED browser bundle (window.__ModuleLoader__ factory)
-plugin.client.js      source of lib/client.js: UI, actions, version tree view
-scripts/build-client.mjs  plugin.client.js -> lib/client.js
-test/*.test.mjs       node:test suites (host HTTP contract, pure tree logic)
-```
+| File | Responsibility |
+| --- | --- |
+| `lib/index.js` | `/message-toolbar` HTTP route, native agent creation, version families, focus and translation |
+| `lib/context-branches.js` | Copied seed construction, legacy normalization, stable question/answer identities |
+| `lib/session-record.js` | Live/cold log reads and public seed options |
+| `lib/toolbar-logic.js` | Family traversal and turn tree helpers |
+| `lib/state-store.js` | Validated plugin state, translation task ownership and durable navigation |
+| `lib/durable-state.js` | Cross-process file locking, mutation deltas and atomic replacement |
+| `lib/model-selection.js` | Native pending/last-used model selection fold |
+| `lib/workspace-revert.js` | Validated inverse hunks, staging, revalidation and recovery |
+| `plugin.client.js` | Toolbar, editors, answer selection, translation, navigation and version tree |
+| `lib/client.js` | Generated `window.__ModuleLoader__` bundle; never edited directly |
+| `test/native-context.integration.mjs` | Optional installed DSH engine verification using a scripted model and temporary storage |
 
-## Why branches are sessions
+`package.json` points to `cordis.patch.yml` for the host plugin and declares the client service dependencies. `npm run build` wraps the source client with the host's React and stylesheet factory. `npm test` and `prepack` rebuild it automatically.
 
-DSH session logs are append-only: a message cannot be rewritten in place. The normal regenerate
-and model-switch buttons append real agent turns to the same session and retain their grouping
-in plugin state. The explicit new-answer-card choice and the legacy `edit`/`retry` APIs instead
-create a **child session**:
+## Native context branches
 
-1. resolves the boundary — the `turn/start` seq of the turn being replaced, minus one;
-2. creates a **child session** seeded with the parent's events up to that boundary;
-3. appends an `ignorable` marker event of type `message-toolbar/version` describing the
-   operation (`edit` | `retry`), the target turn, the seq/indices that changed, and the
-   inverse (`{ kind: 'restore-version', sessionId: parent }`);
-4. for `edit`/`retry`, submits the (possibly rewritten) user message so the child answers;
-   for a model switch, the same, but with `agentOptions: { provider, model }` overridden and
-   the model recorded on the marker (`effect.model`) so the card can be labelled.
+DSH's append-only source log remains unchanged. The plugin calls public `agents.create({ seed, ... })` with an independently copied history and writes an ignorable `message-toolbar/version` marker into that seed. It does not import private DSH packages, patch the installation, replace a provider's request history, or use persistent surface replacements as temporary masks.
 
-Editing a question is **not** one of them any more: saving an edit writes `prompt-save`, a
-display override (`prompts` in the state file) that changes the row and what the next
-regenerate asks, and nothing else — no branch, no turn, no model call. The `edit` action
-stays as an API for clients that want a re-answered branch.
+The source session is a recoverable version. The newly opened native session is the composer's real destination, so its `deriveMessages()` determines subsequent model requests. Native tools, reasoning, attachments and streaming continue through DSH's ordinary agent loop.
 
-`ignorable: true` is mandatory — the core log reader rejects a whole log containing an
-unknown non-ignorable event type.
+| Operation | Child history and generation |
+| --- | --- |
+| `retry` | Copy events before the target `turn/start`, then queue exactly one question with the selected text/attachments. The old answer and all later turns are absent. |
+| `edit-prompt` | Copy through the target closed turn, rewrite its user message, keep the current answer, and truncate later turns. Save makes no model request. |
+| `edit-answer` | Copy through the target closed turn and replace its final assistant text, retaining paired tool work. Clear the edited message's stream and opaque provider replay state so old text cannot override the edit. Later turns are truncated. |
+| `delete-answer` | Copy through the question, remove all assistant/tool history in that turn and later turns, then close the prompt-only lifecycle in child setup. Select another surviving answer if available; otherwise open the question-only child. |
+| `delete-question` | Copy only the history before the target turn. Its answer and continuation remain in the old version. |
+| `adopt` / `adopt-all` | Materialize the selected legacy display history as native messages without generation. A selected answer can be adopted through its turn, or the whole visible legacy history can be synchronized. |
 
-Branch sessions are ordinary sessions: they are **not** `origin: 'subagent'` (that fences
-`session.cancel` and model selection behind *agent-busy*) and they are **not** archived at
-creation (the app cannot navigate to an archived session). They appear in the sidebar,
-can be continued independently, and are attached to the parent's workspace so their files
-resolve the same way.
+The Session constructor owns its `session/end-seed` boundary. The plugin supplies the complete copied seed as inherited history; prompt-only step/turn closers are appended in the public agent setup hook after that boundary. Setup clears inherited queued inbox entries before the child driver starts. The installed-runtime test checks that these histories persist and can resume cold.
 
-### Deleting the card you are reading walks back, not blank
+Every created branch is flushed before success. Retry also flushes its queued prompt. A `false` flush result is an error, not an acknowledgement. Failure cancels/disposes the child and leaves the source available. A later state persistence failure cannot undo a model run already queued; HTTP success is never claimed for that failure.
 
-`delete-version` archives the card's session — and switching to a version archived the rest of
-the family long before that, so the parent is almost always archived too. Two consequences:
+The branch inherits the source workspace, cwd, preset and title. `sessionTitle.rename` pins the existing title when available, with the same public `session/title` event as fallback. It is an ordinary session, not a subagent. File changes are not automatically undone by branching.
 
-1. The workspace clears its main view the moment the session it is showing is archived. Deleting
-   the card of the conversation you are reading therefore reads as *the whole conversation
-   vanished*, not as *one branch was removed*.
-2. Coming back is not just "open the parent": its client-side session reference was released when
-   it was archived, and `openSession` on a released reference fails with `Session reference … is
-   released` — a blank pane and a sidebar error.
+### Stable answer choices
 
-So the client steps back **through the activate path**: `switchToVersion(navigation, { sessionId:
-parent, archived: parentEntry.archived }, current)`, which un-archives first (the host's
-`activate` is idempotent), waits for the session to be listed, then opens it and lets the usual
-focus pass tidy the family. When the family walk could not name the parent, it assumes archived —
-an unnecessary activate costs nothing, a missing one costs the view.
+Schema-2 markers carry the owning session ID, effect, inverse source session, and a complete per-turn `context` snapshot. An entry records a logical question ID and answer ID. Question grouping also hashes the exact prior message history and question content; equal turn numbers or repeated wording alone never join unrelated choices.
 
-### The trash deletes the message, never the conversation
+A retry allocates a new answer ID. Editing the same answer retains its ID, so inherited copies and saved edits deduplicate instead of growing the selector. Deleting an answer records a durable identity tombstone, excluding that answer from all live choices while retaining old logs for explicit recovery.
 
-A row used to carry two different trashes on a version card: one deleted the message, the other
-deleted the card — and the card one archives a session, which on screen looks like the whole
-conversation disappearing. The distinction was invisible in the toolbar and the damage was not.
+`GET` builds `contextChoices[turn] = { active, questionKey, items }`. An item names the real session and includes model and preview metadata. The current copy wins deduplication, followed by newer branch metadata and continuation information. Selecting an answer restores that branch's own continuation; it never splices the continuation of a different answer into it.
 
-Now a row has exactly **one** trash and it always means *this message* — the question row included, on a version card too: the answer (`answer` mark,
-`run-delete` when the turn belongs to a run group), the question (`turn` mark), or the whole failed
-turn. Deleting a branch is a branch-level decision, so it lives where the branch is the thing being
-looked at: `VersionsView` draws a `delete` button on every node that is not the root and not
-already deleted, and a deleted node keeps its `restore` button instead.
+A marker context is a complete snapshot, not a partial merge: deletions and rewinds must not resurrect identities from earlier markers. Schema-1 `message-toolbar/version` and older `message-tree/version` markers remain readable.
 
-Because that view can delete the card **of the conversation on screen**, it takes the same walk-back
-as `removeVersion` above (activate the parent, then open it). Sibling cards need no navigation: the
-main view is untouched, so the node just turns into "已归档 已删除" with a restore button.
+### Legacy display history
 
-### A branch keeps its parent's title
+Versions before 1.11.0 used `runs`, `replays`, `prompts`, `answers` and `hidden` in plugin state. Those records remain readable. Normalization selects one real replay or text variant per question, applies prompt/answer overrides and hidden flags, remaps event references, and excludes discarded replay turns. Text-only legacy alternatives do not inherit the native alternative's discarded tool work.
 
-The fork is the same conversation, so its title must not change — but nothing made that
-true. The `title` projection folds only `session/title` events, and the session-title
-service pins a title only when it is user-sourced; for any other session it schedules a
-fallback named after the **first human message**. A fork seeded up to the boundary usually
-carries no `session/title` event (the parent's title is logged after its first answer, i.e.
-after the boundary), and an edited first prompt is a completely different text — so the
-branch renamed itself after what the reader had just typed.
+The first context mutation normalizes its source before building a seed. Selecting a legacy answer materializes that choice. The composer also provides Sync context (`context-normalize`) for all current selections. Until synchronization the old session still uses its original log; the UI says so explicitly. Histories whose compaction/replacement or cross-answer references prevent safe migration fail visibly. There is no silent fallback to display-only mutation.
 
-`createVersionAgent` therefore logs its parent's title into the child, using
-`ctx.sessionTitle.rename(session, title)` (falling back to appending the same
-`session/title` payload: `{ title, messageSeqs: [], source: { kind: 'user' } }`). That is a
-**pin**: the service's `onUserMessage` returns early for a user-sourced title, so no
-fallback generation follows. It happens before the branch's prompt is queued, because the
-pin has to exist when the child's first `user/message` arrives.
+The retired mutation endpoints reject stale clients with a restart/update error. Read and translation APIs continue to support old data.
 
-## Reading the family back
+## Navigation and version ownership
 
-To render `‹ 2/3 ›` and the version tree, the host must know every sibling of a conversation
-even when an ancestor was deleted:
+A context operation prepares a durable `{ token, root, source, target, completed, archived }` navigation job. The client activates an archived target through public `workspaceRegistry.unarchiveSession`, waits for the session list, then calls `uiWorkspace.openSession`. Missing APIs, activation failure and the 15-second navigation timeout are visible errors.
 
-- `message-toolbar/version` markers carry `inverse.sessionId`, i.e. each marker names its own
-  owner's parent. Because a child's log inherits its ancestors' markers, a single surviving
-  descendant's log describes the whole ancestry — deletion of the ancestor does not lose it.
-- `ancestorChainFromLog(parentId, markers)` walks that chain (`markers.at(-1)` is the session's
-  own marker); `collectFamily(rootId, entries)` flattens headers plus reconstructed ghosts into
-  `[{ entry, depth }]`, so holes render as tombstones instead of splitting the tree.
-- `rootOf(versions, sessionId)` finds the family root; `ringFor(versions, sessionId, turn)`
-  returns the sibling alternatives of one turn plus the index of the current one.
-- `buildTurnTree(versions, currentSessionId)` projects one node per turn
-  (`<sessionId>#t<turn>`), with `current` and `onCurrentPath` flags for the view.
+Only after the target's `conversation.composer.dock` component mounts does it send `focus` with that token. This also works when deletion left an empty transcript. Focus unarchives the target and archives other toolbar-owned family members. Archiving a still-visible source would clear DSH's main pane, so creation and navigation preparation never archive the source. A running member that refuses archival is left visible.
 
-The older `message-tree/version` marker (from `dsh-plugin-message-edit`) has an identical
-payload, so both types are accepted (`MARKER_TYPES`); existing branches keep working after
-the switch.
+Navigation serials discard obsolete client completions. Per-family host locks serialize focus and preparation; a newer handoff cannot overtake an archive already in progress. Tokens reject superseded focus requests. Pending jobs are exposed by GET so reload can finish a handoff. Failed focus is shown in the composer, not swallowed.
+
+Native DSH forks/subagents sharing `parentSession` are separate conversations unless they have a recognized own toolbar marker. Family consolidation never archives those unrelated sessions. Deleting the currently open version marks it deleted and prepares navigation to its parent; archival waits for target mount. Deleting another version focuses the still-open source.
+
+Branches increase session storage. Archiving and deleting a version in plugin UI do not physically erase its log.
 
 ## HTTP contract
 
-Route `/message-toolbar` (registered lazily inside `ctx.effect`).
+The plugin owns the same-origin `/message-toolbar` route.
 
-`GET /message-toolbar?sessionId=<id>` →
-```json
-{ "sessionId": "...", "rootId": "...", "model": {"provider","model","name"},
-  "versions": [{ "sessionId","parentSessionId","targetTurn","operation","createdAt",
-                 "current","archived","deleted","depth","model","turns":[...] }],
-  "tree": [{"id","parentId","sessionId","turn","operation","text","time","current",
-            "onCurrentPath","deleted","archived"}],
-  "messages": { "<messageId>": {"seq","turn","role"} },
-  "answers": { "<turn>": { "active": "native|<id>",
-                           "items": [{ "id","kind":"model|edit","provider","model","name","text","at","baseId" }] } },
-  "translations": { "<eventSeq|turn:n>": { "<lang>": {"text","provider","model","turn","role"} } },
-  "shown": { "<turn>": "<lang>" },
-  "origins": { "<turn>": "<text>" } }
-```
+`GET ?sessionId=<id>` returns:
 
-`GET /message-toolbar?models=1` → `{ "providers": [{ "id","name","models":[{"id","name"}] }] }`
-from `llm.listProviders()` + `llm.listModels(provider)`.
+- `sessionId`, `rootSessionId`, `versions`, message index and per-turn text/tool/finish facts;
+- `contextChoices`, `promptAttachments`, `pendingFocus`, `needsContextMigration`, `contextError`;
+- `model`, `translations`, `shown`, `origins`, deleted-version IDs;
+- legacy `answers`, `runs`, `replays`, `prompts`, `hidden` for compatibility and migration.
 
-`POST /message-toolbar` with `{ "action": ... }`:
+`GET ?models=1` returns the native provider/model catalog. `GET ?rows=1` enables a diagnostic DOM-row report, capped at 400 rows on upload.
 
-| action | payload | effect |
-| --- | --- | --- |
-| `edit` | `sessionId, eventSeq, blockIndex, text` | rewound child + followup |
-| `retry` | `sessionId, turn, model?` | rewound child + followup (model optional) |
-| `translate` | `sessionId, lang, eventSeq? , turn?, text?, model?, stream?` | auxiliary `llm.stream` call (no `maxTokens`), cached under `eventSeq` or `turn:<n>`; records `shown[turn] = lang` and `origins[turn] = <text>` so the answer is drawn bilingual, block by block. With `stream: true` it answers in NDJSON frames (`start` → `delta`* → `done`) |
-| `translate-off` | `sessionId, turn` | drops `shown[turn]` and `origins[turn]`, folding the translation away (the cached translation stays) |
-| `delete-version` | `sessionId` | flags the card deleted and archives it; returns `{ deleted, archived, parent, turn }` (root refused, 400) |
-| `restore-version` | `sessionId` | clears the flag |
-| `activate` | `sessionId` | un-archives (if needed) and attaches to the parent workspace |
-| `focus` | `sessionId` | un-archives the target, archives every other family member (one visible conversation) |
-| `answer-generate` | `sessionId, turn, model?, stream?` | `llm.stream` over a plain-chat transcript, stored as an answer variant; with `stream: true` the reply is an NDJSON frame stream (`start` / `delta` / `done` / `error`) |
-| `answer-save` | `sessionId, turn, text, answerId?` | overwrites the visible answer in place: a variant's text is replaced (the ring keeps its size), the logged answer gets an `override` because the log cannot be rewritten |
-| `prompt-save` | `sessionId, turn, text` | rewrites the question **for display only**: no turn is added, no session is branched, no model is called. The next regenerate (variant or `answer-run`) sends this text instead of the logged one |
-| `prompt-restore` | `sessionId, turn` | drops that rewrite, so the text that was actually sent shows again (API only; the UI offers no button) |
-| `answer-source` | `sessionId, turn, answerId?` | `{ turn, active, items, override, native, text }` — baseline for the editor |
-| `answer-select` | `sessionId, turn, answerId` | flips the visible variant (`'native'` is legal) |
-| `answer-delete` | `sessionId, turn, answerId` | drops a variant; if it was visible, the one before it in the ring (`native` first) takes over |
-| `answer-restore` | `sessionId, turn` | drops the `override`, so the model's logged answer shows again |
-| `run-select` | `sessionId, turn, active` | shows another turn of the same question: `{runs, all}` from `selectRun`. `turn` is the group key (the turn the question was asked in); a turn that never answered that question is a `TypeError` → 400 |
-| `answer-run` | `sessionId, turn, model?, stopPrevious?, hidePrompt?, group?, files?` | answers a turn again **in the same session** with a real agent turn. `group: false` starts over after deletion; otherwise earlier live answers stay in the group. Replays resolve the edited original question and its attachments. Returns `{sessionId, turn, replayedFrom, inPlace: true, runs}`. |
-| `changes` | `sessionId, turn` | `{ turn, supported, cwd?, files: [{path, display, added, deleted, kind, revertable, before, after}], total, added, deleted }` — what that turn changed on disk, read from `workspaceChanges`; `supported: false` carries `reason: "no-service" \| "not-recorded"` |
-| `revert` | `sessionId, turn` | `{ turn, reverted: [{path, display, action}], skipped: [{path, reason}], cwd }`. A preflight conflict prevents all writes. Unverifiable files may be skipped while safe files are reverted. The client stops regeneration unless all skips are `unchanged` or `already-gone`. I/O failures attempt rollback and expose `code`, `rollbackComplete`, `recoveryFiles`. |
-| `hide` | `sessionId, turn, scope: "turn"\|"answer"\|"prompt", hidden: bool` | hides/restores one turn, one answer, or the replayed prompt of a turn in the transcript view; returns the new lists |
-| `models` | — | same catalog as `?models=1` |
+| POST action | Payload and effect |
+| --- | --- |
+| `context-branch` | `sessionId, turn, operation, text?, files?, model?, stopPrevious?`; creates and flushes a native branch, returns its navigation target/token and created session ID |
+| `context-select` | `sessionId, turn, id`; resolves a live answer choice and prepares navigation, or materializes a legacy choice |
+| `context-normalize` | `sessionId`; materializes the current legacy selections without a model request |
+| `prepare-focus` | `sessionId, sourceSessionId`; validates same-family ownership and prepares a durable job |
+| `activate` | `sessionId`; publicly unarchives the target when necessary |
+| `focus` | `sessionId, token`; commits the prepared handoff after target mount |
+| `delete-version` | `sessionId, sourceSessionId?`; flags a non-root version and prepares safe navigation |
+| `restore-version` | `sessionId`; clears its deleted flag and attempts activation |
+| `translate` | `sessionId, lang, eventSeq? / turn?, text?, model?, stream?, force?`; auxiliary LLM translation, cached independently of model history |
+| `translate-off` | `sessionId, turn`; cancels the task and hides the pair while retaining the translation cache |
+| `answer-source` | `sessionId, turn`; reads the current editor baseline, including legacy display state |
+| `changes` | `sessionId, turn`; lists recorded workspace changes and whether they can be verified |
+| `revert` | `sessionId, turn`; explicitly reverses verifiable file changes before a requested retry |
+| `models` | Same catalog as GET `?models=1` |
+| `rows` | Diagnostic client flow-row report |
 
+`edit`, `retry`, `answer-run`, `answer-generate`, `prompt-save`, `prompt-restore`, `answer-save`, `answer-select`, `answer-delete`, `answer-restore`, `run-select`, `run-delete` and `hide` are retired mutation actions. Type errors return HTTP 400; operational failures return 409. A stream already started returns an error frame instead of another JSON header.
 
-### Answering again is a turn of its own
+## Client rendering
 
-`regenerate` and `switch model` do not produce a stand-in: the host appends a real turn to the
-same session (`answer-run`), so the fresh answer has the agent's tools, its thinking, its process
-card and DSH's own streaming page. There is no second, cheaper path in the UI; `answer-generate`
-survives only for API callers and for text variants stored by older versions.
+| Native slot | Component |
+| --- | --- |
+| `conversation.chat.assistant-actions` | `AssistantToolbar`: regenerate/model/edit/translate/delete and the real answer selector |
+| `conversation.chat.turnTail` | `AnswerCard`: bilingual translation, legacy overlays, editor and failed-turn actions |
+| `conversation.view` | `VersionsView`: branch tree and branch-level delete/restore |
+| `conversation.composer.dock` | `ContextFocus`: mount acknowledgement, migration prompt and focus errors |
 
-Both normal actions use the same grouping semantics:
+The source client is an IIFE returning `{ inject, apply }`. `TurnLocation` inputs are normalized with `turnNumberOf`. Model and language menus use DSH's native `Menu` when available, including keyboard navigation and checked rows; the count menu shows a model label and at most 120 characters of answer preview. The selector is immediately after the delete button and only appears with multiple live choices.
 
-| row action | `group` | result on screen |
-| --- | --- | --- |
-| regenerate (answer row, question row) | `true` | the new turn joins the question's group, so `‹ 1/2 ›` walks the real turns; the answers stay until the reader deletes them |
-| switch model | `true` | the same — regenerating and switching a model differ in nothing but the model they pass |
-| "…或新建回答卡片" (last row of the model menu) | — | a fresh session seeded before the turn (`retry`), for when the replaced answer must not be in the model's context |
+User messages retain native attachment/reference rendering. A DOM decorator adds the question toolbar through a React root, identified by `data-chat-flow-kind`, `data-chat-turn` and the native bubble/stack class suffixes. It overlays the editor or suitable markdown while keeping reference chips native. `BodyBoundary` restores the native bubble on markdown-render failure; answer rendering falls back to plain text. DOM changes in future DSH releases may require decorator updates.
 
-`group: false` (no group, no ring) is sent in exactly one case: regenerating a question **whose
-answer was deleted**. The question is then waiting for its first answer again, and a ring over one
-answer plus one deleted answer would read as "nothing was deleted at all" — so it starts over with
-a single answer. Every other regenerate joins the group: the reader decides when an answer goes
-away, not the button.
-Regenerating in place currently does not isolate earlier answers from model context. The append-only
-log and model-visible surface are distinct; the available surface replacement is persistent and
-would hide later legitimate context too. This plugin does not use that unsafe workaround. The
-explicit branch action remains available; see `RELIABILITY-2026-11-21.md` for the unresolved requirement.
+Legacy display state still uses generated hide rules, stray-notice sweeps and outline filtering before migration. New edits/deletions do not depend on CSS to change model context. The outline follows the active native branch; old hidden/replay facts remain supported until synchronization.
 
-When turns do form a group, only the plugin knows it — the log cannot say so.
-`runs[sessionId][turn]` groups them:
+The store rejects stale GET snapshots after mutations and coalesces invalidation. HTTP streams validate NDJSON frames, UTF-8 boundaries and terminal status, release their reader, and settle on `done` without waiting for a connection close. Clipboard actions wait for the actual write and report failure; operation identities prevent old success feedback from replacing a newer error.
 
-    { "turns": [2, 5, 7], "active": 7, "models": { "5": { "provider": "…", "model": "…" } } }
+### Attachments
 
-`turn` is the turn the question was asked in (the group key), `turns` lists the turns that
-answered it in the order they were produced, `active` names the one on screen. The client hides
-every other member by kind (`assistant-step`, `turn-process`, `tool`, `turn-error`,
-`turn-max-tokens`, `model-retry`, `turn-tail`) rather than by `[data-chat-turn]`, so the
-question row of the original turn stays where the reader asked it. `run-select` walks the group;
-deleting the answer on screen also steps the group back.
+Drop, paste and file picker use DSH's own binary upload route. The editor owns the whole attachment list, including removals; pending/failed uploads block Save and Send. Native branch messages retain uploaded file/image references, so normal DSH persistence and rendering serve them after reload. Legacy attachment overrides are normalized into those messages.
 
-Deleting has to keep the group honest, or the picture lies in a way that is hard to read from
-the transcript: a card stands down (`return null`) for every turn that is not the group's
-`active` one, so a group still naming a deleted answer leaves the *surviving* answer drawn by the
-app alone — no ring, no toolbar, and nothing on screen saying why. So `hide` takes the turn out of
-its group in the same step (`removeRunMember`), hands `active` to the answer before it, and drops a
-group that is down to one member. The payload path also calls `reconcileRuns`, which drops members
-whose turn is already hidden — state written before this repair heals on the next read, and it
-costs a write only when something was actually stale.
+The editor follows native geometry (64px image tiles and 240x64 file cards), uses the host's file icon/size helpers, and releases object URLs. A picture can use its object URL until the attachment service provides a stored image URL.
 
-A model is selected through `agent.model.select({provider, model})` when available, with the older
-session controller API as a compatibility fallback. A matching request header retires `pending`
-into `lastUsed`; that host behavior would otherwise leave a model-switch replay's choice active for
-later requests. The plugin records the previous effective choice and watches `agent/inbox/claimed`
-plus the matching replay message and `turn/end`; this also covers a claimed replay that errors before
-its `user/message` is appended. Once synchronous event dispatch unwinds, it restores the previous
-choice only if the current selection is still the temporary one. Restore errors are logged and
-contained so a released session or failed model API does not escape as an uncaught microtask error.
-On DSH `0.2.2-rc.5`, later requests use the restored choice until another selection changes it.
+### Translation
 
-The model a row *offers* when no explicit choice was made (`state.model`, and `resolveAnswerModel`'s
-fallback) is read by `sessionModel(events)` — the same fold `dsh-agent` uses for its selection
-projection: fold all selection/header events, retire pending only on a matching header, then use
-`pending ?? lastUsed`. A failed turn leaves no header, so reading
-only the header would name the model the user had already moved away from; the pending selection is
-what "regenerate this failed answer" should use, and now does.
+Translation is auxiliary: it does not change native model history. It sends text through the host LLM service without an artificial max-token cap. Structured error/aborted finishes reject partial output; max-token finishes mark truncation. Cache entries include source identity so changed text cannot silently reuse an old translation.
 
-Errors: `TypeError` → `400 {error}`, anything else → `409 {error}`.
+The client sends an AbortSignal through fetch; HTTP response closure cancels the host task and provider. Per-session/turn task identities and request order reject old deltas, errors and completions. Editing, deletion and explicit dismissal cancel the matching task. Cancelled partial text is not persisted.
 
-### Files dropped into a question
+Code fences, inline code and math are protected with numbered placeholders. Target-language script detection can preserve already translated sentences for Han, Kana, Hangul and Cyrillic scripts; Latin-script language detection is deliberately omitted. The client pairs completed paragraphs, keeps fenced blocks intact, and falls back to whole-text pairing when block counts disagree. During streaming it avoids re-pairing mid-sentence. The translation menu supports copying only the translated side.
 
-The editor of a question accepts files, and they leave with the answer:
+## Plugin state and file recovery
 
-0. Three doors lead to the same list: the paperclip (`pickFiles`), the drop target (`onDrop`), and
-   `onPaste`. Paste reads `clipboardData.items` for `kind === 'file'` and falls back to
-   `clipboardData.files` only when the item list gave nothing, so a screenshot copied out of a
-   snipping tool becomes one image — and a paste of plain text is left to the field (`preventDefault`
-   is called only when at least one file came out of the clipboard), which keeps undo and the
-   browser's own text handling intact. The handler sits on the box, not on the `textarea`, so it
-   still works when focus is on the paperclip.
+`~/.dsh/message-toolbar/state.json` remains schema 1. It contains deleted-version flags, translation cache/shown/origin text, legacy answers/prompts/runs/replays/hidden, and pending navigation. Native edits and identities are durable session events. Moving installations requires session logs, plugin state and the attachment store.
 
-1. The client posts each dropped file, unchanged, to the app's own upload route
-   (`POST /api/session/uploadFileBinary?sessionId=…&name=…[&mediaType=…]`, body
-   `application/octet-stream`). That is the route the composer itself uses, so nothing is stored
-   twice and no new storage is invented here: the bytes are committed to the attachment store and
-   the answer carries the durable reference. An image is uploaded with `mediaType`, so it is
-   admitted, validated and normalized as an image instead of being kept as an opaque file.
-2. `answer-run` gains `files: [{type: 'file'|'image', attachment: {attachmentId, …}}]` — the blocks
-   exactly as the upload answered them. `promptAttachments` checks only their identity (the type and
-   the `attachmentId`) and passes the reference through untouched; a bad shape is a `400`.
-3. `retryPlan` rebuilds the replayed message with `replayedContent`: the text as it reads now, every
-   part of the original message that is not text (a file the question already carried), then the new
-   ones. When neither the text nor the files changed, the message is cloned verbatim instead, so an
-   ordinary regenerate keeps its exact shape.
+Reads validate JSON, schema and nested dictionaries, including navigation fields. Invalid input is reported and preserved. Mutations use detached drafts; successful HTTP/stream completion flushes before acknowledgement. A sibling cross-process lock, newest-state delta merge, fsync and atomic replacement preserve unrelated concurrent updates. Answer/attachment lists merge by stable ID, hidden lists by value, scalar conflicts by last commit. Unknown lock owners are not reclaimed speculatively; local hard-link/rename support is required. A process killed in the cleanup window may leave a guard needing offline inspection.
 
-A durable reference rather than a per-session staged receipt is what makes this work at all: the
-replayed `user/message` is an ordinary prompt, and the runtime already accepts attachments it can
-read back from the store. Dropping the original's non-text parts matters for the same reason — a
-regenerate of a question that had a PDF must not answer a question that no longer has it.
+Workspace undo is separate from history branching and requires an explicit user choice. `workspaceChanges` supplies diffs/snapshots; no-service and unavailable old records are reported. The revert engine verifies paths, aliases, encodings, hunks and EOF evidence, stages writes and rechecks all files before committing. Later edits outside matched hunks remain. Unverifiable files are skipped, and the client stops regeneration if any consequential skip remains. I/O failure attempts compensation and reports retained recovery files. This is not a filesystem transaction and cannot undo arbitrary tool side effects or process death.
 
-#### Where the list lives, and who else reads it
+## Verification and compatibility
 
-`prompts[sessionId][turn].files` holds the attachments of a question, in the order they were added.
-It is written in two places and read in one:
+The supported package range is `@deepseek-ai/dsh >=0.2.2-rc.5 <0.3.0-0`; this release was exercised with `0.2.2-rc.5`. Public APIs reduce dependence on implementation details but do not guarantee compatibility with every future version. Unsupported APIs produce explicit errors.
 
-- `prompt-save` replaces it when the client sends `files` (the editor owns the whole list, so a
-  removal is a save too); a save without `files` — the words changed, the rail did not — leaves it
-  alone.
-- `answer-run` writes back `plan.attachments` after queueing the message: exactly what went into the
-  replay, merged with the stored list by `type:attachmentId` so a second edit neither loses nor
-  duplicates an attachment.
-- The client draws it above the bubble of the question, which is why the attachments stay visible
-  after sending and survive a reload. The log cannot serve this: a question the reader edited and did
-  not re-send has no entry of its own, and the replayed copy is hidden.
-
-The rail and the cards are the app's components in everything but name: no slot exposes them, so the
-geometry is copied from `dsh-client-ui-chat`'s `MessageItem.module.css` and
-`dsh-client-ui-attachment`'s `FileCard.module.css` (64px tiles, 240×64 cards, hover-only remove),
-while `FileTypeIcon`, `fileExtension` and `fileSizeText` are taken from
-`@deepseek-ai/dsh-client-ui-primitives` at run time — the same helpers the app uses, so `4.2KB`
-reads the same in both places. A picture that was just dropped is drawn from an object URL until
-`uiConversation.imageUrl(sessionId, attachment)` can answer with the stored one.
-
-`scripts/preview-assets.mjs` reads the theme tokens from `test/theme-tokens.css`, a committed
-extract of `@deepseek-ai/dsh-client-ui-theme`'s two blocks: the packages now live inside the desktop
-app's `app.asar`, which no path can reach, and a pinned extract keeps the preview reproducible.
-
-## State
-
-`~/.dsh/message-toolbar/state.json`:
-
-```json
-{ "schema": 1,
-  "deleted": { "<sessionId>": { "at": 0, "operation": "...", "targetTurn": 0 } },
-  "answers": { "<sessionId>": { "<turn>": { "active": "native", "items": [] } } },
-  "hidden": { "<sessionId>": { "turns": [1, 4], "answers": [2], "prompts": [9] } },
-  "translations": { "<sessionId>": { "<eventSeq|turn:n>": { "<lang>": { "text": "...", "at": 0 } } } },
-  "prompts": { "<sessionId>": { "<turn>": { "text": "...", "at": 0, "files": [{ "type": "file", "attachment": { "attachmentId": "..." } }] } } },
-  "runs": { "<sessionId>": { "<turn>": { "turns": [2, 5], "active": 5, "models": { "5": { "provider": "...", "model": "..." } } } } },
-  "replays": { "<sessionId>": { "<replayedTurn>": 2 } },
-  "shown": { "<sessionId>": { "<turn>": "<lang>" } },
-  "origins": { "<sessionId>": { "<turn>": "<text the reader saw>" } } }
-```
-
-`prompts` carries what the reader changed about a question: the wording it reads as now (`text`,
-absent when only the rail changed) and the attachments dropped into it (`files`, absent when there are
-none). A turn with neither is not an entry at all.
-
-`answers` holds text variants — answers that deliberately never entered the session log, written by
-versions before 1.2.0 and still readable; `active: "native"` means the logged answer is the
-visible one. `runs` holds the groups of *real* turns that answer one question (see *Answering
-again is a turn of its own*), which is what `regenerate` and `switch model` use now.
-
-`replays` preserves replay-to-question identity even when deletion removes a singleton group.
-It is used for subsequent regeneration, cascading question deletion and outline previews. Existing
-groups seed this map when old schema-1 state is loaded; identity already lost by an older version
-cannot be inferred safely from text alone.
-
-`durable-state.js` and the store validate JSON/schema/nested state dictionaries, preserve corrupt input, mutate a detached
-draft, and write through an exclusive temporary file, fsync and rename. Background writes remain
-debounced (200 ms), but successful HTTP mutations and stream `done` frames flush before acknowledgement.
-Each flush takes an exclusive sibling lock, reloads the latest valid file, applies this process's queued
-before/after deltas, and then replaces the file atomically. Hidden turn lists merge by value, answer
-alternatives by ID, and attachments by type plus attachment ID. Untouched scalar fields retain external
-updates; pruning a container removes its baseline entries while preserving concurrent additions.
-Conflicting changes to the same scalar use the last commit; generic list reordering is not supported.
-A post-merge domain reconciliation rebuilds still-present answer groups from their root, replay
-identity and hidden flags. It preserves a visible original answer when a concurrent delete and replay
-append collide, while never recreating a group that was explicitly removed.
-A process with a warm cache checks for an external commit before the next read. The file signature is
-captured before reading so a replacement cannot label old bytes with a new signature.
-
-The lock's complete PID/token metadata is published with an exclusive hard link. Known dead owners can
-be reclaimed under a separate cleanup directory with a unique owner marker; competing cleaners cannot
-remove a newly acquired cleanup guard. Live owners, incomplete or unknown metadata, and ownerless
-cleanup guards are preserved. A process killed between removing a cleanup marker and its directory can
-leave a guard requiring offline inspection. The protocol requires local filesystem support for hard
-links and atomic rename. Lock timeouts and failed flushes surface to the caller and remain dirty for retry. A host side
-effect already queued cannot be rolled back merely because the later state flush failed.
-
-### Turns without an answer
-
-`GET ?sessionId=` also carries the per-turn facts the transcript itself does not expose: `turns` is
-`[{ turn, text, time, answered, answerText, reasoning, tools, reason, open? }]`, derived from the log by
-`extractTurns` — `answered` once a durable `assistant/message` with `surfaceOp: 'append'` (or none)
-lands in that turn, `reasoning` when that message carries a reasoning block, `tools` counts the
-`tool/call` events of the turn, `reason` comes from the `turn/end` payload (`error`, `aborted`,
-`completed`, …), `open: true` for a turn that never ended. The chat view draws its action row only for
-a turn with a *closing message*, so a turn that failed has no toolbar at all; the answer card draws one
-itself (`.mtt-tail-actions`, `AssistantToolbar` with `failed: true` → retry / model switch / delete
-only).
-
-Deciding that from state alone is not enough, because state lags: a turn that opened a moment ago — or
-failed after the last refetch — is not in `turns` yet, and a stale payload must not cost the reader the
-retry button. So `failedAnswer(state, turn)` prefers what the payload says (`answered: false` → failed,
-`answered: true` → fine) and otherwise looks at the page: `nativeAnswerRow(turn)` asks whether the app
-drew an action row inside that turn's `turn-tail` row, and no row means the toolbar is ours to draw.
-`answered: false` alone is enough — a turn that ended is not running, so the old `!open` condition only
-created a hole. Regenerating also calls `store.follow(sessionId)`, which re-reads the session a few
-times over the next ~16 s, so the new turn and its failure reach the card without a reload.
-
-### The turn a replay opened is machinery
-
-Answering a question again is a real turn (`answer-run` → `agent.followup`), and the agent opens it by
-injecting a fresh time context and runtime context before it writes anything. The app groups those
-messages into one process row whose title is composed from their kinds — `已注入上下文`. The reader
-typed nothing of that, so for a turn the plugin opened (`hidden.prompts` holds it) the stylesheet also
-takes that group away:
-
-```css
-[data-step-process][data-chat-turn="N"] { display: none }
-[data-chat-flow-kind="context"][data-chat-turn="N"] { display: none }
-[data-chat-flow-kind="turn-process"][data-chat-turn="N"] { display: none }
-```
-
-`data-step-process` is the group row; it carries `data-chat-turn` but **no** `data-chat-flow-kind`, so
-a rule keyed on the flow kind cannot name it. The third rule is the process card itself: with the
-context rows gone and nothing else in the turn, its body has no steps to list, so it would be a
-"已完成 · Ns" disclosure that opens onto an empty box.
-
-All three are skipped when the turn did real work — `tools > 0` or `reasoning: true` — because there
-the card and its group *are* the record of that work, and hiding them would hide the answer's own
-process. That is why the host reports `reasoning` and `tools` per turn.
-
-The group still draws its own **title** row, and that one is not skipped: a turn this plugin replayed
-has no question row, so a title composed from the step kinds reads as a stray heading — "已完成分析"
-over an answer the reader asked for. Only the title goes; the steps stay, and the body is uncapped so
-whatever the title used to reveal stays reachable:
-
-```css
-[data-step-process][data-chat-turn="N"] > div:first-child { display: none }
-[data-step-process][data-chat-turn="N"] [data-step-process-body] { max-height: none; overflow: visible }
-```
-
-The header is the seat's first child (`ChatGroupSeat.tsx`: header `<div>`, then the
-`data-step-process-body` div), which is why the rule is structural rather than keyed on a class name.
-
-## Client side
-
-`plugin.client.js` is an IIFE body returning `{ inject, apply }`; the build wraps it in the
-`window.__ModuleLoader__` factory that supplies `React` and `styles.insert` (which tags the
-injected `<style>` with `data-plugin="dsh-message-toolbar"`).
-
-Registrations (`slots.inject(name, () => slots.register(descriptor, Component))`):
-
-| slot | descriptor | component |
-| --- | --- | --- |
-| `conversation.chat.assistant-actions` | `id: message-toolbar, order: 30, inject: sessionId => ({ sessionId })` | `AssistantToolbar` — copy, regenerate (in place), model switch (in place), edit answer, translate, delete the message. Rendered inside the turn-tail action row, next to DSH's built-in copy/branch buttons. Deleting a *branch* is not here: see the Versions view |
-| `conversation.chat.turnTail` | `id: message-toolbar-answers, order: -10` | `AnswerCard` — the answer on screen: a variant, an edit, a translation, or the failed-turn toolbar. Above the file changes (deliverables registers at order 0) |
-| `conversation.view` | `id: message-toolbar, order` | `VersionsView` — turn-level branching tree with flip / restore, and the only place a card can be deleted |
-
-There is **no settings section**: the translate button opens the language dropdown at the moment it is
-pressed (`LanguageMenuHost`, the same `Menu` the model picker uses), so the target language and the
-translating model never need configuring. The only stored preference is the last language, so the
-menu can tick it.
-
-`TurnTailOwnerProps.turn` is a `TurnLocation` object (`{ turn, status, steps, … }`), not a number —
-both turn-tail components therefore run it through `turnNumberOf()` before indexing state.
-
-Icons inline the official primitives artwork (`@deepseek-ai/dsh-client-ui-primitives`, 16 px grid,
-`strokeWidth: 1` / `ICON_MEDIUM_STROKE`), so the toolbar matches DSH's own action row in size,
-weight and hover behaviour.
-
-### The question row is decorated, not re-drawn
-
-The plugin used to register `conversation.chat.node` with `key: 'user'` — a shadow renderer that
-replaced DSH's own user bubble. Everything the app draws there (the bubble tint, the attachment
-cards, the `@`/`/` reference chips, image thumbnails) then had to be re-implemented, and every
-missing piece was a visible regression: a grey bubble instead of the light blue one, a vanished
-PDF card.
-
-So it no longer shadows the slot at all. `installUserRows()` decorates the app's own DOM instead:
-
-1. A `MutationObserver` on `document.body` (plus a first pass at install and two timers) walks
-   `[data-chat-flow-kind="user"]` rows — every message row carries `data-chat-turn`, `data-chat-node-key`
-   and the node kind.
-2. For each row it calls `createRoot` once on a `<div class="mtt-user-bar">` appended to the row, and
-   marks the row `data-mtt-row="1"`. The React tree is `UserRow`, which renders the toolbar
-   (copy / edit / regenerate / delete / version ring / model chip) and, **only when it must**, an
-   overlay into a `<div class="mtt-user-slot">` inside the app's `*_userStack`.
-3. `[data-mtt-row] [class*="_actions"] { display: none }` takes the app's own copy/branch row out of
-   the way — one row of controls, not two. Ours fades in on the same hover the app uses
-   (`[data-mtt-row]:hover .mtt-actions`).
-4. The overlay is used for two cases only: the question is being edited (the textarea), or the
-   question contains markdown (`markdownish()` — `$…$`, `**…**`, fences, headings, lists, tables)
-   **and carries no `@` reference** (`mentionish()`), and/or has been rewritten (`prompt-save`).
-   Plain questions are left exactly as the app draws them: `projectUserText`, no markdown,
-   `$std(w)$` stays literal — which is what DSH does.
-5. A reference is exactly why that second condition exists. `@C:\Users\…\crash.ips` is plain text in
-   the log; the app's own user-text rules turn it into a highlighted chip with a file icon and a
-   hover card. The path is full of dots, so `markdownish()` alone calls it markdown and a markdown
-   copy of those characters would replace the chip with `@C:\…` — the copy has to earn its place,
-   and for a reference it does not.
-
-Everything else about the question — attachments, images, references — is the app's own markup,
-untouched.
-
-**An overlay that cannot paint must uncover what it covered.** Hiding the native bubble and painting
-over it is only safe while the paint succeeds, and the paint runs other people's code: KaTeX, the
-syntax highlighter, the transcript renderer, all of it over text the reader typed. A question like
-`$\frac{1}{$` makes KaTeX throw; React then unmounts the failed subtree, the bubble stays
-`display: none`, and the question disappears from the transcript while the row itself stays behind —
-invisible, and impossible to edit, copy or delete, because its toolbar lives in that same root.
-
-So the markdown body renders inside `BodyBoundary` (a `getDerivedStateFromError` component). On a
-failure it drops the overlay (`bodyFailed`), which uncovers the native bubble: the question falls
-back to exactly what DSH draws on its own, and the flag resets when the text changes so a corrected
-question can try markdown again. The same boundary makes a failing *answer* body fall back to plain
-text instead of blanking the answer area.
-
-For the same reason the `prompt` mark only hides a row when the log really has that turn: the mark
-names a turn the agent was about to open, and a run that fails before opening it would otherwise
-delete the reader's question for the sake of hiding a duplicate that never arrived.
-
-The row needs a session id and a turn number: the turn comes from `data-chat-turn`, and the session
-is captured by the wrapped `conversation.binding(source)` (`activeSessionId`), because the row
-itself does not carry one.
-
-### The model picker is the composer's picker
-
-`ModelMenuHost` does not paint a look-alike: it renders `Menu` from
-`@deepseek-ai/dsh-client-ui-primitives`, the component the composer's model seat builds its
-dropdown from. Rows are one `{ type: 'label' }` heading per provider plus one row per model,
-`selection: 'check'` marks the model this turn currently answers with
-(`answers[sessionId][turn].active`'s provider/model, else the session's configured model from the
-payload's `model` field), `portal: true` lets it escape the action row's clipping, `align: 'end'`
-hangs it off the button, `side` flips on the same space measurement our own popovers use, and the
-branch action stays one click away as a pinned `footer` row. `closeOnPointerLeave` gives the
-"menu disappears when the pointer leaves" behaviour without a listener of our own.
-
-`dsh-client-ui-primitives` is one of the shell's static seed modules (the boot call passes
-`react`, `react-dom`, `@deepseek-ai/dsh-client-store`, `-ui-slots`, `-ui-primitives`,
-`-ui-dockkit`), so it resolves through `require()` without being listed in `dsh.client.inject`.
-The lookup is defensive: if a host ever ships without `Menu`, `ModelMenuHost` falls back to the
-plugin's own `.mtt-pop` markup rather than failing to compose.
-
-Data comes from a small SWR store (`bySession`, 8 s TTL, invalidated on `sessions.list`
-changes). Navigating to a version activates it first (un-archive → attach → `openSession`)
-and waits for the session list to contain it (`openWhenListed`).
-
-### In-session answer variants
-
-Because a closed turn can never gain a second `assistant/message` (next section), "answer this
-again in the same conversation" cannot be a log write. The plugin keeps those answers in its own
-state instead:
-
-1. `answer-generate` builds a **plain-chat transcript** for the turn (`transcriptMessages`): the
-   user texts of every turn up to the target, plus the last appended assistant text of each
-   preceding turn. Tool calls, file reads and process cards are deliberately excluded — a variant
-   is a model comparison, not an agent run.
-   A replayed answer is emitted as a **full message** — `{ id, role: 'assistant', content, source }`
-   carrying the logged message's `id` and `source` — because `MessageBase` (`dsh-llm/lib/types/message.d.ts`)
-   requires both, and an adapter silently drops entries that lack them: the request then reaches the
-   model with no assistant turn at all and comes back as a single `finish` chunk with no content,
-   which looks exactly like "the model returned nothing". When a reply is empty the handler says what
-   did arrive (`重答失败：…（收到 finish×1）`), and whole-block replies (`block-end` with a text block)
-   are collected for providers that do not stream token deltas.
-2. With `stream: true` the handler answers with NDJSON frames — `start` (turn, provider, model),
-   one `reasoning` per reasoning batch, one `delta` per token batch, then `done` (the stored
-   payload) or `error`. The client writes text deltas into a per-turn "live" slot in the bundle
-   store and reasoning into `live.reasoning`, so picking a model hides the old answer at once and
-   fills the same place with the new one as it arrives; reasoning streams into a collapsible
-   `ThinkingBlock` that folds itself away when the answer starts. The finished text is stored as an
-   item of `answers[sessionId][turn]` (with `reasoning` kept alongside it) and becomes `active`.
-3. `AnswerCard` (turn tail) renders the active variant **in place** and registers an `answer` mark
-   through `useHideRule`, which rewrites a generated
-   `<style data-plugin="dsh-message-toolbar-dyn">` containing three rules —
-   `[data-chat-flow-kind="assistant-step"][data-chat-turn="N"]{display:none}` for the logged answer,
-   plus the same shape for `turn-process` (the "finished in *N*s" line) and `tool` (that answer's
-   tool cards), so a switched-in answer leaves no trace of the old one. These are the same node
-   attributes the chat view itself emits (`data-chat-flow-kind` from `routedNode.kind`,
-   `data-chat-turn` from `turnOf(node)`, which returns `location.turn.turn`).
-4. `‹ i/n ›` is drawn by the assistant action row (not by the card), next to the delete button, and
-   writes `answer-select`; slot `1` is always `native`, i.e. the logged answer, so the original is
-   never lost and `active: 'native'` renders with no stylesheet rule at all. The row only draws the
-   control when the turn has more than one answer; deleting the visible variant goes through
-   `answer-delete`, and the answer before it in the ring (native when it was first) takes over.
-   The count between the two arrows is a **picker**: `ringChoices` turns a run
-   (`{ turns, active, models }`) or a variant slot into menu rows labelled `n. <model>`, the one on
-   screen ticked, and picking a row goes straight to it (`run-select` or `answer-select`). A run
-   records the model of every answer it made (`runs[key].models[turn]`), which is why the rows can
-   be named at all; an answer with no recorded model falls back to `Answer n`. Cherry Studio's
-   sibling navigator works the same way — arrows for stepping, the number for jumping — and it is
-   the only shape that survives five answers to one question.
-5. **Editing overwrites the visible answer**, it does not append one: `answer-save` rewrites the
-   active variant's `text` in place (`edited: true`, same id, ring size unchanged) and the card draws
-   it through the very same `AnswerBody` → `MarkdownText` path as a generated answer, so nothing
-   about its styling changes. When the visible answer *is* the logged one there is no variant to
-   rewrite, so the turn record takes `override: { text, at }` instead: `active` stays `'native'`,
-   `items` stays empty, and the ring never appears. The card then renders `override.text` through
-   the same body and draws nothing else under it; `answer-restore` still drops the override, kept as
-   the API-level way back instead of a button.
-
-Consequences worth knowing: the log is untouched, so **later turns still see the original answer**
-in their model context; and if a future DSH renames those attributes the rule simply stops
-matching, leaving both answers visible instead of breaking the view.
-
-The app's own action row keeps its copy button, and that button reads the **logged** answer. While a
-variant, an override or a translation is on screen it would therefore copy text the reader cannot
-see, so the row adds a copy button of its own (`data-mtt="copy-answer"`) whenever `drawnCopy` is
-non-empty — the variant's text, the override's text, or the translation's — and it writes exactly
-that. The row in a run needs nothing: there the visible answer *is* a logged turn, so the app's copy
-is already right.
-
-### Deleting rows without rewriting the log
-
-The transcript is append-only (see below), so a delete can only be a view decision. `hidden`
-records it and the same generated stylesheet applies it:
-
-| scope | rule | note |
-| --- | --- | --- |
-| `turn` | `[data-chat-turn="N"]{display:none}` | the turn's user row, its answer and its tail row all go: a deleted prompt leaves no orphan answer behind, and no placeholder either |
-| `prompt` | `[data-chat-flow-kind="user"][data-chat-turn="N"]` is hidden (the question row, nothing else) | a prompt replayed by `answer-run`: the question it re-asks must not appear twice; its rail entry is dropped too. Two forces hide it: the decorator sets that row's own `display: none` (it runs for every row, including a turn that failed or is still running and therefore has no tail row yet), and `AnswerCard` writes the same rule into the sheet as a fallback |
-| `answer` | one rule per kind in `DELETED_ANSWER_KINDS` (`assistant-step`, `turn-process`, `tool`, `turn-error`, `turn-max-tokens`, `model-retry`, `turn-tail`, `context`, `turn-trigger`), each scoped to `[data-chat-turn="N"]` | everything the answer owns goes, including the tail row (which carries the action row and the file-change card); the user row stays, with its own toolbar, so the turn can be answered again |
-
-### Notices the frame cannot place in a turn
-
-"Context injected" and "asked to keep going" are messages of their own in the log, and the frame writes
-`data-chat-turn` on a row only when that node's location resolved to a turn. A notice sitting between
-turns resolves to nothing, so it carries no turn number, no stylesheet rule can name it, and deleting
-the answer used to leave it standing on its own.
-
-`syncStrayNotices()` reads the order of the flow instead of its labels: a notice row without a turn is
-hidden when the next row that *does* name a turn is a turn whose answer (or whole turn) is gone — a
-notice always describes the turn it opens. Two details make it work in practice: the panel is swept
-again whenever the store changes, because a deletion mutates `hidden` and nothing in the DOM, so no
-observer callback would fire; and the sweep resolves its session from `store.lastSession` (the last
-session any component asked about) when the chat view has not told us which one it draws yet.
-
-A failed turn has no `assistant-step` row at all — only an error banner and the action row — which is why
-the answer scope hides by *kind list* rather than by "the assistant row": deleting a failed answer removes
-the error banner and its action row, and still leaves the prompt alone.
-
-The `deleted` mark takes precedence over stale overrides, editors and streams. Hiding an answer retires
-its client transient state and host translation task. Regeneration creates another real turn, so it does
-not need to resurrect content inside a deleted one. Deleting a question cascades through its `replays`
-membership even when there is no multi-answer group left.
-
-Answering a turn again is **one action**, whichever row it is pressed on: the question's button and the
-answer's button both run `rerunTurnInPlace()` → `answer-run`, so a new answer is a *turn of its own* in the
-same session — thinking, tool cards, streaming, exactly like the first time — and the runs record groups
-those turns under the question they answer, so the ring shows `‹ 2/2 ›` and switches between them by hiding
-the ones that are not chosen. Nothing is generated as text any more.
-
-`answer-run` replays the prompt on the session's own agent — a fresh turn with the same text — and hands
-back the turn it opened, with `hidePrompt` marking that prompt hidden in the same request (that turn is not
-in the log yet, so a later `hide` would be rejected). That prompt's question row is then hidden by the
-`prompt` mark in the table above and its rail entry is dropped.
-
-The row must be hidden *before it is painted*, which takes three things working together,
-because the log records the replayed question the moment the followup is queued:
-
-- the client guesses the turn the replay will open (`last turn + 1`) and marks it before the
-  request leaves, so the row has something to hide it from the outset. The guess is retired when a
-  payload either contains that turn (the host's mark governs from then on) or has already moved past
-  it (nothing was opened, so the guess must not hide a later question);
-- the host writes its own mark when it queues the followup, so the row stays hidden across reloads;
-- the decorator decides inside the MutationObserver callback, which runs before the frame is
-  painted. A timer would run after it, and one painted frame is the flash this all exists to avoid. Both buttons reach it through
-`rerunAfterRevert` (below) — or directly, when nothing was reverted; the cost, when used, is one replayed
-prompt in the log — visible to the model on later turns.
-
-A run group can also end in failure: the chosen turn has no answer to draw, so `AnswerCard` returns `null`
-for every member of the group — and the app has no action row for a failed turn, which used to take the
-retry button away with it. So the *visible* member of a group is the one exception: if it has no answer and
-is not still open, the card renders the failed-turn toolbar (`AssistantToolbar{ failed: true }`) instead of
-`null`.
-
-### Undoing what the answer did
-
-An answer that edited files cannot be replaced by a text-only variant: the edits are still on disk, the
-variant cannot run a tool, and the next model would build on top of work it never did. So a turn whose
-answer changed files takes a different route — `changes` → ask → `revert` → answer again:
-
-1. `changes` reads DSH's own record. `@deepseek-ai/dsh-workspace-changes` snapshots the whole work tree at
-   `turn/start` and `turn/end` (git tree ids in a private object directory), copies every file a file tool
-   is about to edit, and appends one `workspace/changes` event per top-level turn. Its service,
-   `ctx.workspaceChanges`, serves the summary for that event's sequence and each listed file's comparison
-   as hunks — three context lines, both sides. Without a repository or without git the summary falls back to
-   the file-tool copies alone, so shell edits outside a repository are not recorded. The summaries live only
-   as long as the host process that recorded them: after a restart the older turns answer `not-recorded`,
-   and the row behaves as it always did.
-2. `workspace-revert.js` validates all files, stages replacements, then rechecks every path and content
-   before applying inverse hunks. Later edits outside matched hunks and mixed line endings are preserved.
-   A detected preflight conflict prevents writes. New/deleted files require an exact snapshot or complete
-   diff with explicit EOF evidence; normalized host diffs cannot prove nonempty EOF bytes, so these may
-   return `missing-exact-snapshot`. Binary/oversized/unknown files and unanchored insertions are reported
-   in `skipped`. Safe files may already have been reverted when other files are skipped.
-3. I/O failure triggers best-effort rollback, preserving concurrent edits and retained recovery backups.
-   This is not a filesystem transaction; process death or concurrent path replacement can defeat it.
-   Symlinks/junctions and escaping paths are rejected, but this is not a boundary against a hostile OS process.
-4. The client reports incomplete reverts and stops. On complete safe reverts, both **regenerate** and
-   **switch model** call `answer-run`, retaining real answers in the comparison ring.
-
-Several components want the same turn hidden (the answer card for an active variant, the assistant
-toolbar for a deleted answer, the tail row for a deleted turn), so `nativeHideStyle` keeps a `marks` map
-keyed by owner (`tail:<turn>`, `bar:<turn>`, …) and rebuilds the sheet from all marks, with a whole-turn
-mark winning over an answer-side mark. The modes are `turn` (everything), `deleted` (the whole answer
-side, tail row included), `answer` (body + process + tool cards only — what a switched-in variant needs,
-because file changes belong to the turn) and `translate` (the logged body only — the paired view redraws
-the original itself). `useHideRule(owner, turn, mode)` registers and clears one mark, which makes
-unmounting self-cleaning; the rail hides its own marks through the navigation patch, not through this
-sheet.
-
-The model keeps reading the full log: a deleted answer is still in the context of later turns.
-Erasing it for the model would require a rewritten session (a child seeded without that turn),
-which is a separate, much larger operation.
-
-### The turn rail follows the transcript
-
-The rail on the right is fed from two places, both folded from the log: the host's `turnOutline`
-session projection (every turn, loaded or not) and the chat view's own navigation items, which win
-for a turn that is loaded (`dsh-client-ui-chat`, `mergeTurnRailItems`). Neither knows about a variant,
-an edit, or a delete — those live in this plugin's state, not in the log. So both halves are patched.
-
-**The loaded half.** `ChatView` asks `ctx.uiConversation.binding(session).target('chat')` for a
-snapshot whose `navigation.items()` is one side of the merge, so `installRailSync` wraps `binding`
-(once, in `ctx.inject(['uiConversation'], …)`) and hands back a proxy that only rewrites the `chat`
-target's snapshot:
-
-- items of a forgotten turn (deleted, or the replay of a question asked again) are dropped;
-- for every other item, `response` is replaced with what is on screen when this plugin knows better
-  (`live` stream text → the active variant's text → an override), and left alone otherwise, keeping
-  the item's identity so nothing re-renders for nothing;
-- the patched snapshot is memoized per host snapshot, validated by the store's `railVersion` *and* by
-  the item array's identity — the app's own change signal (`TurnNavigationIndex`: “the array identity
-  changes exactly when a Turn enters, leaves, or changes preview”) — so a switch, a delete, or a new
-  turn all repaint without waiting for a host frame, and re-reading the same snapshot still returns
-  the same array.
-
-Dropping an item there is not enough on its own: the projection contributes one entry per
-`turn/start`, and an entry with no loaded twin renders as an `unloaded` mark that scrolls to a row
-this plugin has hidden. So the other half is patched too.
-
-**The projection half.** The projection cannot be *written* (registrants sharing a key share one unit,
-so a second writer would fight the host's own frames), but it can be *read* through a filter:
-`installOutlineFilter` patches `ProjectionValueStore.prototype.faceOf` — the method the app's
-`useProjection` resolves through, and the one object the Session holds as `projections` — so
-`faceOf('turnOutline')` answers with a face that drops the forgotten turns. Every other key is
-untouched, and the patch is restored on dispose.
-
-That patch goes on the prototype because the app reaches the store through the Session object
-(`binding(sessionId).session.projections`), which keeps the instance and never looks anything up on the
-service again. Since a store carries no session id of its own, `service.binding` is wrapped too: every
-binding tells us which session a store belongs to, and sessions already open when the plugin loads are
-walked once at install time (`binding` is a pure map lookup, so that costs nothing). A store whose
-session is still unknown answers unfiltered — exactly the stock behaviour.
-
-The face keeps its value's reference until either the host publishes a new value or the forgotten set
-changes — `useProjection` binds it with `useSyncExternalStore`, so a fresh array per call would
-loop — and it forwards our own `store.subscribe`, so deleting a row repaints the rail immediately.
-
-**Why not hide the mark.** An earlier version hid the deleted turn's mark with
-`nav button[data-index="N"]{display:none}` and pulled the marks after it up with an
-`!important` `translateY`, because a hidden mark does not reclaim its pitch in the virtual list
-(`TURN_SPACING_PX = 10` in the app's `TurnNavigator`). That fights the virtualizer: it writes each
-mark's position as an inline `transform` (`directDomUpdatesMode: 'transform'`), so an `!important`
-transform on the same property wins and repositions *every* mark onto the same spot. The rail then
-looks frozen — new turns land on the pile — and in a session with many deleted turns the whole rail
-disappears. Filtering the source list instead leaves the virtualizer's geometry alone: with the entry
-gone, the marks are contiguous and the rail is simply shorter.
-
-### Why a turn cannot gain a second answer
-
-
-The session log cannot hold two answers for one turn. `dsh-session`'s invariant admits
-`assistant/message` only while its own `turn`/`step` is open, and `step/start` numbers must
-increase, so a settled turn can never receive a second answer in place. Surface replacements
-(`surfaceOp: { op: 'replace' }`) are model-only by design — they never rewrite the human
-transcript (`dsh-session/lib/types/surface.js`: "the wrong source for a human transcript").
-An alternative with tools therefore needs another real turn, either in the same session (normal
-regeneration) or in a child session (the explicit branch action).
-
-For explicit child-session navigation, every version switch calls
-`focus`: the target is un-archived and every other family member is archived, so one
-conversation stays visible while the rest remain one click away in the version ring.
-`focus` runs from the *target's* first mounted toolbar, because archiving the session that
-is still current makes the workspace UI clear the main view. A member with a running turn
-(`WorkspaceActiveSessionError`) is left visible rather than force-stopped.
-
-Translation is drawn beside the answer, not instead of it: `translate` stores the translated text keyed by
-the event seq the client handed over (or `turn:<n>` when the text on screen is a variant, which never lives
-in the log), records `shown[sessionId][turn] = lang`, and remembers the original side in
-`origins[sessionId][turn]` — necessary because a variant or an edit is not in the log, so the log cannot
-tell us what the reader was looking at. `AnswerCard` then draws both sides through the same `AnswerBody` →
-`MarkdownText` path: `textBlocks()` splits each side on blank lines (fenced code stays whole) and
-`pairParagraphs()` interleaves them paragraph by paragraph, falling back to whole-text-above-whole-text when
-the two sides disagree on block count instead of pairing the wrong halves. Because the original is redrawn
-by us, the card registers the `translate` mark rather than the `answer` mark: only the logged body makes
-way, while the turn's own process card and tool cards stay, since they are still that turn's record.
-`translate-off` deletes only the `shown`/`origins` entries: the translation stays cached, the turn goes back
-to what it showed before, and the language menu's first row is that call. There is no second surface — no
-panel under the answer, no popover above the action row.
-
-Two consequences worth writing down, because both were bugs once:
-
-- **The card decides from `drawing`, not `showingVariant`.** A translated turn hides the logged answer and
-  draws its own page; if the early return still keyed on `showingVariant` (which a translation is not), the
-  answer area would be hidden *and* empty. `drawing = showingVariant || translation !== null ||
-  liveTranslation !== null` is what both the early return and the failed-turn branch ask.
-- **A translation carries no `maxTokens`.** It is exactly as long as the text it translates, so any cap is a
-  guess — and 4096 was the guess that cut a 700-word article mid-sentence. The provider's own window is the
-  only honest limit. If a model still stops on *its* length limit (`finish.reason` of `length`/`max_tokens`),
-  the stored entry and the response carry `truncated: true` and the paired page draws one quiet line saying
-  the rest is untranslated. Silence would look like a complete translation that stopped early.
-
-### Streaming a translation
-
-`translate` accepts `stream: true` and answers with the same NDJSON frames `answer-generate` does — `start`
-(with `seq`, `turn`, `lang`, `provider`, `model`), one `delta` per token batch, then `done` carrying the same
-payload a plain POST would return (cached translations answer with a single `done`). Host side both writers
-share `respondStream(response, run)`; client side both share `streamOperation(operation, handlers)`, so there
-is one reader to trust. The translation has its own live cell (`store.liveTranslations`, keyed
-`${sessionId}|${turn}`) because nothing else about the turn is changing while it arrives: `AnswerCard` draws
-the paired page on the first delta, and while the text is still empty it draws three bobbing dots (`.mtt-dots`)
-in the translation column. During the stream the card keeps the whole original in one block and grows the
-translation beneath it, so blocks never re-pair mid-sentence; paragraph pairing happens once, when the
-translation is complete.
-
-The translation is also copyable on its own: the language menu carries a `Copy the translation` row
-(`COPY_TRANSLATION_ROW`) whenever one is on screen, because the paired page is drawn for reading —
-pulling just the translated half out by hand is the one thing the pairing makes harder. The row sits
-under the way back to the original and before the languages, and `copyTranslation` writes
-`translationOf(state, turn).text`, never the visible pair.
-
-### Code and formulas are not translated
-Handing code to a translator is asking for it to be rewritten: an identifier gets translated, a fence gets
-re-indented, a LaTeX macro gets "corrected". So `translate` never sends it. `protectText()` walks the text with
-two pattern lists — `BLOCK_PATTERNS` (fences, `~~~`, `$$…$$`, `\[…\]`) and `INLINE_PATTERNS` (`` `…` ``, `$…$`,
-`\(…\)`) — and replaces every match with `⟦n⟧`, keeping the original in `kept[n-1]`. A block that already stood
-on its own (`/(^|\n)[ \t]*$/` right before it) is replaced by its own paragraph, because a fence that comes back
-mid-sentence renders as plain text instead of a code block; display math written inside a sentence is replaced
-inline, where it was. The system prompt tells the model to copy placeholders unchanged and in order, and
-`restoreText()` puts the originals back by number. Streaming restores as it goes, but holds back a placeholder
-that has only partly arrived (`settledLength()`), so `⟦1` never appears on screen. The finished translation
-collapses any padding blank lines (`/\n{3,}/g` → `\n\n`).
-
-Text already written in the target language is lifted by the same mechanism, and lifted *first*:
-`liftTargetLanguage()` rewrites sentence by sentence (`/[^\n。！？；!?;]+[。！？；!?;]?/g`) and replaces any piece
-whose share of the target script is at least half with a placeholder. `TARGET_SCRIPTS` only covers languages a
-script can identify — Chinese (han), Japanese (kana + han), Korean (hangul), Russian (cyrillic); Latin-script
-targets are absent on purpose, because "English" and "German" are indistinguishable letter for letter and a
-wrong guess would leave a paragraph untranslated. Lifting runs before the code patterns so that
-`先运行 \`npm run build\` 再继续。` is kept whole, code included. On the client, a pair whose two sides are the
-same text after whitespace normalisation (`sameText()`) is drawn once: a sentence that needed no translating
-should not appear twice.
-
-## Compatibility notes
-
-- Peer: `@deepseek-ai/dsh >=0.2.0-rc.2 <0.3.0-0`.
-- Slot contracts were written against `dsh-client-ui-conversation` /
-  `dsh-client-ui-chat` `0.2.0-rc.2` (`conversation.chat.assistant-actions`,
-  `conversation.chat.turnTail`, `conversation.view`).
-- The question row is decorated in the DOM, not shadowed through a slot, so this plugin no longer
-  collides with `dsh-plugin-message-edit` / `dsh-msg-edit`; both can be installed at once, though
-  two toolbars on one row is not useful. The decorator keys off `data-chat-flow-kind`,
-  `data-chat-turn` and the app's `*_userStack` / `*_bubble` class suffixes — if a future DSH renames
-  them, the row simply renders as the app draws it (no toolbar, no crash).
-- `message-toolbar` is used as the cordis plugin id, HTTP path segment, event type prefix and
-  state directory name, distinct from `message-edit`/`message-tree` to avoid collisions.
+`npm test` runs source/bundle checks plus isolated host, client, state, seed, navigation, workspace recovery and sync tests. The optional installed-runtime runner imports DSH packages only inside the test, uses a temporary home and scripted LLM, observes actual `GenerateOptions.messages`, and verifies cold persisted resumes. It does not call a cloud model or change personal sessions. See [the 1.11.0 verification report](NATIVE-CONTEXT-2026-11-21.md) for final commands and limits.

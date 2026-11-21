@@ -129,8 +129,9 @@ export function clientHarness() {
     if (name === '@deepseek-ai/dsh-client-ui-primitives') return primitives;
     throw new Error('Unexpected require ' + name);
   };
-  const exports = `store, AnswerCard, AssistantToolbar, UserRow, translateInto, cancelTranslation, ringChoices, answerMutate,
-    nativeHideStyle, railTarget, outlineFace, streamOperation, patchRailItems, rerunAfterRevert`;
+  const exports = `store, AnswerCard, AssistantToolbar, UserRow, translateInto, cancelTranslation, contextRingChoices,
+    nativeHideStyle, railTarget, outlineFace, streamOperation, patchRailItems, rerunAfterRevert,
+    switchToVersion, ContextFocus, VersionsView, __setNavigation: function(value) { navigation = value; }`;
   const source = fs.readFileSync(new URL('../../plugin.client.js', import.meta.url), 'utf8')
     .replace(/\nreturn \{\r?\n  inject:/, '\nreturn { __test: { ' + exports + ' },\n  inject:');
   const context = vm.createContext({ window, document, require, console, TextDecoder, URL, AbortController,
@@ -139,7 +140,14 @@ export function clientHarness() {
   });
   const module = vm.runInContext('(function(require){const React=require("react");const styles={insert(){return()=>{}}};return(function(){'
     + source + '\n})();})', context)(require);
-  return { ...module.__test, window, document, render, timers,
+  const opened = [];
+  module.__test.__setNavigation({ openVersion(id) { opened.push(id); } });
+  return { ...module.__test, window, document, render, timers, opened,
+    unmount() {
+      for (const cells of hooks.values()) for (const cell of cells) {
+        if (typeof cell.cleanup === 'function') { const cleanup = cell.cleanup; cell.cleanup = undefined; cleanup(); }
+      }
+    },
     mount(type, props) { return () => render(type, props); },
   };
 }
