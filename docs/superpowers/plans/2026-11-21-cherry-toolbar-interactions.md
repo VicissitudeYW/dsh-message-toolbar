@@ -88,7 +88,7 @@
 - [x] Run the changed UI CSS/DOM check when available and inspect the actual diff for original UI conventions.
 - [x] Request one independent branch review, resolve important findings with regression tests, and rerun affected checks.
 - [x] Update the project version and release notes only if justified by the final behavior.
-- [ ] Remove the completed temporary TODO CSV, record limitations honestly, commit the finished change, and push the authorized feature branch to the configured GitHub remote.
+- [x] Remove the completed temporary TODO CSV, record limitations honestly, commit the finished change, and fast-forward main and push it to the configured GitHub remote.
 ## Verification and review record
 
 - Source research and spec completed against the fixed Cherry and DSH commits listed in the comparison document. Context7 quota was exhausted; official GitHub search and pinned source were used as the documented fallback.
@@ -98,4 +98,4 @@
 - `impeccable detect --json --changed` returned `[]`. A browser fixture used current plugin source, React 18.2 and DSH's pinned native Menu. Keyboard selection updated the active answer; Stop canceled a live replacement translation and restored the previous complete one. Light desktop and dark 390px layouts were inspected; the dark menu bounds were 12–350px within a 390px viewport and document width stayed 390px.
 - The first fixture load exposed a missing fake GET response, which was fixed in the temporary fixture; it was not a plugin failure. The fixture lacks the full DSH frame and icon sprite and uses a controlled provider. This is not full DSH GUI or real model acceptance testing and does not establish full Web Worker compatibility.
 - The actual desktop-installed plugin was read-only verified as 1.8.8. This work does not sync that copy, change personal state/sessions, restart DSH or publish npm.
-- Git delivery is the remaining step. The base main checkout is clean and remote main was checked at d5969e6f4a466d8a8a96cd7d64496a5f841785dc before committing.
+- Runtime implementation and its spec were committed as [`137536c639e2b9fd9b7386782b4850e0fa483b74`](https://github.com/VicissitudeYW/dsh-message-toolbar/commit/137536c639e2b9fd9b7386782b4850e0fa483b74). The original main checkout fast-forwarded cleanly from d5969e6; push succeeded and `git ls-remote origin refs/heads/main` confirmed that exact implementation SHA. The temporary TODO CSV is complete and removed. This final record changes documentation only.
