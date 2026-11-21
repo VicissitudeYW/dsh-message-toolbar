@@ -54,6 +54,8 @@ Restart DSH after installing.
 4. Saving an edited question only saves the change. Press Send to generate an answer.
 5. Open the version tree to view or restore an older version.
 
+With **dsh-btw-explore 0.3.4 or later**, toolbar **1.11.1** keeps answer edits and version selection inside the exploration card, including its source excerpt. Closing or switching cards during a save prevents a delayed result from navigating the main window.
+
 ![Original and translation shown block by block](./docs/showcase/02-translation.png)
 
 ## What to know

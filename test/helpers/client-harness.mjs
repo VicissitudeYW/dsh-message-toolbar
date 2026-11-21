@@ -34,7 +34,7 @@ export const flush = async () => { for (let i = 0; i < 12; i++) await Promise.re
 // Execute the real source inside the same factory/IIFE shape as the shipped web
 // bundle. Only the browser, React hooks and native primitives are test doubles.
 // Extra exports are injected into this in-memory copy, never production code.
-export function clientHarness() {
+export function clientHarness(options = {}) {
   const hooks = new Map();
   const classes = new Map();
   let current, hookIndex, pending = false, effects = [], ordinals;
@@ -95,6 +95,7 @@ export function clientHarness() {
       try { result = type(props); } finally { current = previous; hookIndex = previousIndex; }
       return expand(result);
     }
+    if (props.ref && typeof props.ref === 'object' && options.elementRef) props.ref.current = options.elementRef(type, props);
     return [{ type, props, children: expand(props.children) }];
   }
   function render(type, props) {
@@ -112,11 +113,14 @@ export function clientHarness() {
     addEventListener() {}, removeEventListener() {},
   };
   const timers = new Map(); let timerId = 0;
+  const events = new EventTarget();
   const window = {
     fetch: async () => { throw new Error('Unexpected fetch'); }, document,
     localStorage: { getItem() { return null; }, setItem() {} },
     navigator: { language: 'en', clipboard: { writeText: async () => {} } },
-    addEventListener() {}, removeEventListener() {}, innerHeight: 900,
+    addEventListener: events.addEventListener.bind(events),
+    removeEventListener: events.removeEventListener.bind(events),
+    dispatchEvent: events.dispatchEvent.bind(events), CustomEvent, innerHeight: 900,
   };
   const primitives = {
     MarkdownText: (props) => React.createElement('div', { className: 'native-md' }, props.text),
@@ -131,7 +135,8 @@ export function clientHarness() {
   };
   const exports = `store, AnswerCard, AssistantToolbar, UserRow, translateInto, cancelTranslation, contextRingChoices,
     nativeHideStyle, railTarget, outlineFace, streamOperation, patchRailItems, rerunAfterRevert,
-    switchToVersion, ContextFocus, VersionsView, __setNavigation: function(value) { navigation = value; }`;
+    changeContext, switchToVersion, ContextFocus, VersionsView,
+    __getNavigation: function() { return navigation; }, __setNavigation: function(value) { navigation = value; }`;
   const source = fs.readFileSync(new URL('../../plugin.client.js', import.meta.url), 'utf8')
     .replace(/\nreturn \{\r?\n  inject:/, '\nreturn { __test: { ' + exports + ' },\n  inject:');
   const context = vm.createContext({ window, document, require, console, TextDecoder, URL, AbortController,
@@ -143,9 +148,22 @@ export function clientHarness() {
   const opened = [];
   module.__test.__setNavigation({ openVersion(id) { opened.push(id); } });
   return { ...module.__test, window, document, render, timers, opened,
-    unmount() {
-      for (const cells of hooks.values()) for (const cell of cells) {
-        if (typeof cell.cleanup === 'function') { const cleanup = cell.cleanup; cell.cleanup = undefined; cleanup(); }
+    installWorkspaceNavigation(byId = { source: {}, target: {} }) {
+      const services = {
+        slots: { inject() {}, register() {} },
+        sessions: { list: { getSnapshot: () => ({ byId }), subscribe: () => () => {} } },
+        uiWorkspace: { openSession: (id) => { opened.push(id); } },
+      };
+      module.apply({ get: (name) => services[name], effect() {} });
+      return module.__test.__getNavigation();
+    },
+    unmount(type, ordinal = 0) {
+      const selected = type ? [[type.name + ':' + ordinal, hooks.get(type.name + ':' + ordinal)]] : [...hooks];
+      for (const [key, cells] of selected) {
+        for (const cell of cells || []) {
+          if (typeof cell.cleanup === 'function') { const cleanup = cell.cleanup; cell.cleanup = undefined; cleanup(); }
+        }
+        hooks.delete(key);
       }
     },
     mount(type, props) { return () => render(type, props); },
