@@ -60,10 +60,12 @@
 
 ### Task 6: Deliver GitHub revision
 
-- [ ] Commit focused changes; push authorized repository and verify remote SHA.
-- [ ] Fast-forward clean original checkout if delivery still applies; verify independently.
-- [ ] All CSV DONE then delete it, final Chinese report with verified limits and repository links.
+- [x] Commit focused changes; push authorized repository and verify remote SHA.
+- [x] Fast-forward clean original checkout if delivery still applies; verify independently.
+- [x] All CSV DONE then delete it, final Chinese report with verified limits and repository links.
 
 ## Execution record
 
 `update_plan` is unavailable in this toolset (tool discovery returned unrelated APIs). The root TODO CSV and this persisted checklist carry identical task progress; no fictitious tool calls are recorded.
+
+Delivery record: implementation commit `ad5b8366dd14242568a8b3faa18c1d0bb761571d` was pushed to `origin/codex/cherry-toolbar-interactions` and fast-forwarded into the original checkout's `main`. The final documentation-only delivery commit is pushed to both branches after this record is updated; remote SHAs are checked independently before reporting.
