@@ -45,16 +45,17 @@ editor's short-lived state. They survive reloads and restarts on the same instal
 
 - DSH session logs are append-only, so "delete" hides rows in the view. Deleting a question also hides all its replayed answers.
 - In-session regeneration still includes the earlier answer and repeated question in model history. This version does not implement request-scoped history isolation. The explicit new-answer-card action creates a child session instead; see the [reliability report](docs/RELIABILITY-2026-11-21.md).
-- Model switching uses the host's native selection. On the inspected DSH `0.2.2-rc.5`, that selection remains the choice for later steps; the plugin does not automatically restore the earlier model.
+- Model switching uses the host's native selection. An explicit model-switch replay restores the prior selection after its matching turn ends (successfully, with an error, or by cancellation). A newer model choice made during the replay is preserved.
 - Answer edits, grouping, attachment references and translations live in `~/.dsh/message-toolbar/state.json`; real regenerated answers remain in the session log. Moving machines requires both plugin state and the DSH attachment store.
 - Undoing depends on the `workspace-changes` record: without a git repository it only covers file-tool edits, and after a host restart older turns have no record.
 - The host diff normalizes the final newline. Without exact snapshots, nonempty created/deleted files may be skipped rather than restored unsafely. Binary and oversized files are skipped too. Other safe files may already have been reverted; the UI reports counts and stops regeneration.
 - Preflight, revalidation and rollback reduce risk but do not make filesystem operations transactional. Process death, storage faults and concurrent path changes can defeat rollback; errors expose retained recovery backup paths.
-- State persistence assumes one host process. Multiple DSH processes must not write the same state file concurrently. Corrupt or future-schema state is reported and the original file is preserved.
+- State persistence uses an exclusive sibling lock, latest-state delta merging and atomic replacement, so multiple DSH processes can write the same state file. Lock timeouts and corrupt or future-schema state are reported and the original file is preserved. Network filesystems and hostile external writers are outside the guarantee.
+- Locks are reclaimed only when their recorded owner has exited. Unknown or corrupt ownership metadata causes a conservative timeout. The state directory must support hard links; a process killed during a short cleanup window can leave a guard requiring inspection after the relevant DSH processes have been stopped.
 
-## Reliability refactor in 1.9.0
+## Reliability follow-up in 1.9.1
 
-Fixes include lost regeneration grouping flags, deleted answers returning in the ring, grouped answer edits and translations being skipped, stale requests overwriting new state, sending before attachments finish, partial streams being recorded as successful, and unsafe file reverts. State persistence and workspace reverts now have separate modules. `npm test` builds the current client and runs existing checks plus new regressions. Validation uses isolated state, temporary files and a client VM; real GUI and model-call acceptance testing remains outstanding.
+Building on the 1.9.0 reliability refactor, this release restores the prior model after an explicit model-switch replay ends, including a claimed replay that fails before its user message is recorded. Restore errors are logged and contained so an asynchronous failure cannot escape and crash the host. Shared state writes use a cross-process lock, latest-state merge and stale-lock recovery. Concurrent answer deletion and replay preserve the still-visible original answer, while other concurrent fields, alternatives and translations are retained. `npm test` builds the current client and runs existing checks plus new regressions. Validation uses isolated state, temporary files and a client VM; real GUI and model-call acceptance testing remains outstanding.
 
 ## Screenshots
 
@@ -84,7 +85,7 @@ Or from a packed tarball:
 
 ```bash
 npm pack
-dsh plugin --profile web add file:./dsh-message-toolbar-1.9.0.tgz
+dsh plugin --profile web add file:./dsh-message-toolbar-1.9.1.tgz
 ```
 
 Then restart DSH — host and client both load at startup.

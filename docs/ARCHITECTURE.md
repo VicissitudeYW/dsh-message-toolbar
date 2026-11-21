@@ -10,7 +10,7 @@ lib/index.js          host: /message-toolbar HTTP route + version branching engi
 lib/toolbar-logic.js  pure functions: family walk, version ring, turn tree
 lib/session-record.js session log reading with the same fallback chain DSH uses
 lib/state-store.js    plugin-owned durable state (deleted cards, translation cache)
-lib/durable-state.js  isolated mutations, validated reads, fsync + atomic rename
+lib/durable-state.js  process locking, mutation deltas, validated reads, atomic rename
 lib/model-selection.js native pending/lastUsed projection fold
 lib/workspace-revert.js validated inverse hunks, staging and rollback
 lib/client.js         GENERATED browser bundle (window.__ModuleLoader__ factory)
@@ -218,8 +218,13 @@ costs a write only when something was actually stale.
 
 A model is selected through `agent.model.select({provider, model})` when available, with the older
 session controller API as a compatibility fallback. A matching request header retires `pending`
-into `lastUsed`; this does **not** restore the previous model. On DSH `0.2.2-rc.5`, later requests
-continue to use that selection until another selection changes it.
+into `lastUsed`; that host behavior would otherwise leave a model-switch replay's choice active for
+later requests. The plugin records the previous effective choice and watches `agent/inbox/claimed`
+plus the matching replay message and `turn/end`; this also covers a claimed replay that errors before
+its `user/message` is appended. Once synchronous event dispatch unwinds, it restores the previous
+choice only if the current selection is still the temporary one. Restore errors are logged and
+contained so a released session or failed model API does not escape as an uncaught microtask error.
+On DSH `0.2.2-rc.5`, later requests use the restored choice until another selection changes it.
 
 The model a row *offers* when no explicit choice was made (`state.model`, and `resolveAnswerModel`'s
 fallback) is read by `sessionModel(events)` — the same fold `dsh-agent` uses for its selection
@@ -320,11 +325,26 @@ groups seed this map when old schema-1 state is loaded; identity already lost by
 cannot be inferred safely from text alone.
 
 `durable-state.js` and the store validate JSON/schema/nested state dictionaries, preserve corrupt input, mutate a detached
-draft, and writes through an exclusive temporary file, fsync and rename. Background writes remain
+draft, and write through an exclusive temporary file, fsync and rename. Background writes remain
 debounced (200 ms), but successful HTTP mutations and stream `done` frames flush before acknowledgement.
-Failed flushes surface to the caller and remain dirty for retry. This is a single-process store;
-there is no cross-process lock or merge. A host side effect already queued cannot be rolled back merely
-because the later state flush failed.
+Each flush takes an exclusive sibling lock, reloads the latest valid file, applies this process's queued
+before/after deltas, and then replaces the file atomically. Hidden turn lists merge by value, answer
+alternatives by ID, and attachments by type plus attachment ID. Untouched scalar fields retain external
+updates; pruning a container removes its baseline entries while preserving concurrent additions.
+Conflicting changes to the same scalar use the last commit; generic list reordering is not supported.
+A post-merge domain reconciliation rebuilds still-present answer groups from their root, replay
+identity and hidden flags. It preserves a visible original answer when a concurrent delete and replay
+append collide, while never recreating a group that was explicitly removed.
+A process with a warm cache checks for an external commit before the next read. The file signature is
+captured before reading so a replacement cannot label old bytes with a new signature.
+
+The lock's complete PID/token metadata is published with an exclusive hard link. Known dead owners can
+be reclaimed under a separate cleanup directory with a unique owner marker; competing cleaners cannot
+remove a newly acquired cleanup guard. Live owners, incomplete or unknown metadata, and ownerless
+cleanup guards are preserved. A process killed between removing a cleanup marker and its directory can
+leave a guard requiring offline inspection. The protocol requires local filesystem support for hard
+links and atomic rename. Lock timeouts and failed flushes surface to the caller and remain dirty for retry. A host side
+effect already queued cannot be rolled back merely because the later state flush failed.
 
 ### Turns without an answer
 

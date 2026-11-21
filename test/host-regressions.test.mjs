@@ -4,93 +4,18 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
+import { spawnSync } from 'node:child_process';
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'mtt-host-regression-'));
 process.env.USERPROFILE = home;
 process.env.HOME = home;
-const { apply } = await import('../lib/index.js');
+const { harness, history } = await import('./helpers/host-harness.mjs');
 const store = await import('../lib/state-store.js');
 const stateFile = path.join(home, '.dsh', 'message-toolbar', 'state.json');
 after(() => { store.flushState(); fs.rmSync(home, { recursive: true, force: true }); });
 
 function reset() {
   store.flushState(); fs.rmSync(stateFile, { force: true }); store.reloadState();
-}
-
-function history(count = 2) {
-  return Array.from({ length: count }, (_, i) => i + 1).flatMap((turn) => {
-    const seq = (turn - 1) * 4;
-    return [
-      { seq, type: 'turn/start', data: { turn } },
-      { seq: seq + 1, type: 'user/message', data: { id: `u${turn}`, role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: `question ${turn}` }] } },
-      { seq: seq + 2, type: 'assistant/message', data: { turn, step: 1, message: { id: `a${turn}`, role: 'assistant', content: [{ type: 'text', text: `answer ${turn}` }] } } },
-      { seq: seq + 3, type: 'turn/end', data: { turn, reason: { kind: 'completed' } } },
-    ];
-  });
-}
-
-function harness(events = history(), { followupError } = {}) {
-  let handler;
-  const sent = [], selected = [], requests = [];
-  const listeners = new Map();
-  let cancelled = 0;
-  let currentSelection = { provider: 'p', model: 'original', reasoningEffort: 'medium' };
-  const dispatch = (subject, event) => {
-    for (const listener of listeners.get('session/event') ?? []) listener(subject, event);
-  };
-  const session = { header: { id: 'session-test', cwd: home }, events, append(type, data) {
-    const event = { seq: events.length, type, data };
-    events.push(event);
-    dispatch(session, event);
-  } };
-  const agentContext = { on(type, listener) {
-    const bucket = listeners.get(type) ?? new Set();
-    bucket.add(listener);
-    listeners.set(type, bucket);
-    return () => bucket.delete(listener);
-  } };
-  const agent = {
-    ctx: agentContext,
-    session,
-    model: {
-      current() { return currentSelection && { ...currentSelection }; },
-      select(selection) { selected.push(selection); currentSelection = { ...selection }; session.append('model/selection', selection); },
-    },
-    followup(message) { if (followupError) throw followupError; sent.push(message); },
-    runMaintenance(fn) { return fn(); },
-    cancel() { cancelled++; },
-    async whenIdle() {},
-  };
-  const ctx = {
-    effect(fn) { fn(); },
-    webServer: { register(route) { handler = route.handler; return () => {}; } },
-    sessions: { get() { return undefined; } },
-    agents: { get(id) { return id === 'session-test' ? agent : undefined; } },
-    sessionQuery: { async observeSession(id) { if (id !== 'session-test') throw new Error('missing'); return session; } },
-    get() { return undefined; },
-    llm: {
-      listProviders() { return [{ id: 'p' }]; },
-      async listModels() { return [{ id: 'm' }]; },
-      async *stream(request) { requests.push(request); yield { type: 'text-delta', text: 'translated' }; },
-    },
-  };
-  apply(ctx);
-  async function post(body, raw) {
-    const text = raw ?? JSON.stringify({ sessionId: 'session-test', ...body });
-    const request = { method: 'POST', url: '/message-toolbar', on(name, listener) {
-      if (name === 'data') listener(Buffer.from(text));
-      if (name === 'end') listener();
-      return this;
-    } };
-    const response = { status: 0, body: '', headersSent: false, writableEnded: false,
-      writeHead(status) { this.status = status; this.headersSent = true; },
-      write(value) { this.body += value; },
-      end(value) { this.body += value ?? ''; this.writableEnded = true; },
-    };
-    await handler(request, response);
-    return { status: response.status, payload: JSON.parse(response.body) };
-  }
-  return { post, handle: handler, events, ctx, agent, session, dispatch, sent, selected, requests, cancelled: () => cancelled };
 }
 
 function appendReplayTurn(h, turn, messageId, reason = { kind: 'completed' }) {
@@ -177,7 +102,28 @@ for (const reason of [{ kind: 'error' }, { kind: 'aborted', reason: { kind: 'use
     await eventTurnSettled();
     assert.deepEqual(h.selected.at(-1), { provider: 'p', model: 'original', reasoningEffort: 'medium' });
   });
+
+  test(`a replay restores the previous model after ${reason.kind} before its user message is recorded`, async () => {
+    reset(); const h = harness();
+    const result = await h.post({ action: 'answer-run', turn: 1, model: { provider: 'p', model: 'other' } });
+    const turn = result.payload.turn;
+    h.session.append('turn/start', { turn });
+    h.emit('agent/inbox/claimed', { agent: h.agent, message: h.sent[0], turn });
+    h.session.append('turn/end', { turn, reason });
+    await eventTurnSettled();
+    assert.deepEqual(h.selected.at(-1), { provider: 'p', model: 'original', reasoningEffort: 'medium' });
+    assert.equal(h.listenerCount(), 0, 'the completed replay leaves no lifecycle watchers');
+  });
 }
+
+test('discarding a queued model-switch replay restores the previous selection', async () => {
+  reset(); const h = harness();
+  await h.post({ action: 'answer-run', turn: 1, model: { provider: 'p', model: 'other' } });
+  h.emit('agent/inbox/discarded', { agent: h.agent, message: h.sent[0] });
+  await eventTurnSettled();
+  assert.deepEqual(h.selected.at(-1), { provider: 'p', model: 'original', reasoningEffort: 'medium' });
+  assert.equal(h.listenerCount(), 0);
+});
 
 test('model restoration leaves a newer user selection untouched', async () => {
   reset(); const h = harness();
@@ -206,6 +152,49 @@ test('a replay queue failure restores the prior model and removes its watcher', 
   h.dispatch(foreignSession, { type: 'turn/end', data: { turn: 3 } });
   await eventTurnSettled();
   assert.equal(h.selected.length, 2);
+});
+
+for (const failure of ['current', 'select', 'history']) {
+  test(`a model restoration ${failure} error is reported without crashing the host`, () => {
+    const childHome = fs.mkdtempSync(path.join(os.tmpdir(), 'mtt-restore-error-'));
+    try {
+      const result = spawnSync(process.execPath, ['--input-type=module', '--eval', `
+        import { harness } from ${JSON.stringify(new URL('./helpers/host-harness.mjs', import.meta.url).href)};
+        const h = harness();
+        const response = await h.post({ action: 'answer-run', turn: 1, model: { provider: 'p', model: 'other' } });
+        if (response.status !== 200) throw new Error(JSON.stringify(response));
+        const fail = () => { throw new Error('restore dependency unavailable'); };
+        if (${JSON.stringify(failure)} === 'history') {
+          h.agent.model.current = undefined;
+          Object.defineProperty(h.session, 'events', { get: fail });
+        } else h.agent.model[${JSON.stringify(failure)}] = fail;
+        h.session.append('turn/start', { turn: response.payload.turn });
+        h.session.append('user/message', { id: h.sent[0].id, source: { kind: 'user' } });
+        h.session.append('turn/end', { turn: response.payload.turn, reason: { kind: 'completed' } });
+        await new Promise(resolve => setImmediate(resolve));
+        console.log(JSON.stringify({ listeners: h.listenerCount() }));
+      `], { encoding: 'utf8', timeout: 15000, env: { ...process.env, HOME: childHome, USERPROFILE: childHome } });
+      assert.equal(result.status, 0, result.stderr);
+      assert.match(result.stderr, /restore dependency unavailable/);
+      assert.deepEqual(JSON.parse(result.stdout.trim()), { listeners: 0 });
+    } finally {
+      fs.rmSync(childHome, { recursive: true, force: true });
+    }
+  });
+}
+
+test('a failed model restoration does not replace the original queue error', async (t) => {
+  const diagnostic = t.mock.method(console, 'error', () => {});
+  reset(); const h = harness();
+  h.agent.followup = () => {
+    h.agent.model.select = () => { throw new Error('restore unavailable'); };
+    throw new Error('queue unavailable');
+  };
+  const result = await h.post({ action: 'answer-run', turn: 1, model: { provider: 'p', model: 'other' } });
+  assert.equal(result.status, 409);
+  assert.match(result.payload.error, /queue unavailable/);
+  assert.equal(h.listenerCount(), 0);
+  assert.match(diagnostic.mock.calls[0].arguments[1].message, /restore unavailable/);
 });
 
 test('two replay requests cannot reserve the same future turn', async () => {
