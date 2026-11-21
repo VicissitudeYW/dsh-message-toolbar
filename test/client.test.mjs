@@ -354,7 +354,12 @@ const primitives = {
       'data-native-menu': '',
       'data-count': String((props.items || []).length),
       'data-open': props.open === true ? '1' : '0',
-      'data-items': JSON.stringify((props.items || []).map((item) => (item.type ? item.type + ':' + item.id : item.id + '=' + item.label))),
+      'data-items': JSON.stringify((props.items || []).map((item) => {
+        const labelText = (label) => Array.isArray(label) ? label.map(labelText).join('')
+          : label && typeof label === 'object' ? labelText(label.props?.children)
+            : label == null ? '' : String(label);
+        return item.type ? item.type + ':' + item.id : item.id + '=' + labelText(item.label);
+      })),
       'data-selected': props.selectedId === undefined ? '' : String(props.selectedId),
       'data-selection': props.selection === undefined ? '' : String(props.selection),
       'data-side': props.side === undefined ? '' : String(props.side),

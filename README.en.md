@@ -17,12 +17,12 @@ A message toolbar plugin for DSH (DeepSeek Harness).
 | Action | Where | What happens |
 | --- | --- | --- |
 | **Edit** | user messages | Rewrites that question — drop files into the editor and they leave with it. |
-| **Regenerate** | assistant messages | Answers again in place, without opening a new conversation. The fresh answer to the same question is stored as a variant of that turn and swapped in for the logged one. `‹ 1/2 ›` switches between them, and the count in the middle opens the answers by name so you can jump straight to the one you want. |
+| **Regenerate** | assistant messages | Answers again in place, without opening a new conversation. The fresh answer to the same question is stored as a variant of that turn and swapped in for the logged one. `‹ 1/2 ›` switches between them, and the count opens model names and short answer previews so you can jump straight to the one you want. |
 | **Switch model** | assistant messages | Every model's answer becomes a variant of the same turn; `‹ 2/3 ›` walks them without leaving the conversation. |
 | **Undo file edits** | before regenerate / switch model | Lists the files for confirmation and reverses only verifiable edits, preserving later changes outside the affected hunks. Conflicts or unverifiable files stop regeneration and report the outcome. |
 | **Edit answer** | assistant messages | The answer becomes an editor where it stands, holding the markdown source of its text. |
 | **Copy** | assistant messages | Once an answer has been replaced, edited or translated, the row carries a copy button of its own: it copies the answer on screen, while the app's copy button keeps copying the one in the log. |
-| **Translate** | assistant messages | Pressing translate opens a dropdown of target languages; pick one and the answer is redrawn block by block, original and translation side by side. The same menu copies the translation on its own, or puts the answer back to the original. |
+| **Translate** | assistant messages | Pressing translate opens a dropdown of target languages; pick one and the answer is redrawn block by block, original and translation side by side. While it runs, the button becomes Stop translating. The same menu copies the translation on its own, or puts the answer back to the original. |
 | **Delete message / answer** | user messages / assistant messages | Removes a whole turn (message, answer, tool cards, and the notices above the answer) or a single answer from the conversation. |
 | **Version tree** | conversation view | A turn-level branching tree of the whole conversation family, with the active path highlighted, model labels, timestamps, and restore/delete controls. |
 
@@ -45,6 +45,7 @@ editor's short-lived state. They survive reloads and restarts on the same instal
 
 - DSH session logs are append-only, so "delete" hides rows in the view. Deleting a question also hides all its replayed answers.
 - In-session regeneration still includes the earlier answer and repeated question in model history. This version does not implement request-scoped history isolation. The explicit new-answer-card action creates a child session instead; see the [reliability report](docs/RELIABILITY-2026-11-21.md).
+- The answer ring only selects the displayed alternative; it does not change the model context path for the next question. This differs from Cherry's active branch semantics; see the [source comparison](docs/cherry-studio-comparison.md).
 - Model switching uses the host's native selection. An explicit model-switch replay restores the prior selection after its matching turn ends (successfully, with an error, or by cancellation). A newer model choice made during the replay is preserved.
 - Answer edits, grouping, attachment references and translations live in `~/.dsh/message-toolbar/state.json`; real regenerated answers remain in the session log. Moving machines requires both plugin state and the DSH attachment store.
 - Undoing depends on the `workspace-changes` record: without a git repository it only covers file-tool edits, and after a host restart older turns have no record.
@@ -52,6 +53,10 @@ editor's short-lived state. They survive reloads and restarts on the same instal
 - Preflight, revalidation and rollback reduce risk but do not make filesystem operations transactional. Process death, storage faults and concurrent path changes can defeat rollback; errors expose retained recovery backup paths.
 - State persistence uses an exclusive sibling lock, latest-state delta merging and atomic replacement, so multiple DSH processes can write the same state file. Lock timeouts and corrupt or future-schema state are reported and the original file is preserved. Network filesystems and hostile external writers are outside the guarantee.
 - Locks are reclaimed only when their recorded owner has exited. Unknown or corrupt ownership metadata causes a conservative timeout. The state directory must support hard links; a process killed during a short cleanup window can leave a guard requiring inspection after the relevant DSH processes have been stopped.
+
+## Cherry toolbar follow-up in 1.10.0
+
+Compared with Cherry Studio's message toolbar, this release adds cancellable streaming translation: cancel reaches the HTTP request and the DSH provider signal, so partial text is never persisted; answer choices show the model and a short preview; clipboard success is awaited and failures are reported. Structured DSH error/aborted finishes are no longer treated as successful answers.
 
 ## Reliability follow-up in 1.9.1
 
@@ -85,7 +90,7 @@ Or from a packed tarball:
 
 ```bash
 npm pack
-dsh plugin --profile web add file:./dsh-message-toolbar-1.9.1.tgz
+dsh plugin --profile web add file:./dsh-message-toolbar-1.10.0.tgz
 ```
 
 Then restart DSH — host and client both load at startup.

@@ -3,8 +3,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import http from 'node:http';
 import { EventEmitter } from 'node:events';
 import { spawnSync } from 'node:child_process';
+import { clientHarness, state } from './helpers/client-harness.mjs';
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'mtt-host-regression-'));
 process.env.USERPROFILE = home;
@@ -298,6 +300,160 @@ test('the first translation response includes its source for immediate bilingual
   assert.equal(result.payload.origin, 'answer 1');
 });
 
+test('disconnecting a streaming translation aborts the provider signal without caching partial text', async () => {
+  reset(); const h = harness();
+  let streamStarted;
+  const started = new Promise((resolve) => { streamStarted = resolve; });
+  let release;
+  const aborted = new Promise((resolve) => { release = resolve; });
+  h.ctx.llm.stream = async function* (request) {
+    h.requests.push(request);
+    streamStarted();
+    yield { type: 'text-delta', text: 'partial translation' };
+    await aborted;
+    request.signal.throwIfAborted();
+  };
+  const stream = h.postStream({ action: 'translate', turn: 1, text: 'answer 1', lang: 'zh', stream: true });
+  await started;
+  assert.ok(h.requests[0].signal instanceof AbortSignal);
+  assert.equal(h.requests[0].signal.aborted, false);
+
+  stream.close();
+  await new Promise((resolve) => setImmediate(resolve));
+  release();
+  await stream.completion;
+  assert.equal(h.requests[0].signal.aborted, true);
+  assert.equal(store.translationFor('session-test', 'turn:1', 'zh'), undefined);
+  assert.equal(store.shownForSession('session-test')['1'], undefined);
+  assert.equal(stream.response.body.includes('"type":"done"'), false);
+  assert.equal(stream.response.listenerCount('close'), 0);
+});
+
+test('a translation disconnected before session loading never starts a provider request', async () => {
+  reset(); const h = harness(); let release;
+  const loading = new Promise((resolve) => { release = resolve; });
+  h.ctx.sessionQuery.observeSession = () => loading;
+  const stream = h.postStream({ action: 'translate', eventSeq: 2, lang: 'zh', stream: true });
+  stream.close();
+  release(h.session);
+  await stream.completion;
+  assert.equal(h.requests.length, 0);
+  assert.equal(store.shownForSession('session-test')['1'], undefined);
+});
+
+test('the DSH worker tunnel ending its response still cancels the translation provider', async () => {
+  reset(); const h = harness();
+  let started, unblock;
+  const ready = new Promise((resolve) => { started = resolve; });
+  const blocked = new Promise((resolve) => { unblock = resolve; });
+  h.ctx.llm.stream = async function* (request) {
+    h.requests.push(request);
+    started();
+    yield { type: 'text-delta', text: 'partial' };
+    await blocked;
+    request.signal.throwIfAborted();
+  };
+  const stream = h.postStream({ action: 'translate', eventSeq: 2, lang: 'zh', stream: true });
+  await ready;
+  // The worker response provides on/off but no Node removeListener method.
+  stream.response.removeListener = undefined;
+  stream.response.off = (name, listener) => EventEmitter.prototype.removeListener.call(stream.response, name, listener);
+  stream.response.writableEnded = true;
+  stream.response.emit('close');
+  unblock();
+  await stream.completion;
+  assert.equal(h.requests[0].signal.aborted, true);
+  assert.equal(store.translationFor('session-test', 2, 'zh'), undefined);
+});
+
+test('a slow session lookup cannot supersede a newer translation of the same turn', async () => {
+  reset(); const h = harness();
+  let releaseFirst;
+  const firstRead = new Promise((resolve) => { releaseFirst = resolve; });
+  let count = 0;
+  h.ctx.sessionQuery.observeSession = () => ++count === 1 ? firstRead : h.session;
+  const earlier = h.postStream({ action: 'translate', eventSeq: 2, lang: 'zh', stream: true });
+  const later = h.postStream({ action: 'translate', turn: 1, text: 'answer 1', lang: 'fr', stream: true });
+  await later.completion;
+  releaseFirst(h.session);
+  await earlier.completion;
+
+  assert.equal(h.requests.length, 1);
+  assert.equal(store.shownForSession('session-test')['1'], 'fr');
+  assert.equal(store.translationFor('session-test', 2, 'zh'), undefined);
+});
+
+test('closing a translation invalidates the pending session lookup for that turn', async () => {
+  reset(); const h = harness();
+  let release;
+  h.ctx.sessionQuery.observeSession = () => new Promise((resolve) => { release = resolve; });
+  const stream = h.postStream({ action: 'translate', eventSeq: 2, lang: 'zh', stream: true });
+  const off = await h.post({ action: 'translate-off', turn: 1 });
+  assert.equal(off.status, 200);
+  release(h.session);
+  await stream.completion;
+  assert.equal(h.requests.length, 0);
+  assert.equal(store.shownForSession('session-test')['1'], undefined);
+});
+
+test('translate-off aborts only the active translation for its turn, even when addressed by eventSeq', async () => {
+  reset(); const h = harness();
+  const started = [];
+  const releases = [];
+  h.ctx.llm.stream = async function* (request) {
+    h.requests.push(request);
+    started.push(request);
+    yield { type: 'text-delta', text: 'partial' };
+    await new Promise((resolve) => { releases.push(resolve); });
+    request.signal.throwIfAborted();
+  };
+  const first = h.postStream({ action: 'translate', eventSeq: 2, lang: 'zh', stream: true });
+  const second = h.postStream({ action: 'translate', eventSeq: 6, lang: 'fr', stream: true });
+  while (started.length < 2 || releases.length < 2) await new Promise((resolve) => setImmediate(resolve));
+  const off = await h.post({ action: 'translate-off', turn: 1 });
+  assert.equal(off.status, 200);
+  assert.equal(started[0].signal.aborted, true);
+  assert.equal(started[1].signal.aborted, false);
+  releases.forEach((resolve) => resolve());
+  await Promise.all([first.completion, second.completion]);
+  assert.equal(store.translationFor('session-test', 2, 'zh'), undefined);
+  assert.equal(store.translationFor('session-test', 6, 'fr')?.text, 'partial');
+});
+
+test('client cancellation reaches the provider over a real HTTP streaming connection', { timeout: 5000 }, async (t) => {
+  reset(); const h = harness();
+  let providerStarted, routeFinished, providerSignal;
+  const started = new Promise((resolve) => { providerStarted = resolve; });
+  const completed = new Promise((resolve) => { routeFinished = resolve; });
+  h.ctx.llm.stream = async function* (request) {
+    providerSignal = request.signal;
+    providerStarted();
+    yield { type: 'text-delta', index: 0, text: 'partial' };
+    await new Promise((resolve) => {
+      if (request.signal.aborted) resolve();
+      else request.signal.addEventListener('abort', resolve, { once: true });
+    });
+    request.signal.throwIfAborted();
+  };
+  const server = http.createServer((request, response) => {
+    h.handle(request, response).finally(routeFinished);
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => { server.closeAllConnections(); return new Promise((resolve) => server.close(resolve)); });
+  const client = clientHarness(); client.store.set('session-test', state());
+  client.window.fetch = (_url, init) => fetch(`http://127.0.0.1:${server.address().port}/message-toolbar`, init);
+  const translating = client.translateInto('session-test', 1, { eventSeq: 2, lang: 'zh' });
+  await started;
+  assert.equal(providerSignal.aborted, false);
+  client.cancelTranslation('session-test', 1);
+  assert.equal(await translating, null);
+  await completed;
+  assert.equal(providerSignal.aborted, true);
+  assert.equal(client.store.getLiveTranslation('session-test', 1), null);
+  assert.equal(store.translationFor('session-test', 2, 'zh'), undefined);
+  assert.equal(store.shownForSession('session-test')['1'], undefined);
+});
+
 test('translation cache cannot reuse the previous answer under the same turn key', async () => {
   reset(); const h = harness();
   await h.post({ action: 'translate', turn: 1, text: 'old answer', lang: 'zh' });
@@ -306,6 +462,35 @@ test('translation cache cannot reuse the previous answer under the same turn key
   assert.equal(result.payload.cached, false);
   assert.equal(result.payload.origin, 'changed answer');
   assert.equal(h.requests.length, 2);
+});
+
+for (const kind of ['error', 'aborted']) {
+  for (const action of ['translate', 'answer-generate']) {
+    test(`${action} rejects a DSH ${kind} finish even after receiving partial text`, async () => {
+      reset(); const h = harness();
+      h.ctx.llm.stream = async function* () {
+        yield { type: 'text-delta', index: 0, text: 'incomplete text' };
+        yield { type: 'finish', reason: { kind, failure: { code: 'UPSTREAM_FAILURE', message: 'provider stopped' } } };
+      };
+      const result = await h.post({ action, turn: 1, text: 'answer 1', lang: 'zh' });
+      assert.equal(result.status, 409);
+      assert.match(result.payload.error, /provider stopped/);
+      assert.equal(store.translationFor('session-test', 'turn:1', 'zh'), undefined);
+      assert.equal(store.answerEntry('session-test', 1), undefined);
+    });
+  }
+}
+
+test('translation marks the DSH max-tokens finish as truncated', async () => {
+  reset(); const h = harness();
+  h.ctx.llm.stream = async function* () {
+    yield { type: 'text-delta', index: 0, text: 'incomplete translation' };
+    yield { type: 'finish', reason: { kind: 'max-tokens' } };
+  };
+  const result = await h.post({ action: 'translate', turn: 1, text: 'answer 1', lang: 'zh' });
+  assert.equal(result.status, 200);
+  assert.equal(result.payload.truncated, true);
+  assert.equal(store.translationFor('session-test', 'turn:1', 'zh')?.truncated, true);
 });
 
 test('answer generation rejects a failed stream even after receiving partial text', async () => {

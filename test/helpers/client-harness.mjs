@@ -129,11 +129,11 @@ export function clientHarness() {
     if (name === '@deepseek-ai/dsh-client-ui-primitives') return primitives;
     throw new Error('Unexpected require ' + name);
   };
-  const exports = ['store', 'AnswerCard', 'AssistantToolbar', 'UserRow', 'translateInto', 'answerMutate',
-    'nativeHideStyle', 'railTarget', 'outlineFace', 'streamOperation', 'patchRailItems', 'rerunAfterRevert'];
+  const exports = `store, AnswerCard, AssistantToolbar, UserRow, translateInto, cancelTranslation, ringChoices, answerMutate,
+    nativeHideStyle, railTarget, outlineFace, streamOperation, patchRailItems, rerunAfterRevert`;
   const source = fs.readFileSync(new URL('../../plugin.client.js', import.meta.url), 'utf8')
-    .replace(/\nreturn \{\r?\n  inject:/, '\nreturn { __test: { ' + exports.join(',') + ' },\n  inject:');
-  const context = vm.createContext({ window, document, require, console, TextDecoder, URL,
+    .replace(/\nreturn \{\r?\n  inject:/, '\nreturn { __test: { ' + exports + ' },\n  inject:');
+  const context = vm.createContext({ window, document, require, console, TextDecoder, URL, AbortController,
     setTimeout: (fn) => { const id = ++timerId; timers.set(id, fn); return id; },
     clearTimeout: (id) => timers.delete(id),
   });

@@ -1,4 +1,5 @@
 import os from 'node:os';
+import { EventEmitter } from 'node:events';
 import { apply } from '../../lib/index.js';
 
 export function history(count = 2) {
@@ -74,10 +75,26 @@ export function harness(events = history(), { followupError } = {}) {
     await handler(request, response);
     return { status: response.status, payload: JSON.parse(response.body) };
   }
+  function postStream(body) {
+    const request = new EventEmitter();
+    request.method = 'POST'; request.url = '/message-toolbar';
+    const response = new EventEmitter();
+    Object.assign(response, { status: 0, body: '', headersSent: false, writableEnded: false, destroyed: false,
+      writeHead(status) { this.status = status; this.headersSent = true; },
+      flushHeaders() {},
+      write(value) { if (!this.destroyed) this.body += value; },
+      end(value) { this.body += value ?? ''; this.writableEnded = true; },
+      close() { this.destroyed = true; this.emit('close'); },
+    });
+    const completion = handler(request, response);
+    request.emit('data', Buffer.from(JSON.stringify({ sessionId: 'session-test', ...body })));
+    request.emit('end');
+    return { response, completion, close: () => response.close() };
+  }
   const emit = (type, payload) => {
     for (const listener of listeners.get(type) ?? []) listener(payload);
   };
   const listenerCount = () => [...listeners.values()].reduce((total, bucket) => total + bucket.size, 0);
-  return { post, handle: handler, events, ctx, agent, session, dispatch, emit, listenerCount, sent, selected, requests, cancelled: () => cancelled };
+  return { post, postStream, handle: handler, events, ctx, agent, session, dispatch, emit, listenerCount, sent, selected, requests, cancelled: () => cancelled };
 }
 

@@ -27,6 +27,131 @@ test('deleting an answer retires its live translation before it can complete', a
   assert.equal(h.render(h.AnswerCard, props).length, 0);
 });
 
+test('canceling a translation aborts its request and releases the live translation without writeback', async () => {
+  const h = clientHarness(); h.store.set('s', state());
+  const requestStarted = deferred(); let requestSignal;
+  h.window.fetch = (_url, init) => new Promise((_resolve, reject) => {
+    requestSignal = init.signal;
+    requestStarted.resolve();
+    requestSignal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })));
+  });
+  const translating = h.translateInto('s', 1, { eventSeq: 5, lang: 'zh' });
+  await requestStarted.promise;
+  assert.equal(requestSignal.aborted, false);
+  assert.ok(h.store.getLiveTranslation('s', 1));
+
+  assert.equal(h.cancelTranslation('s', 1), true);
+  assert.equal(requestSignal.aborted, true);
+  assert.equal(await translating, null);
+  assert.equal(h.store.getLiveTranslation('s', 1), null);
+  assert.deepEqual(h.store.get('s').state.translations, {});
+  assert.deepEqual(h.store.get('s').state.shown, {});
+});
+
+test('answer choice rows identify their reply alongside the model label', () => {
+  const h = clientHarness();
+  const choices = h.ringChoices({ active: 2, turns: [1, 2], models: {
+    1: { provider: 'p', model: 'alpha' }, 2: { provider: 'p', model: 'beta' },
+  } }, null, [
+    { turn: 1, answerText: 'first answer preview' },
+    { turn: 2, answerText: 'selected answer preview' },
+  ]);
+  assert.match(h.render(() => choices.items[0].label, {}).map(textOf).join(''), /alpha.*first answer preview/);
+  assert.match(h.render(() => choices.items[1].label, {}).map(textOf).join(''), /beta.*selected answer preview/);
+  assert.equal(choices.selectedId, '2');
+});
+
+test('the answer menu previews each edited reply and does not label an empty answer with its question', () => {
+  const h = clientHarness();
+  h.store.set('s', state({ turns: [
+    { turn: 1, answerText: 'original source' }, { turn: 2, answerText: 'old source' }, { turn: 3, text: 'question without reply' },
+  ], runs: { 1: { turns: [1, 2, 3], active: 2 } },
+  answers: { 2: { active: 'native', items: [], override: { text: 'edited second answer' } } } }));
+  const ringMenu = openAnswerMenu(h, 2);
+  const rowText = ringMenu.props.items.map((item) => h.render(() => item.label, {}).map(textOf).join(''));
+  assert.match(rowText[1], /edited second answer/);
+  assert.doesNotMatch(rowText[0], /edited second answer/);
+  assert.doesNotMatch(rowText[2], /question without reply/);
+});
+
+function openAnswerMenu(h, turn) {
+  const draw = () => h.render(h.AssistantToolbar, { sessionId: 's', turn });
+  const menu = () => findAll(draw(), (node) => node.type === 'menu'
+    && (node.props.anchor?.props.className || '').includes('mtt-ring-num'))[0];
+  menu().props.anchor.props.onClick();
+  return menu();
+}
+
+test('an answer group shows the selected legacy variant and bounds its menu preview', () => {
+  const h = clientHarness();
+  const longReply = 'visible legacy answer ' + '段落 '.repeat(5000);
+  h.store.set('s', state({ runs: { 1: { turns: [1, 2], active: 2, models: { 1: { model: 'native-model' } } } },
+    answers: { 1: { active: 'v1', items: [{ id: 'v1', model: 'legacy-model', text: longReply }],
+      override: { text: 'hidden native edit' } } } }));
+
+  const menu = openAnswerMenu(h, 2);
+  const first = h.render(() => menu.props.items[0].label, {});
+  const preview = byClass(first, 'mtt-answer-choice-preview')[0];
+  assert.match(first.map(textOf).join(''), /legacy-model.*visible legacy answer/);
+  assert.ok(textOf(preview).length <= 120);
+  assert.ok((preview.props.title || '').length <= 120);
+});
+
+test('the toolbar can stop a translation even after mounting during its live stream', async () => {
+  const h = clientHarness(); h.store.set('s', state());
+  const pending = deferred();
+  h.window.fetch = () => pending.promise;
+  const translating = h.translateInto('s', 1, { eventSeq: 5, lang: 'zh' });
+  const stop = findAll(h.render(h.AssistantToolbar, props), (node) => node.type === 'button' && node.props.title === 'Stop translating')[0];
+  assert.ok(stop, 'the live request exposes a stop button, not a disabled language picker');
+  assert.notEqual(stop.props.disabled, true);
+  stop.props.onClick();
+  assert.equal(h.store.getLiveTranslation('s', 1), null);
+  pending.resolve(streamResponse([{ type: 'done', payload: { turn: 1, seq: 5, lang: 'zh', text: 'late' } }]));
+  assert.equal(await translating, null);
+  assert.equal(Object.keys(h.store.get('s').state.translations).length, 0);
+  const tree = h.render(h.AssistantToolbar, props);
+  assert.ok(findAll(tree, (node) => node.type === 'button' && node.props.title === 'Translate')[0]);
+});
+
+test('a confirmed translation becomes visible without waiting for the connection to close', async () => {
+  const h = clientHarness(); h.store.set('s', state());
+  const eof = deferred(); let reads = 0;
+  const bytes = new TextEncoder().encode(JSON.stringify({ type: 'done', payload: {
+    turn: 1, seq: 5, lang: 'zh', text: '完整译文', origin: 'original answer',
+  } }) + '\n');
+  h.window.fetch = async () => ({ ok: true, body: { getReader: () => ({
+    read: async () => ++reads === 1 ? { done: false, value: bytes } : eof.promise,
+    cancel() { return eof.promise; }, releaseLock() {},
+  }) } });
+  const translating = h.translateInto('s', 1, { eventSeq: 5, lang: 'zh' });
+  try {
+    await flush();
+    assert.equal(h.store.get('s').state.translations[5]?.zh?.text, '完整译文');
+    assert.equal(h.cancelTranslation('s', 1), false);
+    assert.equal((await translating).text, '完整译文');
+  } finally {
+    eof.resolve({ done: true });
+    await translating;
+  }
+});
+
+test('a canceled old translation cannot clear or overwrite a same-turn retry', async () => {
+  const h = clientHarness(); h.store.set('s', state());
+  const first = deferred(), second = deferred(); let request = 0;
+  h.window.fetch = () => [first, second][request++].promise;
+  const old = h.translateInto('s', 1, { eventSeq: 5, lang: 'zh' });
+  h.cancelTranslation('s', 1);
+  const retry = h.translateInto('s', 1, { eventSeq: 5, lang: 'fr' });
+  first.resolve(streamResponse([{ type: 'done', payload: { turn: 1, seq: 5, lang: 'zh', text: 'stale' } }]));
+  assert.equal(await old, null);
+  assert.equal(h.store.getLiveTranslation('s', 1)?.lang, 'fr');
+  second.resolve(streamResponse([{ type: 'done', payload: { turn: 1, seq: 5, lang: 'fr', text: 'nouveau' } }]));
+  assert.equal((await retry).text, 'nouveau');
+  assert.equal(h.store.get('s').state.translations[5].zh, undefined);
+  assert.equal(h.store.get('s').state.shown[1], 'fr');
+});
+
 test('an incomplete file revert stops regeneration and reports files already reverted', async () => {
   const h = clientHarness(), actions = [];
   h.store.set('s', state());
@@ -121,6 +246,70 @@ test('copy on a grouped edited answer copies the visible override', () => {
   h.window.navigator.clipboard.writeText = (text) => clipped.push(text);
   const copy = findAll(h.render(h.AssistantToolbar, props), (node) => node.props['data-mtt'] === 'copy-answer')[0];
   assert.ok(copy); copy.props.onClick(); assert.equal(clipped[0], 'visible override');
+});
+
+test('copying an edited answer reports success only after the clipboard write succeeds', async () => {
+  const h = clientHarness();
+  h.store.set('s', state({ answers: { 1: { active: 'native', items: [], override: { text: 'visible override' } } } }));
+  const written = deferred(); h.window.navigator.clipboard.writeText = () => written.promise;
+  const copy = findAll(h.render(h.AssistantToolbar, props), (node) => node.props['data-mtt'] === 'copy-answer')[0];
+  const copying = copy.props.onClick();
+  let tree = h.render(h.AssistantToolbar, props);
+  assert.equal(findAll(tree, (node) => node.props['data-mtt'] === 'copy-answer')[0].props.title, 'Copy this answer');
+  written.resolve(); await copying;
+  tree = h.render(h.AssistantToolbar, props);
+  assert.equal(findAll(tree, (node) => node.props['data-mtt'] === 'copy-answer')[0].props.title, 'Copied');
+});
+
+test('failed clipboard writes surface an error instead of marking the answer copied', async () => {
+  const h = clientHarness();
+  h.store.set('s', state({ answers: { 1: { active: 'native', items: [], override: { text: 'visible override' } } } }));
+  h.window.navigator.clipboard.writeText = () => Promise.reject(new Error('clipboard denied'));
+  const copy = findAll(h.render(h.AssistantToolbar, props), (node) => node.props['data-mtt'] === 'copy-answer')[0];
+  await copy.props.onClick();
+  const tree = h.render(h.AssistantToolbar, props);
+  assert.equal(findAll(tree, (node) => node.props['data-mtt'] === 'copy-answer')[0].props.title, 'Copy this answer');
+  assert.match(tree.map(textOf).join(''), /clipboard denied/);
+});
+
+test('a late earlier clipboard success cannot override a newer copy failure', async () => {
+  const h = clientHarness();
+  h.store.set('s', state({ answers: { 1: { active: 'native', items: [], override: { text: 'edited answer' } } } }));
+  const first = deferred(); let attempts = 0;
+  h.window.navigator.clipboard.writeText = () => ++attempts === 1
+    ? first.promise : Promise.reject(new Error('latest copy denied'));
+  const copy = () => findAll(h.render(h.AssistantToolbar, props), (node) => node.type === 'button'
+    && node.props['data-mtt'] === 'copy-answer')[0];
+  const earlier = copy().props.onClick();
+  await copy().props.onClick();
+  first.resolve();
+  await earlier;
+  assert.notEqual(copy().props.title, 'Copied');
+  assert.match(h.render(h.AssistantToolbar, props).map(textOf).join(''), /latest copy denied/);
+});
+
+test('copying a translation reports a failed clipboard write without claiming success', async () => {
+  const h = clientHarness();
+  h.store.set('s', state({ shown: { 1: 'zh' }, translations: { 5: { zh: { turn: 1, text: '译文' } } } }));
+  h.window.navigator.clipboard.writeText = () => { throw new Error('clipboard unavailable'); };
+  const menu = findAll(h.render(h.AssistantToolbar, props), (node) => node.type === 'menu'
+    && node.props.items?.some((item) => item.id === 'message-toolbar/copy-translation'))[0];
+  assert.ok(menu);
+  await menu.props.onSelect('message-toolbar/copy-translation'); await flush();
+  const text = h.render(h.AssistantToolbar, props).map(textOf).join('');
+  assert.match(text, /clipboard unavailable/);
+  assert.doesNotMatch(text, /Translation copied/);
+});
+
+test('copying a question without clipboard access reports a usable error', async () => {
+  const h = clientHarness(); h.store.set('s', state());
+  h.window.navigator.clipboard = undefined;
+  const rowProps = { ...props, text: 'question' };
+  const copy = findAll(h.render(h.UserRow, rowProps), (node) => node.props['data-mtt'] === 'copy')[0];
+  await copy.props.onClick();
+  const tree = h.render(h.UserRow, rowProps);
+  assert.equal(findAll(tree, (node) => node.props['data-mtt'] === 'copy')[0].props.title, 'Copy');
+  assert.match(tree.map(textOf).join(''), /clipboard|Clipboard/);
 });
 
 test('a grouped answer shows the completed translation beside its source', () => {
