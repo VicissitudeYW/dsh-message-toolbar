@@ -7,6 +7,10 @@
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-111827.svg"></a>
 </p>
 
+<p align="center">
+  <a href="assets/showcase/message-toolbar.png"><img src="assets/showcase/message-toolbar.png" alt="Message toolbar and 2/2 answer switcher below an answer in a sample DSH conversation" width="720"></a>
+</p>
+
 ## Install
 
 Works with DSH Desktop and Web from `0.2.2-rc.5` through `0.2.x`. Check that `dsh --version` runs in your terminal first.
@@ -40,6 +44,18 @@ Restart DSH after installing. The toolbar appears below your messages.
 - **Pick an answer and keep chatting.** Use the arrows below an answer, or click `2/3` to pick one. The conversation returns to that answer and its follow-ups, and your next message uses that history.
 - **Edit or delete.** When editing a question, **Save** keeps the edit and **Send** generates a reply. Deleting the current answer selects another available answer. The switcher disappears when only one remains.
 - **Translate and copy.** Read the translation alongside the original and copy either one.
+
+### Screenshots
+
+These screenshots use a sample conversation and a simulated local model in an isolated DSH Web profile. Click an image to open it at full size.
+
+**Edit an answer.** Click the edit icon below the answer, make your changes, and choose **Save**.
+
+[![The DSH answer editor with its Save button in the top right](assets/showcase/edit-answer.png)](assets/showcase/edit-answer.png)
+
+**Compare the original and translation.** Choose a language from the translation menu. The translated text appears below the corresponding original paragraph.
+
+[![Chinese source text and its English translation paired paragraph by paragraph in a DSH answer](assets/showcase/bilingual-translation.png)](assets/showcase/bilingual-translation.png)
 
 ## Update
 

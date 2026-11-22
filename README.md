@@ -7,6 +7,10 @@
   <a href="LICENSE"><img alt="许可证：MIT" src="https://img.shields.io/badge/license-MIT-111827.svg"></a>
 </p>
 
+<p align="center">
+  <a href="assets/showcase/message-toolbar.png"><img src="assets/showcase/message-toolbar.png" alt="DSH 示例会话的回答下方显示消息工具栏和 2/2 回答切换控件" width="720"></a>
+</p>
+
 ## 安装
 
 支持 DSH `0.2.2-rc.5` 至 `0.2.x` 的桌面版和网页版。先确认终端能运行 `dsh --version`。
@@ -40,6 +44,18 @@ dsh plugin --profile web add "file:$(pwd)"
 - **选个回答接着聊：** 点击回答下方的箭头切换，或点 `2/3` 直接选。切换时会恢复该回答的后续问答，下一次追问也沿用这段历史。
 - **编辑或删除：** 编辑提问时，点**保存**只修改内容，点**发送**会重答。删除当前回答后会切到另一条可用回答；只剩一条时隐藏切换器。
 - **翻译和复制：** 在原文旁查看译文，也可以分别复制两种文本。
+
+### 用法截图
+
+截图取自隔离的 DSH 网页会话，使用示例问题和本地模拟模型。点击图片可查看原图。
+
+**编辑回答。** 点击回答下方的编辑图标，修改内容后点「保存」。
+
+[![DSH 回答编辑框，右上角有保存按钮](assets/showcase/edit-answer.png)](assets/showcase/edit-answer.png)
+
+**对照原文与译文。** 点击翻译图标选择语言，译文显示在对应的原文段落下方。
+
+[![同一条 DSH 回答中逐段显示中文原文和英文译文](assets/showcase/bilingual-translation.png)](assets/showcase/bilingual-translation.png)
 
 ## 升级
 
