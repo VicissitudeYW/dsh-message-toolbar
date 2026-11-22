@@ -175,11 +175,11 @@ test('unchanged and already removed files do not block regeneration after a safe
     const body = JSON.parse(init.body); actions.push(body.action);
     return jsonResponse(body.action === 'revert'
       ? { reverted: [{ path: 'safe.txt' }], skipped: [{ reason: 'unchanged' }, { reason: 'already-gone' }] }
-      : { sessionId: 'target', navigationToken: 'token' });
+      : { sessionId: 's', inPlace: true });
   };
   const result = await h.rerunAfterRevert({ sessionId: 's', turn: 1 });
   assert.equal(result.revertedCount, 1);
-  assert.deepEqual(actions, ['revert', 'context-branch']);
+  assert.deepEqual(actions, ['revert', 'context-update']);
 });
 
 test('a grouped visible answer renders its editor and saved override', () => {
@@ -383,10 +383,10 @@ test('a successful unchanged GET is not fetched a second time', async () => {
 
 test('replayed prompt hiding combines with answer and translation hiding', () => {
   const h = clientHarness();
-  h.nativeHideStyle.set('prompt:1', 1, 'prompt');
-  h.nativeHideStyle.set('tail:1', 1, 'answer');
+  h.nativeHideStyle.set('prompt:1', 1, 'prompt', 's');
+  h.nativeHideStyle.set('tail:1', 1, 'answer', 's');
   assert.match(h.nativeHideStyle.node.textContent, /assistant-step/);
-  h.nativeHideStyle.set('tail:1', 1, 'translate');
+  h.nativeHideStyle.set('tail:1', 1, 'translate', 's');
   assert.match(h.nativeHideStyle.node.textContent, /assistant-step/);
 });
 
@@ -459,7 +459,7 @@ test('pending attachments block both Send and the keyboard shortcut until upload
       const body = JSON.parse(init.body); sent.push(body);
       if (body.action === 'prompt-save') return jsonResponse({ prompts: { 1: { text: body.text, files: body.files } } });
       if (body.action === 'changes') return jsonResponse({ supported: false });
-      return jsonResponse({ sessionId: 'target', navigationToken: 'token' });
+      return jsonResponse({ sessionId: 's', inPlace: true });
     }
     return jsonResponse(state());
   };
@@ -468,12 +468,12 @@ test('pending attachments block both Send and the keyboard shortcut until upload
   assert.equal(button(tree, 'Send').props.disabled, true);
   // Invoke the handler captured before React could render the pending upload.
   byClass(beforeDrop, 'mtt-answer-edit-input')[0].props.onKeyDown({ key: 'Enter', ctrlKey: true, preventDefault() {} });
-  await flush(); assert.equal(sent.some((body) => body.action === 'context-branch' && body.operation === 'retry'), false);
+  await flush(); assert.equal(sent.some((body) => body.action === 'context-update' && body.operation === 'retry'), false);
   pending.resolve(jsonResponse({ ok: true, value: { file: { attachmentId: 'file-1', name: 'report.pdf' } } }));
   await flush(); tree = draw();
   assert.equal(button(tree, 'Send').props.disabled, false);
   await button(tree, 'Send').props.onClick();
-  assert.equal(sent.find((body) => body.action === 'context-branch' && body.operation === 'retry').files[0].attachment.attachmentId, 'file-1');
+  assert.equal(sent.find((body) => body.action === 'context-update' && body.operation === 'retry').files[0].attachment.attachmentId, 'file-1');
 });
 
 test('a failed upload stays explicit and prevents sending an incomplete question', async () => {
@@ -486,7 +486,7 @@ test('a failed upload stays explicit and prevents sending an incomplete question
   await flush(); let tree = draw();
   assert.match(tree.map(textOf).join(''), /upload offline/);
   await button(tree, 'Send').props.onClick(); await flush(); tree = draw();
-  assert.equal(sent.some((body) => body.action === 'context-branch' && body.operation === 'retry'), false);
+  assert.equal(sent.some((body) => body.action === 'context-update' && body.operation === 'retry'), false);
   assert.match(tree.map(textOf).join(''), /upload offline/);
 });
 
@@ -501,13 +501,13 @@ for (const retry of [false, true]) {
       }
       const body = JSON.parse(init.body); sent.push(body);
       if (body.action === 'prompt-save') return jsonResponse({ prompts: { 1: { text: body.text, files: body.files } } });
-      return jsonResponse({ supported: false, sessionId: 'target', navigationToken: 'token' });
+      return jsonResponse(body.action === 'changes' ? { supported: false } : { sessionId: 's', inPlace: true });
     };
     const draw = editor(h);
     drop(draw(), [{ name: 'report.pdf', type: 'application/pdf' }]); await flush();
     drop(draw(), [{ name: retry ? 'report.pdf' : 'other.pdf', type: 'application/pdf' }]); await flush();
     await button(draw(), 'Send').props.onClick(); await flush();
-    const replay = sent.find((body) => body.action === 'context-branch' && body.operation === 'retry');
+    const replay = sent.find((body) => body.action === 'context-update' && body.operation === 'retry');
     assert.equal(Boolean(replay), retry);
     if (retry) assert.equal(replay.files[0].attachment.attachmentId, 'file-2');
     else assert.match(draw().map(textOf).join(''), /upload offline/);

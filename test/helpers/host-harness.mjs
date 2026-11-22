@@ -14,7 +14,7 @@ export function history(count = 2) {
   });
 }
 
-export function harness(events = history(), { followupError, flushError, createError, deferFollowupMessage = false } = {}) {
+export function harness(events = history(), { followupError, flushError, deferFollowupMessage = false, cold = false } = {}) {
   let handler;
   const sent = [], selected = [], requests = [];
   const listeners = new Map();
@@ -42,13 +42,26 @@ export function harness(events = history(), { followupError, flushError, createE
       current() { return currentSelection && { ...currentSelection }; },
       select(selection) { selected.push(selection); currentSelection = { ...selection }; session.append('model/selection', selection); },
     },
-    followup(message) { if (followupError) throw followupError; sent.push(message); },
+    followup(message) {
+      if (followupError) throw followupError;
+      sent.push(message);
+      this.queuedMessage = message;
+      if (!deferFollowupMessage) this.appendQueuedMessage();
+    },
+    appendQueuedMessage() {
+      if (this.queuedMessage === undefined) throw new Error('no queued message');
+      const turn = (events.findLast(event => event.type === 'turn/start')?.data.turn ?? 0) + 1;
+      session.append('turn/start', { turn });
+      session.append('user/message', structuredClone(this.queuedMessage));
+      this.queuedMessage = undefined;
+      return turn;
+    },
     runMaintenance(fn) { return fn(); },
     cancel() { cancelled++; },
     async whenIdle() {},
   };
-  const children = [], flushed = [], disposed = [], archived = [];
-  const sessions = new Map([['session-test', session]]), agents = new Map([['session-test', agent]]);
+  const children = [], flushed = [], disposed = [], archived = [], resumed = [];
+  const sessions = new Map([['session-test', session]]), agents = new Map(cold ? [] : [['session-test', agent]]);
   const registry = { archivedSessionIds: archived,
     async archiveSession(id) { if (!archived.includes(id)) archived.push(id); },
     async unarchiveSession(id) { const at = archived.indexOf(id); if (at >= 0) archived.splice(at, 1); },
@@ -56,10 +69,30 @@ export function harness(events = history(), { followupError, flushError, createE
   };
   const ctx = {
     effect(fn) { fn(); },
+    on() {},
     webServer: { register(route) { handler = route.handler; return () => {}; } },
     sessions: { get(id) { return sessions.get(id); }, async flush(subject) { if (flushError) throw flushError; flushed.push(subject.header.id); return true; } },
-    agents: { get(id) { return agents.get(id); }, async create(options) {
-      if (createError) throw createError;
+    agents: {
+      get(id) { return agents.get(id); },
+      async create() { throw new Error('The toolbar must not create a session.'); },
+      async resume(options) {
+        if (options.resumeSessionId !== session.header.id) throw new Error('Wrong session resumed.');
+        resumed.push(options);
+        currentSelection = options.agentOptions;
+        agents.set(options.resumeSessionId, agent);
+        return { agent, async dispose() { disposed.push(options.resumeSessionId); } };
+      },
+    },
+    sessionQuery: { async observeSession(id) { if (!sessions.has(id)) throw new Error('missing'); return sessions.get(id); },
+      async listSessions() { return [...sessions.values()].map(value => ({ header: value.header, events: value.events })); } },
+    get(name) { return name === 'workspaceRegistry' ? registry : undefined; },
+    llm: {
+      listProviders() { return [{ id: 'p' }]; },
+      async listModels() { return [{ id: 'm' }]; },
+      async *stream(request) { requests.push(request); yield { type: 'text-delta', text: 'translated' }; },
+    },
+  };
+  function seedSession(options) {
       const childEvents = structuredClone(options.seed);
       const childSession = { header: { id: options.sessionId, ...options.meta }, events: childEvents,
         inheritedEventCount: options.inheritedEventCount,
@@ -82,20 +115,10 @@ export function harness(events = history(), { followupError, flushError, createE
         },
         async whenIdle() {}, cancel() {}, runMaintenance(fn) { return fn(); },
       };
-      await options.setup?.(ctx, child);
       sessions.set(options.sessionId, childSession); agents.set(options.sessionId, child);
       children.push(child);
       return { agent: child, async dispose() { disposed.push(options.sessionId); agents.delete(options.sessionId); } };
-    } },
-    sessionQuery: { async observeSession(id) { if (!sessions.has(id)) throw new Error('missing'); return sessions.get(id); },
-      async listSessions() { return [...sessions.values()].map(value => ({ header: value.header, events: value.events })); } },
-    get(name) { return name === 'workspaceRegistry' ? registry : undefined; },
-    llm: {
-      listProviders() { return [{ id: 'p' }]; },
-      async listModels() { return [{ id: 'm' }]; },
-      async *stream(request) { requests.push(request); yield { type: 'text-delta', text: 'translated' }; },
-    },
-  };
+  }
   apply(ctx);
   async function post(body, raw) {
     const text = raw ?? JSON.stringify({ sessionId: 'session-test', ...body });
@@ -138,7 +161,7 @@ export function harness(events = history(), { followupError, flushError, createE
       { writeHead(value) { status = value; }, end(value) { body += value; } });
     return { status, payload: JSON.parse(body) };
   }
-  return { post, get, postStream, handle: handler, events, ctx, agent, session, dispatch, emit, listenerCount, sent, selected, requests,
-    children, flushed, disposed, archived, cancelled: () => cancelled };
+  return { post, get, postStream, seedSession, handle: handler, events, ctx, agent, session, dispatch, emit, listenerCount, sent, selected, requests,
+    children, flushed, disposed, archived, resumed, cancelled: () => cancelled };
 }
 

@@ -1,12 +1,13 @@
 # Architecture
 
-`dsh-message-toolbar` ships a dependency-free ESM host and a browser client. Version 1.11.0 uses native DSH sessions for every consequential message operation. Display overlays remain for translation and for reading old plugin state before migration.
+`dsh-message-toolbar` ships a dependency-free ESM host and a browser client. In 1.12, the original DSH agent generates every new answer. The plugin records the selected answer and its follow-ups separately from DSH's append-only log.
 
 | File | Responsibility |
 | --- | --- |
-| `lib/index.js` | `/message-toolbar` HTTP route, native agent creation, version families, focus and translation |
-| `lib/context-branches.js` | Copied seed construction, legacy normalization, stable question/answer identities |
-| `lib/session-record.js` | Live/cold log reads and public seed options |
+| `lib/index.js` | HTTP route, same-agent retry, model request hook, legacy navigation and translation |
+| `lib/in-session-context.js` | Selected answer history, legacy display compatibility, model and UI projections |
+| `lib/context-history.js` | Native turn reader and legacy state detection |
+| `lib/session-record.js` | Live and persisted session reads |
 | `lib/toolbar-logic.js` | Family traversal and turn tree helpers |
 | `lib/state-store.js` | Validated plugin state, translation task ownership and durable navigation |
 | `lib/durable-state.js` | Cross-process file locking, mutation deltas and atomic replacement |
@@ -14,52 +15,23 @@
 | `lib/workspace-revert.js` | Validated inverse hunks, staging, revalidation and recovery |
 | `plugin.client.js` | Toolbar, editors, answer selection, translation, navigation and version tree |
 | `lib/client.js` | Generated `window.__ModuleLoader__` bundle; never edited directly |
-| `test/native-context.integration.mjs` | Optional installed DSH engine verification using a scripted model and temporary storage |
+| `test/in-session-context.integration.mjs` | Installed DSH engine verification with a scripted model and temporary storage |
 
 `package.json` points to `cordis.patch.yml` for the host plugin and declares the client service dependencies. `npm run build` wraps the source client with the host's React and stylesheet factory. `npm test` and `prepack` rebuild it automatically.
 
-## Native context branches
+## Same-session answer history
 
-DSH's append-only source log remains unchanged. The plugin calls public `agents.create({ seed, ... })` with an independently copied history and writes an ignorable `message-toolbar/version` marker into that seed. It does not import private DSH packages, patch the installation, replace a provider's request history, or use persistent surface replacements as temporary masks.
+Message operations use the current session ID throughout. Regeneration admits a new prompt through the existing agent's `followup`. The plugin associates the new answer with its question by the admitted prompt's ID. It records the current path and each answer's continuation in `state.json`. Selecting a different answer restores that answer's own follow-ups. Saving an edit keeps the surrounding messages and makes no model call. Deleting a question removes that turn from the selected history and keeps the later messages. Deleting an answer selects the preceding available answer and its continuation when possible. If there is no other answer, the question and its subsequent messages remain. The native events are preserved.
 
-The source session is a recoverable version. The newly opened native session is the composer's real destination, so its `deriveMessages()` determines subsequent model requests. Native tools, reasoning, attachments and streaming continue through DSH's ordinary agent loop.
+DSH's loop builds a frozen request from the native surface. Before it reaches a provider, the plugin's `llm/stream` listener forwards a projected request with the selected messages, current model controls, tool information and the original cancellation signal. DSH receives the normal stream and executes tools through the same agent. This extension runs only on changed or legacy toolbar sessions. Consumers of the raw DSH log, including native replay and export, still see the physical history.
 
-| Operation | Child history and generation |
-| --- | --- |
-| `retry` | Copy events before the target `turn/start`, then queue exactly one question with the selected text/attachments. The old answer and all later turns are absent. |
-| `edit-prompt` | Copy through the target closed turn, rewrite its user message, keep the current answer, and truncate later turns. Save makes no model request. |
-| `edit-answer` | Copy through the target closed turn and replace its final assistant text, retaining paired tool work. Clear the edited message's stream and opaque provider replay state so old text cannot override the edit. Later turns are truncated. |
-| `delete-answer` | Copy through the question, remove all assistant/tool history in that turn and later turns, then close the prompt-only lifecycle in child setup. Select another surviving answer if available; otherwise open the question-only child. |
-| `delete-question` | Copy only the history before the target turn. Its answer and continuation remain in the old version. |
-| `adopt` / `adopt-all` | Materialize the selected legacy display history as native messages without generation. A selected answer can be adopted through its turn, or the whole visible legacy history can be synchronized. |
+The projection retains automatic turns and the selected tool calls and results. A historical compaction checkpoint is reused only if it covers the same unchanged messages in the same order. Otherwise the projection uses the selected source messages. The plugin rejects a native compaction model request that includes discarded answers; a long selected history can still hit the model's context limit.
 
-The Session constructor owns its `session/end-seed` boundary. The plugin supplies the complete copied seed as inherited history; prompt-only step/turn closers are appended in the public agent setup hook after that boundary. Setup clears inherited queued inbox entries before the child driver starts. The installed-runtime test checks that these histories persist and can resume cold.
-
-Every created branch is flushed before success. Retry also flushes its queued prompt. A `false` flush result is an error, not an acknowledgement. Failure cancels/disposes the child and leaves the source available. A later state persistence failure cannot undo a model run already queued; HTTP success is never claimed for that failure.
-
-The branch inherits the source workspace, cwd, preset and title. `sessionTitle.rename` pins the existing title when available, with the same public `session/title` event as fallback. It is an ordinary session, not a subagent. File changes are not automatically undone by branching.
-
-### Stable answer choices
-
-Schema-2 markers carry the owning session ID, effect, inverse source session, and a complete per-turn `context` snapshot. An entry records a logical question ID and answer ID. Question grouping also hashes the exact prior message history and question content; equal turn numbers or repeated wording alone never join unrelated choices.
-
-A retry allocates a new answer ID. Editing the same answer retains its ID, so inherited copies and saved edits deduplicate instead of growing the selector. Deleting an answer records a durable identity tombstone, excluding that answer from all live choices while retaining old logs for explicit recovery.
-
-`GET` builds `contextChoices[turn] = { active, questionKey, items }`. An item names the real session and includes model and preview metadata. The current copy wins deduplication, followed by newer branch metadata and continuation information. Selecting an answer restores that branch's own continuation; it never splices the continuation of a different answer into it.
-
-A marker context is a complete snapshot, not a partial merge: deletions and rewinds must not resurrect identities from earlier markers. Schema-1 `message-toolbar/version` and older `message-tree/version` markers remain readable.
-
-### Legacy display history
-
-Versions before 1.11.0 used `runs`, `replays`, `prompts`, `answers` and `hidden` in plugin state. Those records remain readable. Normalization selects one real replay or text variant per question, applies prompt/answer overrides and hidden flags, remaps event references, and excludes discarded replay turns. Text-only legacy alternatives do not inherit the native alternative's discarded tool work.
-
-The first context mutation normalizes its source before building a seed. Selecting a legacy answer materializes that choice. The foreground composer automatically invokes `context-normalize` for old display changes and uses DSH's composer block during handoff when available. Unchanged compaction summaries survive; stale summaries are dropped in favor of their selected source messages. The source log is preserved, and a retry can reuse its previously migrated version when the source has not advanced. Invalid histories fail visibly.
-
-The retired mutation endpoints reject stale clients with a restart/update error. Read and translation APIs continue to support old data.
+Older display edits and choices are interpreted on first read and first model request. This path reads existing `runs`, `replays`, `prompts`, `answers` and `hidden` without rewriting DSH events or opening a migration session. Text-only legacy answers exclude the discarded answer's tool work. The first new toolbar mutation stores the selection in the current format.
 
 ## Navigation and version ownership
 
-A context operation prepares a durable `{ token, root, source, target, completed, archived }` navigation job. The client waits for the session list, then calls `uiWorkspace.openSession`. Opening an explicitly selected archived target first calls the public `workspaceRegistry.unarchiveSession` for that session. If automatic migration finds an archived copy, the composer offers an explicit reopen action.
+Navigation jobs remain for selecting an already existing conversation from the legacy version tree, or deleting a historical version card. The client waits for the session list, then calls `uiWorkspace.openSession`. Opening a selected archived conversation requires an explicit action and uses `workspaceRegistry.unarchiveSession`.
 
 The target's `conversation.composer.dock` component acknowledges the handoff with `focus` after it mounts, even when deletion left an empty transcript. Completion and cancellation only update pending navigation state. No toolbar action submits a new archive request to DSH.
 
@@ -67,7 +39,7 @@ Navigation serials discard obsolete client completions. Per-family host locks se
 
 Native DSH forks and subagents sharing `parentSession` remain separate conversations unless they have a recognized toolbar marker. Deleting the open version returns to its parent when available, or to another available version. If there is no other openable version, the deletion waits for the reader to open one. Deleting another version leaves the current conversation open.
 
-Branches are native sessions and may appear separately in the DSH sidebar. Deleting or restoring a version card changes its availability in the toolbar and preserves the session log.
+Historical versions created by 1.11 are native sessions and may appear separately in the DSH sidebar. Deleting or restoring their version cards changes availability in the toolbar and preserves the session log.
 
 ## HTTP contract
 
@@ -76,17 +48,17 @@ The plugin owns the same-origin `/message-toolbar` route.
 `GET ?sessionId=<id>` returns:
 
 - `sessionId`, `rootSessionId`, `versions`, message index and per-turn text/tool/finish facts;
-- `contextChoices`, `promptAttachments`, `pendingFocus`, `needsContextMigration`, `contextError`;
+- `contextChoices`, `promptAttachments`, `pendingFocus`, `contextError`, and `contextOrder` when legacy replies need to be placed earlier in the transcript;
 - `model`, `translations`, `shown`, `origins`, deleted-version IDs;
-- legacy `answers`, `runs`, `replays`, `prompts`, `hidden` for compatibility and migration.
+- `answers`, `runs`, `replays`, `prompts`, `hidden` for rendering and compatibility.
 
 `GET ?models=1` returns the native provider/model catalog. `GET ?rows=1` enables a diagnostic DOM-row report, capped at 400 rows on upload.
 
 | POST action | Payload and effect |
 | --- | --- |
-| `context-branch` | `sessionId, turn, operation, text?, files?, model?, stopPrevious?`; creates and flushes a native branch, returns its navigation target/token and created session ID |
-| `context-select` | `sessionId, turn, id`; resolves a live answer choice and prepares navigation, or materializes a legacy choice |
-| `context-normalize` | `sessionId`; materializes the current legacy selections without a model request |
+| `context-update` | `sessionId, turn, operation, id?, text?, files?, model?, stopPrevious?`; mutates the selected history and returns the same `sessionId` with `inPlace: true` |
+| `context-branch` / `context-select` | Compatibility aliases for in-session mutations; never navigate or create a session |
+| `context-normalize` | Compatibility acknowledgement for a session already interpreted in place |
 | `prepare-focus` | `sessionId, sourceSessionId`; validates same-family ownership and prepares a durable job |
 | `activate` | `sessionId`. Reopens the selected archived session via the public workspace registry. |
 | `focus` | `sessionId, token`; commits the prepared handoff after target mount |
@@ -109,20 +81,20 @@ The plugin owns the same-origin `/message-toolbar` route.
 | --- | --- |
 | `conversation.chat.assistant-actions` | `AssistantToolbar`: regenerate/model/edit/translate/delete and the real answer selector |
 | `conversation.chat.turnTail` | `AnswerCard`: bilingual translation, legacy overlays, editor and failed-turn actions |
-| `conversation.view` | `VersionsView`: branch tree and branch-level delete/restore |
-| `conversation.composer.dock` | `ContextFocus`: mount acknowledgement, migration prompt and focus errors |
+| `conversation.view` | `VersionsView`: navigation and card management for earlier native versions |
+| `conversation.composer.dock` | `ContextFocus`: mount acknowledgement and focus errors for legacy navigation |
 
 The source client is an IIFE returning `{ inject, apply }`. `TurnLocation` inputs are normalized with `turnNumberOf`. Model and language menus use DSH's native `Menu` when available, including keyboard navigation and checked rows; the count menu shows a model label and at most 120 characters of answer preview. The selector is immediately after the delete button and only appears with multiple live choices.
 
 User messages retain native attachment/reference rendering. A DOM decorator adds the question toolbar through a React root, identified by `data-chat-flow-kind`, `data-chat-turn` and the native bubble/stack class suffixes. It overlays the editor or suitable markdown while keeping reference chips native. `BodyBoundary` restores the native bubble on markdown-render failure; answer rendering falls back to plain text. DOM changes in future DSH releases may require decorator updates.
 
-Legacy display state still uses generated hide rules, stray-notice sweeps and outline filtering before migration. New edits/deletions do not depend on CSS to change model context. The outline follows the active native branch; old hidden/replay facts remain supported until synchronization.
+The transcript and outline read the selected path. Visibility rules, including notices next to a hidden turn, are scoped to each conversation pane so the same turn number in a separate card is unaffected.
 
 The store rejects stale GET snapshots after mutations and coalesces invalidation. HTTP streams validate NDJSON frames, UTF-8 boundaries and terminal status, release their reader, and settle on `done` without waiting for a connection close. Clipboard actions wait for the actual write and report failure; operation identities prevent old success feedback from replacing a newer error.
 
 ### Attachments
 
-Drop, paste and file picker use DSH's own binary upload route. The editor owns the whole attachment list, including removals; pending/failed uploads block Save and Send. Native branch messages retain uploaded file/image references, so normal DSH persistence and rendering serve them after reload. Legacy attachment overrides are normalized into those messages.
+Drop, paste and file picker use DSH's own binary upload route. The editor owns the whole attachment list, including removals; pending/failed uploads block Save and Send. Regeneration reuses the original session's attachment references. A saved edit supplies the updated references in the selected request.
 
 The editor follows native geometry (64px image tiles and 240x64 file cards), uses the host's file icon/size helpers, and releases object URLs. A picture can use its object URL until the attachment service provides a stored image URL.
 
@@ -136,14 +108,14 @@ Code fences, inline code and math are protected with numbered placeholders. Targ
 
 ## Plugin state and file recovery
 
-`~/.dsh/message-toolbar/state.json` remains schema 1. It contains deleted-version flags, translation cache/shown/origin text, legacy answers/prompts/runs/replays/hidden, and pending navigation. Native edits and identities are durable session events. Moving installations requires session logs, plugin state and the attachment store.
+`~/.dsh/message-toolbar/state.json` remains schema 1. It contains selected histories, deleted-version flags, translation data, legacy display state and pending navigation. Moving installations requires session logs, plugin state and the attachment store.
 
 Reads validate JSON, schema and nested dictionaries, including navigation fields. Invalid input is reported and preserved. Mutations use detached drafts; successful HTTP/stream completion flushes before acknowledgement. A sibling cross-process lock, newest-state delta merge, fsync and atomic replacement preserve unrelated concurrent updates. Answer/attachment lists merge by stable ID, hidden lists by value, scalar conflicts by last commit. Unknown lock owners are not reclaimed speculatively; local hard-link/rename support is required. A process killed in the cleanup window may leave a guard needing offline inspection.
 
-Workspace undo is separate from history branching and requires an explicit user choice. `workspaceChanges` supplies diffs/snapshots; no-service and unavailable old records are reported. The revert engine verifies paths, aliases, encodings, hunks and EOF evidence, stages writes and rechecks all files before committing. Later edits outside matched hunks remain. Unverifiable files are skipped, and the client stops regeneration if any consequential skip remains. I/O failure attempts compensation and reports retained recovery files. This is not a filesystem transaction and cannot undo arbitrary tool side effects or process death.
+Workspace undo is separate from selecting a conversation history and requires an explicit user choice. `workspaceChanges` supplies diffs/snapshots; no-service and unavailable old records are reported. The revert engine verifies paths, aliases, encodings, hunks and EOF evidence, stages writes and rechecks all files before committing. Later edits outside matched hunks remain. Unverifiable files are skipped, and the client stops regeneration if any consequential skip remains. I/O failure attempts compensation and reports retained recovery files. This is not a filesystem transaction and cannot undo arbitrary tool side effects or process death.
 
 ## Verification and compatibility
 
 The supported package range is `@deepseek-ai/dsh >=0.2.2-rc.5 <0.3.0-0`; this release was exercised with `0.2.2-rc.5`. Public APIs reduce dependence on implementation details but do not guarantee compatibility with every future version. Unsupported APIs produce explicit errors.
 
-`npm test` runs source/bundle checks plus isolated host, client, state, seed, navigation, workspace recovery and sync tests. The optional installed-runtime runner imports DSH packages only inside the test, uses a temporary home and scripted LLM, observes actual `GenerateOptions.messages`, and verifies cold persisted resumes. It does not call a cloud model or change personal sessions. See [the 1.11.0 verification report](NATIVE-CONTEXT-2026-11-21.md) for final commands and limits.
+`npm test` covers the host, built client, state, legacy navigation, workspace recovery and sync. `test/in-session-context.integration.mjs` runs in the installed Electron binary's Node mode with the path to `resources/app.asar`. It observes actual scripted adapter requests and verifies native persistence and restart behavior in a temporary home. The [1.11.0 report](NATIVE-CONTEXT-2026-11-21.md) documents the previous architecture.

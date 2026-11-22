@@ -288,7 +288,7 @@ const statePayload = {
   ] } },
   model: null,
 };
-const branchStates = new Map();
+const updatedStates = new Map();
 const openedSessions = [];
 
 const fetchStub = async function (url, init) {
@@ -300,20 +300,19 @@ const fetchStub = async function (url, init) {
   if ((init && init.method) === 'POST') {
     let sent = {};
     try { sent = JSON.parse(String(init.body)); } catch (e) {}
-    if (sent.action === 'context-branch') {
+    if (sent.action === 'context-update' && sent.operation === 'retry') {
       const target = structuredClone(statePayload);
-      target.sessionId = 'context-target'; target.answers = {}; target.runs = {}; target.hidden = { turns: [], answers: [], prompts: [] };
-      target.prompts = {}; target.promptAttachments = { [sent.turn]: sent.files || [] };
-      target.turns = [{ turn: sent.turn, text: sent.text || 'a question', answered: false }];
-      branchStates.set('context-target', target);
-      return { ok: true, status: 200, json: async () => ({ sessionId: 'context-target', navigationToken: 'branch-token' }) };
+      target.sessionId = sent.sessionId;
+      target.promptAttachments = { 9: sent.files || [] };
+      target.turns.push({ turn: 9, text: sent.text || 'a question', answered: false });
+      updatedStates.set(sent.sessionId, target);
     }
-    if (sent.action === 'context-select') return { ok: true, status: 200,
-      json: async () => ({ sessionId: 'alternate-5', navigationToken: 'select-token' }) };
+    if (sent.action === 'context-update') return { ok: true, status: 200,
+      json: async () => ({ sessionId: sent.sessionId, inPlace: true }) };
     return { ok: true, status: 200, json: async () => ({ supported: false }) };
   }
   const id = new URL(String(url), 'http://test').searchParams.get('sessionId');
-  return { ok: true, status: 200, json: async () => branchStates.get(id) || statePayload };
+  return { ok: true, status: 200, json: async () => updatedStates.get(id) || statePayload };
 };
 
 const windowStub = {
@@ -683,12 +682,13 @@ const saved = posts.filter((call) => {
 }).pop();
 check('Send has no preliminary display save', saved, undefined);
 const run = posts.filter((call) => {
-  try { return JSON.parse(call.init.body).action === 'context-branch'; } catch (e) { return false; }
+  try { const body = JSON.parse(call.init.body); return body.action === 'context-update' && body.operation === 'retry'; } catch (e) { return false; }
 }).pop();
-check('the question creates a context branch', run !== undefined, true);
-check('the native composer opens the created branch', openedSessions.includes('context-target'), true);
+check('the edited question reruns in the current session', run !== undefined, true);
+check('the native composer does not open another session', openedSessions, []);
 if (run !== undefined) {
   const body = JSON.parse(run.init.body);
+  check('the run keeps the session id', body.sessionId, 'session-x');
   check('the run carries both attachments', body.files, [
     { type: 'file', attachment: { attachmentId: 'att-9', name: 'notes.pdf', bytes: 2048 } },
     { type: 'image', attachment: { attachmentId: 'img-1', width: 640, height: 480 } },
@@ -696,18 +696,19 @@ if (run !== undefined) {
   check('the run names the turn', body.turn, 1);
 }
 
-// 5. the created branch editor reads its native attachments; the source stays unchanged.
+// 5. the new turn's editor reads its native attachments in the same session.
 {
-  const targetMount = { type: mount.type, props: Object.assign({}, mount.props, { sessionId: 'context-target', turn: 1 }) };
+  const targetMount = { type: mount.type, props: Object.assign({}, mount.props, { sessionId: 'session-x', turn: 9 }) };
   render(targetMount);
   await new Promise(resolve => setTimeout(resolve, 20));
   let targetTree = render(targetMount);
   const edit = findAll(targetTree, node => node.props['data-mtt'] === 'edit')[0];
-  check('the target branch has its own editor', !!edit, true);
+  check('the new turn has its own editor', !!edit, true);
   edit.props.onClick(); targetTree = render(targetMount);
   check('the new editor retains the file', findAll(targetTree, node => node.props.className === 'mtt-file').length, 1);
   check('the new editor retains the image', findAll(targetTree, node => node.props.className === 'mtt-tile').length, 1);
   check('source prompt state was not modified by Send', statePayload.prompts, {});
+  updatedStates.clear();
 }
 
 // 6. the right-hand rail lists the turns the transcript shows — and only those
@@ -770,7 +771,8 @@ if (run !== undefined) {
   const postsBefore = calls.filter((call) => call.init.method === 'POST').length;
   await openMenu.props.onSelect('5');
   const jumped = calls.filter((call) => call.init.method === 'POST').slice(postsBefore).map((call) => JSON.parse(call.init.body));
-  check('picking an answer selects it', jumped, [{ action: 'context-select', sessionId: 'session-x', turn: 6, id: '5' }]);
+  check('picking an answer in the current session selects it', jumped,
+    [{ action: 'context-update', sessionId: 'session-x', turn: 6, operation: 'select', id: '5' }]);
 }
 
 // 8. a variant on screen is what copy copies

@@ -7,6 +7,8 @@
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-111827.svg"></a>
 </p>
 
+![The toolbar and answer switcher below a message](./docs/showcase/01-toolbar.png)
+
 ## Install
 
 Works with DSH Desktop and Web from `0.2.2-rc.5` through `0.2.x`. Check that `dsh --version` runs in your terminal first.
@@ -34,23 +36,27 @@ Use `--profile desktop` for Desktop in Bash, or `--profile web` for Web in Power
 
 Restart DSH after installing. The toolbar appears below your messages.
 
-![The toolbar and answer switcher below a message](./docs/showcase/01-toolbar.png)
-
 ## Usage
 
-- **Pick an answer and keep chatting.** Use the arrows below an answer, or click the number to choose a version. Your next question uses that answer and its conversation history.
-- **Revise the conversation.** Regenerate, switch models, or edit and delete messages. When editing a question, **Save** keeps the edit and **Send** generates a reply. Open the version tree to return to an earlier version.
+- **Regenerate or switch models.** Keep several answers to one question in the current conversation. The toolbar leaves the sidebar and archive alone.
+- **Pick an answer and keep chatting.** Use the arrows below an answer, or click `2/3` to pick one. The conversation returns to that answer and its follow-ups, and your next message uses that history.
+- **Edit or delete.** When editing a question, **Save** keeps the edit and **Send** generates a reply. Deleting the current answer selects another available answer. The switcher disappears when only one remains.
 - **Translate and copy.** Read the translation alongside the original and copy either one.
 
 ![The original answer and translation shown block by block](./docs/showcase/02-translation.png)
 
-**Exploration cards:** With `dsh-btw-explore 0.3.4` or later, toolbar `1.11.1` and later save edits and switch answers inside the card, keeping its source excerpt. Closing or switching cards during a save leaves the main chat where it was.
+## Update
 
-## FAQ
+If you installed from a local folder using the steps above, run these commands in that folder, then fully quit and reopen DSH:
 
-**How do I continue a conversation changed with an older toolbar?** Open it as usual. The toolbar syncs your selected answers and message changes while keeping the original. If the synced version is archived, choose **Unarchive and open**. Choose **Retry sync** if syncing fails.
+```powershell
+git pull --ff-only
+npm run sync -- desktop
+```
 
-**Does regenerating or switching answers archive my chat?** Starting in `1.11.3`, the toolbar leaves archiving to you. DSH may show each version in the sidebar. You can switch versions or reopen an archived version from the version tree.
+Use `web` instead of `desktop` for the Web profile. The sync command requires Node.js and npm.
+
+**Open older conversations as usual.** The toolbar uses your saved answer selections and edits without a separate sync step. Older versions that already exist as separate conversations are still available from the version tree.
 
 For bugs and suggestions, open an [issue](https://github.com/VicissitudeYW/dsh-message-toolbar/issues).
 

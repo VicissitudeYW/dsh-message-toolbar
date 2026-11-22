@@ -9,21 +9,21 @@ function setup(extra = {}) {
     if (!init?.body) return jsonResponse(state());
     const body = JSON.parse(init.body); sent.push(body);
     if (body.action === 'changes') return jsonResponse({ supported: false });
+    if (body.action === 'context-update') {
+      return jsonResponse({ sessionId: body.sessionId, inPlace: true });
+    }
     return jsonResponse({ sessionId: 'target', navigationToken: 'token', token: 'token' });
   };
   return { ...h, sent };
 }
 const button = (tree, name) => findAll(tree, node => node.type === 'button' && (node.props.title === name || textOf(node) === name))[0];
 
-test('regenerate creates and opens a context branch, then focuses only after its toolbar mounts', async () => {
+test('regenerate updates the source without opening, activating or focusing another session', async () => {
   const h = setup();
   await button(h.render(h.AssistantToolbar, { sessionId: 'source', turn: 1 }), 'Regenerate this turn').props.onClick();
-  assert.equal(h.sent.find(body => body.action === 'context-branch')?.operation, 'retry');
-  assert.deepEqual(h.opened, ['target']);
-  assert.equal(h.sent.some(body => body.action === 'focus'), false);
-  h.store.set('target', state());
-  h.render(h.ContextFocus, { sessionId: 'target' }); await flush();
-  assert.equal(h.sent.find(body => body.action === 'focus')?.token, 'token');
+  assert.equal(h.sent.find(body => body.action === 'context-update')?.operation, 'retry');
+  assert.deepEqual(h.opened, []);
+  assert.deepEqual(h.sent.map(body => body.action), ['changes', 'context-update']);
 });
 
 test('question Send submits one atomic retry with edited text and no preliminary save', async () => {
@@ -37,19 +37,30 @@ test('question Send submits one atomic retry with edited text and no preliminary
   await button(tree, 'Send').props.onClick();
   const mutations = h.sent.filter(body => body.action !== 'changes');
   assert.equal(mutations.length, 1);
-  assert.equal(mutations[0].action, 'context-branch'); assert.equal(mutations[0].operation, 'retry');
-  assert.equal(mutations[0].text, 'revised question'); assert.deepEqual(h.opened, ['target']);
+  assert.equal(mutations[0].action, 'context-update'); assert.equal(mutations[0].operation, 'retry');
+  assert.equal(mutations[0].text, 'revised question'); assert.deepEqual(h.opened, []);
 });
 
-test('answer arrows select a real session through the context route', async () => {
+test('answer arrows select a version in the active conversation without navigating', async () => {
   const h = setup({ contextChoices: { '1': { active: 'a1', items: [
-    { id: 'a1', sessionId: 'source', preview: 'one' }, { id: 'a2', sessionId: 'target', preview: 'two' },
+    { id: 'a1', sessionId: 'source', preview: 'one' }, { id: 'a2', sessionId: 'source', preview: 'two' },
   ] } } });
   const tree = h.render(h.AssistantToolbar, { sessionId: 'source', turn: 1 });
   const next = button(tree, 'Next answer'); assert.ok(next);
   await next.props.onClick();
-  assert.equal(h.sent.find(body => body.action === 'context-select')?.id, 'a2');
-  assert.deepEqual(h.opened, ['target']);
+  assert.equal(h.sent.find(body => body.action === 'context-update' && body.operation === 'select')?.id, 'a2');
+  assert.deepEqual(h.opened, []);
+  assert.deepEqual(h.sent.map(body => body.action), ['context-update']);
+});
+
+test('legacy display records do not block send or start a conversation handoff', async () => {
+  const h = setup({ needsContextMigration: true, prompts: { 1: { text: 'edited with an old toolbar' } } });
+  const blocks = composerBlocks();
+  h.render(h.ContextFocus, { sessionId: 'source', composerBlocks: blocks });
+  await flush();
+  assert.equal(blocks.get('source'), undefined);
+  assert.deepEqual(h.sent, []);
+  assert.deepEqual(h.opened, []);
 });
 
 test('failed unarchive rejects navigation and does not open or focus the source', async () => {
@@ -96,56 +107,6 @@ test('unmounting the destination composer cancels an unfinished focus request', 
   pending.resolve(jsonResponse({ ok: true })); await flush();
 });
 
-test('opening a legacy session automatically starts migration and keeps a retry after failure', async () => {
-  const h = setup({ needsContextMigration: true, contextError: 'old diagnostic' }), pending = deferred();
-  h.window.fetch = async (_url, init) => {
-    if (!init?.body) return jsonResponse(state({ needsContextMigration: true }));
-    const body = JSON.parse(init.body); h.sent.push(body);
-    return pending.promise;
-  };
-
-  let tree = h.render(h.ContextFocus, { sessionId: 'source' });
-  await flush();
-  tree = h.render(h.ContextFocus, { sessionId: 'source' });
-  const notice = byClass(tree, 'mtt-context-notice')[0];
-  assert.equal(notice.props.role, 'status');
-  assert.equal(textOf(notice), 'Syncing old conversation…');
-  assert.equal(button(tree, 'Retry sync'), undefined);
-  assert.equal(byClass(tree, 'mtt-context-error').length, 0);
-  assert.equal(h.sent.filter(body => body.action === 'context-normalize').length, 1);
-
-  pending.resolve({ ok: false, status: 409, json: async () => ({ error: 'legacy history needs recovery' }) });
-  await flush();
-  tree = h.render(h.ContextFocus, { sessionId: 'source' });
-  assert.ok(textOf(byClass(tree, 'mtt-context-error')[0])
-    .includes('legacy history needs recovery'));
-  assert.ok(button(tree, 'Retry sync'));
-});
-
-test('automatic legacy sync leaves an archived copy untouched until the reader opens it', async () => {
-  const h = setup({ needsContextMigration: true });
-  h.window.fetch = async (_url, init) => {
-    if (!init?.body) return jsonResponse(state({ needsContextMigration: true }));
-    const body = JSON.parse(init.body);
-    h.sent.push(body);
-    if (body.action === 'context-normalize') {
-      return jsonResponse({ sessionId: 'target', navigationToken: 'legacy-token', archived: true });
-    }
-    return jsonResponse({ ok: true });
-  };
-
-  h.render(h.ContextFocus, { sessionId: 'source' });
-  await flush();
-  assert.deepEqual(h.opened, []);
-  assert.equal(h.sent.some(body => body.action === 'activate'), false);
-  const notice = h.render(h.ContextFocus, { sessionId: 'source' });
-  const reopen = button(notice, 'Unarchive and open');
-  assert.ok(reopen);
-  await reopen.props.onClick();
-  assert.deepEqual(h.sent.filter(body => body.action === 'activate').map(body => body.sessionId), ['target']);
-  assert.deepEqual(h.opened, ['target']);
-});
-
 function composerBlocks() {
   const values = new Map(), listeners = new Set();
   return {
@@ -155,119 +116,6 @@ function composerBlocks() {
     set(id, block) { values.set(id, block); listeners.forEach(fn => fn()); },
   };
 }
-
-test('the native composer stays blocked through legacy detection and handoff, then releases the source', async () => {
-  const h = clientHarness(), initial = deferred(), migration = deferred(), blocks = composerBlocks();
-  const props = { sessionId: 'source', composerBlocks: blocks };
-  h.window.fetch = async (_url, init) => init?.body ? migration.promise : initial.promise;
-  h.render(h.ContextFocus, props);
-  assert.ok(blocks.get('source')?.reason, 'opening a conversation must not expose Send before classification');
-
-  initial.resolve(jsonResponse(state({ needsContextMigration: true })));
-  await flush(); h.render(h.ContextFocus, props); await flush();
-  assert.ok(blocks.get('source')?.reason, 'the original session still has legacy context');
-
-  migration.resolve(jsonResponse({ sessionId: 'target', navigationToken: 'token' }));
-  await flush();
-  assert.deepEqual(h.opened, ['target']);
-  assert.ok(blocks.get('source')?.reason, 'the source cannot submit before it leaves the pane');
-  h.unmount();
-  assert.equal(blocks.get('source'), undefined);
-});
-
-test('the initial composer check releases a normal session and does not clear other plugins’ blocks', async () => {
-  const h = clientHarness(), initial = deferred(), blocks = composerBlocks();
-  const props = { sessionId: 'source', composerBlocks: blocks };
-  h.window.fetch = () => initial.promise;
-  h.render(h.ContextFocus, props);
-  assert.ok(blocks.get('source')?.reason);
-
-  const theirs = { reason: 'Another plugin is preparing this session' };
-  blocks.set('source', theirs);
-  initial.resolve(jsonResponse(state()));
-  await flush(); h.render(h.ContextFocus, props);
-  assert.equal(blocks.get('source'), theirs);
-  blocks.set('source', undefined);
-  assert.equal(blocks.get('source'), undefined, 'a normal conversation must be able to send');
-});
-
-test('retrying a failed legacy navigation lets the host resolve the current migration target', async () => {
-  const h = setup({ needsContextMigration: true });
-  const originalFetch = h.window.fetch;
-  const actions = [];
-  let normalizations = 0;
-  let opens = 0;
-  h.window.fetch = async (_url, init) => {
-    const body = init?.body ? JSON.parse(init.body) : null;
-    if (body) actions.push(body.action);
-    if (body?.action === 'context-normalize') {
-      return jsonResponse(++normalizations === 1
-        ? { sessionId: 'target', navigationToken: 'first-token' }
-        : { sessionId: 'replacement', navigationToken: 'replacement-token' });
-    }
-    if (body?.action === 'prepare-focus') return jsonResponse({ sessionId: 'target', token: 'retry-token' });
-    return originalFetch(_url, init);
-  };
-  h.__setNavigation({ openVersion(id) {
-    opens++;
-    if (opens === 1) throw new Error('temporary navigation failure');
-    h.opened.push(id);
-  } });
-
-  h.render(h.ContextFocus, { sessionId: 'source' }); await flush();
-  let tree = h.render(h.ContextFocus, { sessionId: 'source' });
-  const retry = button(tree, 'Retry sync');
-  assert.ok(retry);
-  await retry.props.onClick();
-  await flush();
-
-  assert.equal(actions.filter(action => action === 'context-normalize').length, 2);
-  assert.equal(actions.filter(action => action === 'prepare-focus').length, 0);
-  assert.deepEqual(h.opened, ['replacement']);
-});
-
-test('closing the source composer cancels the late legacy handoff without opening its branch', async () => {
-  const h = setup({ needsContextMigration: true }), pending = deferred();
-  h.window.fetch = async (_url, init) => {
-    if (!init?.body) return jsonResponse(state({ needsContextMigration: true }));
-    const body = JSON.parse(init.body); h.sent.push(body);
-    if (body.action === 'context-normalize') return pending.promise;
-    return jsonResponse({ ok: true });
-  };
-
-  h.render(h.ContextFocus, { sessionId: 'source' }); await flush();
-  assert.equal(h.sent.filter(body => body.action === 'context-normalize').length, 1);
-  h.unmount();
-  pending.resolve(jsonResponse({ sessionId: 'target', navigationToken: 'late-token' }));
-  await flush();
-
-  assert.deepEqual(h.opened, []);
-  assert.ok(h.sent.some(body => body.action === 'cancel-focus' && body.token === 'late-token'));
-});
-
-test('an inert legacy composer waits until it becomes visible before migrating', async () => {
-  let covered = true, onAttributes;
-  const h = setup();
-  const parent = {};
-  h.window.MutationObserver = class {
-    constructor(callback) { onAttributes = callback; }
-    observe() {}
-    disconnect() {}
-  };
-  const tree = h.render(h.ContextFocus, { sessionId: 'source' });
-  if (tree[0].props.ref) tree[0].props.ref.current = {
-    isConnected: true, parentElement: parent, closest: () => covered ? parent : null,
-  };
-  h.store.set('source', state({ needsContextMigration: true }));
-  h.render(h.ContextFocus, { sessionId: 'source' }); await flush();
-  assert.equal(h.sent.filter(body => body.action === 'context-normalize').length, 0);
-  assert.deepEqual(h.opened, []);
-
-  covered = false;
-  onAttributes?.(); await flush();
-  assert.equal(h.sent.filter(body => body.action === 'context-normalize').length, 1);
-  assert.deepEqual(h.opened, ['target']);
-});
 
 test('version cards name prompt, answer and deletion operations separately', () => {
   const h = setup({ versions: [
