@@ -7,8 +7,6 @@
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-111827.svg"></a>
 </p>
 
-![The toolbar and answer switcher below a message](./docs/showcase/01-toolbar.png)
-
 ## Install
 
 Works with DSH Desktop and Web from `0.2.2-rc.5` through `0.2.x`. Check that `dsh --version` runs in your terminal first.
@@ -42,8 +40,6 @@ Restart DSH after installing. The toolbar appears below your messages.
 - **Pick an answer and keep chatting.** Use the arrows below an answer, or click `2/3` to pick one. The conversation returns to that answer and its follow-ups, and your next message uses that history.
 - **Edit or delete.** When editing a question, **Save** keeps the edit and **Send** generates a reply. Deleting the current answer selects another available answer. The switcher disappears when only one remains.
 - **Translate and copy.** Read the translation alongside the original and copy either one.
-
-![The original answer and translation shown block by block](./docs/showcase/02-translation.png)
 
 ## Update
 

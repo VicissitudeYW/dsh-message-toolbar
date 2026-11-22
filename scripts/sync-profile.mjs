@@ -36,7 +36,6 @@ if (!fs.existsSync(path.dirname(target))) {
 
 fs.mkdirSync(path.join(target, 'lib'), { recursive: true });
 fs.mkdirSync(path.join(target, 'scripts'), { recursive: true });
-fs.mkdirSync(path.join(target, 'docs'), { recursive: true });
 
 for (const file of ['package.json', 'cordis.patch.yml', 'plugin.client.js', 'README.md', 'README.en.md', 'LICENSE']) {
   fs.copyFileSync(path.join(root, file), path.join(target, file));
@@ -44,16 +43,8 @@ for (const file of ['package.json', 'cordis.patch.yml', 'plugin.client.js', 'REA
 for (const file of fs.readdirSync(path.join(root, 'lib'))) {
   fs.copyFileSync(path.join(root, 'lib', file), path.join(target, 'lib', file));
 }
-for (const file of fs.readdirSync(path.join(root, 'docs'))) {
-  // `docs/testing/` holds screenshots of the test run, not part of the package.
-  const from = path.join(root, 'docs', file);
-  if (!fs.statSync(from).isFile()) continue;
-  fs.copyFileSync(from, path.join(target, 'docs', file));
-}
-for (const file of fs.readdirSync(path.join(root, 'scripts'))) {
-  const from = path.join(root, 'scripts', file);
-  if (!fs.statSync(from).isFile()) continue;
-  fs.copyFileSync(from, path.join(target, 'scripts', file));
+for (const file of ['build-client.mjs', 'sync-profile.mjs']) {
+  fs.copyFileSync(path.join(root, 'scripts', file), path.join(target, 'scripts', file));
 }
 
 console.log('synced dsh-message-toolbar -> ' + target);

@@ -7,8 +7,6 @@
   <a href="LICENSE"><img alt="许可证：MIT" src="https://img.shields.io/badge/license-MIT-111827.svg"></a>
 </p>
 
-![消息下方的工具栏和回答切换按钮](./docs/showcase/01-toolbar.png)
-
 ## 安装
 
 支持 DSH `0.2.2-rc.5` 至 `0.2.x` 的桌面版和网页版。先确认终端能运行 `dsh --version`。
@@ -42,8 +40,6 @@ dsh plugin --profile web add "file:$(pwd)"
 - **选个回答接着聊：** 点击回答下方的箭头切换，或点 `2/3` 直接选。切换时会恢复该回答的后续问答，下一次追问也沿用这段历史。
 - **编辑或删除：** 编辑提问时，点**保存**只修改内容，点**发送**会重答。删除当前回答后会切到另一条可用回答；只剩一条时隐藏切换器。
 - **翻译和复制：** 在原文旁查看译文，也可以分别复制两种文本。
-
-![回答的原文与译文按段显示](./docs/showcase/02-translation.png)
 
 ## 升级
 

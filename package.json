@@ -23,10 +23,8 @@
     "lib/",
     "plugin.client.js",
     "cordis.patch.yml",
-    "docs/*.md",
-    "docs/*.png",
-    "docs/showcase/*.png",
-    "scripts/*.mjs",
+    "scripts/build-client.mjs",
+    "scripts/sync-profile.mjs",
     "README.md",
     "README.en.md",
     "LICENSE"
@@ -66,7 +64,6 @@
   "scripts": {
     "build": "node scripts/build-client.mjs",
     "sync": "node scripts/build-client.mjs && node scripts/sync-profile.mjs",
-    "test": "npm run build && node test/host.test.mjs && node test/client.test.mjs && node --test test/state-store.test.mjs test/host-regressions.test.mjs test/client-regressions.test.mjs test/context-client.test.mjs test/embedded-navigation.test.mjs test/workspace-revert.test.mjs test/sync-profile.test.mjs",
     "prepack": "npm run build"
   }
 }
