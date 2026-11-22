@@ -1,6 +1,6 @@
 {
   "name": "dsh-message-toolbar",
-  "version": "1.11.1",
+  "version": "1.11.2",
   "description": "DSH message toolbar with native context branches, answer switching, editing, deletion, bilingual translation and a version tree",
   "license": "MIT",
   "repository": {

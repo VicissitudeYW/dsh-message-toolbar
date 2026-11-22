@@ -1,72 +1,53 @@
 # dsh-message-toolbar
 
-<p align="center">
-  A Cherry Studio-style message toolbar for DSH
-  <br>
-  <strong>English</strong> · <a href="README.md">简体中文</a>
-</p>
+A Cherry Studio-style toolbar for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). Regenerate, switch models, edit, translate, and **pick an answer to continue from**, right below your messages.
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-111827.svg)](LICENSE)
-[![Supports DSH 0.2.2-rc.5 to 0.2.x](https://img.shields.io/badge/DSH-0.2.2--rc.5%20to%200.2.x-4b5563.svg)](package.json)
-
-Add answer switching, regeneration, model switching, editing, translation, copy and delete actions below DSH messages.
-
-![The message toolbar and answer switcher](./docs/showcase/01-toolbar.png)
+**English** · [简体中文](README.md) · [![License: MIT](https://img.shields.io/badge/license-MIT-111827.svg)](LICENSE)
 
 ## Install
 
-Works with DSH `0.2.x` (minimum `0.2.2-rc.5`). Clone the repository and run:
+Works with DSH Desktop and Web from `0.2.2-rc.5` through `0.2.x`. Check that `dsh --version` runs in your terminal first.
+
+**Windows Desktop (PowerShell)**
 
 ```powershell
 git clone https://github.com/VicissitudeYW/dsh-message-toolbar.git
 cd dsh-message-toolbar
-dsh plugin --profile web add file:$((Get-Location).Path)
+dsh plugin --profile desktop add "file:$($PWD.Path.Replace('\', '/'))"
 ```
 
-On Bash, macOS or Linux:
+<details>
+<summary>Web or Bash</summary>
 
 ```bash
 git clone https://github.com/VicissitudeYW/dsh-message-toolbar.git
 cd dsh-message-toolbar
-dsh plugin --profile web add file:$(pwd)
+dsh plugin --profile web add "file:$(pwd)"
 ```
 
-Restart DSH after installing.
+Use `--profile desktop` for Desktop in Bash, or `--profile web` for Web in PowerShell. If you start DSH with a custom profile, use that name instead.
 
-## Features
+</details>
 
-| Action | What it does |
-| --- | --- |
-| **Switch answers** | Move between answers to the same question. |
-| **Regenerate** | Generate another answer for the current question. |
-| **Switch model** | Generate an answer with another model. |
-| **Edit a question** | Save a revised question or send it with attachments. |
-| **Edit an answer** | Edit the answer's Markdown where it appears. |
-| **Translate and copy** | Show a translation and copy either version. |
-| **Delete and restore** | Remove a question or answer while keeping the old version available. |
-| **Undo file changes** | Undo safe file changes made by an answer before regenerating or switching models. |
+Restart DSH after installing. The toolbar appears below your messages.
+
+![The toolbar and answer switcher below a message](./docs/showcase/01-toolbar.png)
 
 ## Usage
 
-1. Open a DSH conversation and find the toolbar below a message.
-2. Use the arrows to switch answers; click the number to view the other answers.
-3. Use Regenerate or Switch model for a new answer. Use Edit to change a question.
-4. Saving an edited question only saves the change. Press Send to generate an answer.
-5. Open the version tree to view or restore an older version.
+- **Pick an answer and keep chatting.** Use the arrows below an answer, or click the number to choose a version. Your next question uses that answer and its conversation history.
+- **Revise the conversation.** Regenerate, switch models, or edit and delete messages. When editing a question, **Save** keeps the edit and **Send** generates a reply. Open the version tree to return to an earlier version.
+- **Translate and copy.** Read the translation alongside the original and copy either one.
 
-With **dsh-btw-explore 0.3.4 or later**, toolbar **1.11.1** keeps answer edits and version selection inside the exploration card, including its source excerpt. Closing or switching cards during a save prevents a delayed result from navigating the main window.
+![The original answer and translation shown block by block](./docs/showcase/02-translation.png)
 
-![Original and translation shown block by block](./docs/showcase/02-translation.png)
+**Exploration cards:** With `dsh-btw-explore 0.3.4` or later, toolbar `1.11.1` and later save edits and switch answers inside the card, keeping its source excerpt. Closing or switching cards during a save leaves the main chat where it was.
 
-## What to know
+## FAQ
 
-- Switching answers also switches the context for the next question. The next question continues from the answer you selected.
-- Editing or deleting an earlier question or answer creates a new branch; the old version remains in the version tree.
-- The old session records remain available, and branches use additional session storage.
-- Some old histories cannot be edited when compaction or replacement makes their boundaries unclear. The plugin refuses those operations.
-- File undo only reverts changes that DSH can verify. Uncertain files are left in place.
+**How do I continue a conversation changed with an older toolbar?** Open it as usual. The toolbar syncs your selected answers and message changes, then opens the updated version. The original stays available, and syncing does not call a model. Choose **Retry sync** if syncing fails.
 
-For bugs and suggestions, open an [Issue](https://github.com/VicissitudeYW/dsh-message-toolbar/issues).
+For bugs and suggestions, open an [issue](https://github.com/VicissitudeYW/dsh-message-toolbar/issues).
 
 ## License
 

@@ -96,6 +96,155 @@ test('unmounting the destination composer cancels an unfinished focus request', 
   pending.resolve(jsonResponse({ ok: true })); await flush();
 });
 
+test('opening a legacy session automatically starts migration and keeps a retry after failure', async () => {
+  const h = setup({ needsContextMigration: true, contextError: 'old diagnostic' }), pending = deferred();
+  h.window.fetch = async (_url, init) => {
+    if (!init?.body) return jsonResponse(state({ needsContextMigration: true }));
+    const body = JSON.parse(init.body); h.sent.push(body);
+    return pending.promise;
+  };
+
+  let tree = h.render(h.ContextFocus, { sessionId: 'source' });
+  await flush();
+  tree = h.render(h.ContextFocus, { sessionId: 'source' });
+  const notice = byClass(tree, 'mtt-context-notice')[0];
+  assert.equal(notice.props.role, 'status');
+  assert.equal(textOf(notice), 'Syncing old conversation…');
+  assert.equal(button(tree, 'Retry sync'), undefined);
+  assert.equal(byClass(tree, 'mtt-context-error').length, 0);
+  assert.equal(h.sent.filter(body => body.action === 'context-normalize').length, 1);
+
+  pending.resolve({ ok: false, status: 409, json: async () => ({ error: 'legacy history needs recovery' }) });
+  await flush();
+  tree = h.render(h.ContextFocus, { sessionId: 'source' });
+  assert.ok(textOf(byClass(tree, 'mtt-context-error')[0])
+    .includes('legacy history needs recovery'));
+  assert.ok(button(tree, 'Retry sync'));
+});
+
+function composerBlocks() {
+  const values = new Map(), listeners = new Set();
+  return {
+    get: id => values.get(id),
+    storeFor: id => ({ getSnapshot: () => values.get(id),
+      subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); } }),
+    set(id, block) { values.set(id, block); listeners.forEach(fn => fn()); },
+  };
+}
+
+test('the native composer stays blocked through legacy detection and handoff, then releases the source', async () => {
+  const h = clientHarness(), initial = deferred(), migration = deferred(), blocks = composerBlocks();
+  const props = { sessionId: 'source', composerBlocks: blocks };
+  h.window.fetch = async (_url, init) => init?.body ? migration.promise : initial.promise;
+  h.render(h.ContextFocus, props);
+  assert.ok(blocks.get('source')?.reason, 'opening a conversation must not expose Send before classification');
+
+  initial.resolve(jsonResponse(state({ needsContextMigration: true })));
+  await flush(); h.render(h.ContextFocus, props); await flush();
+  assert.ok(blocks.get('source')?.reason, 'the original session still has legacy context');
+
+  migration.resolve(jsonResponse({ sessionId: 'target', navigationToken: 'token' }));
+  await flush();
+  assert.deepEqual(h.opened, ['target']);
+  assert.ok(blocks.get('source')?.reason, 'the source cannot submit before it leaves the pane');
+  h.unmount();
+  assert.equal(blocks.get('source'), undefined);
+});
+
+test('the initial composer check releases a normal session and does not clear other plugins’ blocks', async () => {
+  const h = clientHarness(), initial = deferred(), blocks = composerBlocks();
+  const props = { sessionId: 'source', composerBlocks: blocks };
+  h.window.fetch = () => initial.promise;
+  h.render(h.ContextFocus, props);
+  assert.ok(blocks.get('source')?.reason);
+
+  const theirs = { reason: 'Another plugin is preparing this session' };
+  blocks.set('source', theirs);
+  initial.resolve(jsonResponse(state()));
+  await flush(); h.render(h.ContextFocus, props);
+  assert.equal(blocks.get('source'), theirs);
+  blocks.set('source', undefined);
+  assert.equal(blocks.get('source'), undefined, 'a normal conversation must be able to send');
+});
+
+test('retrying a failed legacy navigation lets the host resolve the current migration target', async () => {
+  const h = setup({ needsContextMigration: true });
+  const originalFetch = h.window.fetch;
+  const actions = [];
+  let normalizations = 0;
+  let opens = 0;
+  h.window.fetch = async (_url, init) => {
+    const body = init?.body ? JSON.parse(init.body) : null;
+    if (body) actions.push(body.action);
+    if (body?.action === 'context-normalize') {
+      return jsonResponse(++normalizations === 1
+        ? { sessionId: 'target', navigationToken: 'first-token' }
+        : { sessionId: 'replacement', navigationToken: 'replacement-token' });
+    }
+    if (body?.action === 'prepare-focus') return jsonResponse({ sessionId: 'target', token: 'retry-token' });
+    return originalFetch(_url, init);
+  };
+  h.__setNavigation({ openVersion(id) {
+    opens++;
+    if (opens === 1) throw new Error('temporary navigation failure');
+    h.opened.push(id);
+  } });
+
+  h.render(h.ContextFocus, { sessionId: 'source' }); await flush();
+  let tree = h.render(h.ContextFocus, { sessionId: 'source' });
+  const retry = button(tree, 'Retry sync');
+  assert.ok(retry);
+  await retry.props.onClick();
+  await flush();
+
+  assert.equal(actions.filter(action => action === 'context-normalize').length, 2);
+  assert.equal(actions.filter(action => action === 'prepare-focus').length, 0);
+  assert.deepEqual(h.opened, ['replacement']);
+});
+
+test('closing the source composer cancels the late legacy handoff without opening its branch', async () => {
+  const h = setup({ needsContextMigration: true }), pending = deferred();
+  h.window.fetch = async (_url, init) => {
+    if (!init?.body) return jsonResponse(state({ needsContextMigration: true }));
+    const body = JSON.parse(init.body); h.sent.push(body);
+    if (body.action === 'context-normalize') return pending.promise;
+    return jsonResponse({ ok: true });
+  };
+
+  h.render(h.ContextFocus, { sessionId: 'source' }); await flush();
+  assert.equal(h.sent.filter(body => body.action === 'context-normalize').length, 1);
+  h.unmount();
+  pending.resolve(jsonResponse({ sessionId: 'target', navigationToken: 'late-token' }));
+  await flush();
+
+  assert.deepEqual(h.opened, []);
+  assert.ok(h.sent.some(body => body.action === 'cancel-focus' && body.token === 'late-token'));
+});
+
+test('an inert legacy composer waits until it becomes visible before migrating', async () => {
+  let covered = true, onAttributes;
+  const h = setup();
+  const parent = {};
+  h.window.MutationObserver = class {
+    constructor(callback) { onAttributes = callback; }
+    observe() {}
+    disconnect() {}
+  };
+  const tree = h.render(h.ContextFocus, { sessionId: 'source' });
+  if (tree[0].props.ref) tree[0].props.ref.current = {
+    isConnected: true, parentElement: parent, closest: () => covered ? parent : null,
+  };
+  h.store.set('source', state({ needsContextMigration: true }));
+  h.render(h.ContextFocus, { sessionId: 'source' }); await flush();
+  assert.equal(h.sent.filter(body => body.action === 'context-normalize').length, 0);
+  assert.deepEqual(h.opened, []);
+
+  covered = false;
+  onAttributes?.(); await flush();
+  assert.equal(h.sent.filter(body => body.action === 'context-normalize').length, 1);
+  assert.deepEqual(h.opened, ['target']);
+});
+
 test('version cards name prompt, answer and deletion operations separately', () => {
   const h = setup({ versions: [
     { sessionId: 'source', turns: [{ turn: 1, text: 'question' }], current: true },

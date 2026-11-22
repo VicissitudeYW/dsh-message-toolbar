@@ -121,6 +121,19 @@ test('a durable navigation retains its token and target across reload and comple
     completed: false, archived: true }, completed: true });
 });
 
+test('legacy migration targets and preserved prompt visibility survive a state reload', () => {
+  const result = isolated(`
+    store.recordMigration('source', 'target', [1, 2, 2]);
+    store.flushState();
+    store.reloadState();
+    console.log(JSON.stringify({ migration: store.migrationFor('source'), hidden: store.hiddenForSession('target') }));
+  `);
+  assert.deepEqual(result, {
+    migration: { targetSessionId: 'target' },
+    hidden: { turns: [], answers: [], prompts: [1, 2] },
+  });
+});
+
 for (const maps of [
   { hidden: { s: [] } }, { translations: { s: [] } },
   { translations: { s: { 'turn:1': [] } } }, { answers: { s: { 1: [] } } },

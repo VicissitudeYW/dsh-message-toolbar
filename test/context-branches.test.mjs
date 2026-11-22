@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildContextBranch, contextTurns, normalizeLegacyHistory, questionIdentity } from '../lib/context-branches.js';
+import { buildContextBranch, contextTurns, hasLegacyContext, normalizeLegacyHistory, questionIdentity } from '../lib/context-branches.js';
 
 function history(count = 3) {
   const events = [];
@@ -78,12 +78,31 @@ test('every closed branch lets the native constructor mark its entire inherited 
   }
 });
 
-test('editing a compacted question refuses a shadowed message instead of changing invisible history', () => {
+test('branches can edit or retry a question whose summary was written after the branch point', () => {
   const source = history(1);
   source.push({ type: 'developer/message', seq: source.length, time: 200,
     surfaceOp: { op: 'replace', startSeq: 2, endSeq: 3 }, sourceEventSeqs: [2, 3],
     data: { id: 'summary', role: 'developer', content: [{ type: 'text', text: 'Q1 A1 summary' }] } });
-  assert.throws(() => buildContextBranch(source, { sessionId: 'root', operation: 'edit-prompt', turn: 1, text: 'new' }), /压缩|替换/);
+  const edit = buildContextBranch(source, { sessionId: 'root', operation: 'edit-prompt', turn: 1, text: 'new' });
+  assert.deepEqual(messages(edit.seed), ['new', 'A1']);
+  assert.ok(!edit.seed.some(event => event.data.id === 'summary'));
+  const retry = buildContextBranch(source, { sessionId: 'root', operation: 'retry', turn: 1 });
+  assert.deepEqual(messages(retry.seed), []);
+  assert.equal(retry.queuedUser.content[0].text, 'Q1');
+});
+
+test('editing a question drops a stale summary created within that same turn', () => {
+  const source = history(1);
+  source.splice(4, 0, { type: 'user/message', time: 104,
+    surfaceOp: { op: 'replace', startSeq: 2, endSeq: 3 }, sourceEventSeqs: [2, 3],
+    data: { id: 'summary', role: 'user', source: { kind: 'compact-checkpoint' }, content: [{ type: 'text', text: 'old Q1' }] } });
+  source.forEach((event, seq) => { event.seq = seq; });
+  const before = structuredClone(source);
+
+  const result = buildContextBranch(source, { sessionId: 'root', operation: 'edit-prompt', turn: 1, text: 'new' });
+
+  assert.deepEqual(messages(result.seed), ['new', 'A1']);
+  assert.deepEqual(source, before);
 });
 
 test('deleting a question drops its answer and all later context', () => {
@@ -126,6 +145,196 @@ test('legacy text variants become native answer history without carrying discard
   const result = normalizeLegacyHistory(source, { answers: { '1': { active: 'variant', items: [{ id: 'variant', text: 'chosen text' }] } } });
   assert.deepEqual(messages(result.events), ['Q1', 'chosen text']);
   assert.equal(result.events.some(e => e.data?.message?.content?.some(b => b.type === 'tool-call')), false);
+});
+
+test('a saved text variant supplies an answer when the original request never did', () => {
+  const source = history(1).filter(event => event.type !== 'assistant/message');
+  source.forEach((event, seq) => { event.seq = seq; });
+  const result = normalizeLegacyHistory(source, { answers: { 1: {
+    active: 'finished-variant', items: [{ id: 'finished-variant', text: 'answer recovered' }],
+  } } });
+
+  assert.deepEqual(messages(result.events), ['Q1', 'answer recovered']);
+  assert.equal(result.events.find(event => event.type === 'assistant/message').surfaceOp, 'append');
+});
+
+test('a retry copied from a later turn keeps its original request configuration and tool header', () => {
+  const source = history(2);
+  source.splice(3, 0, { type: 'request/header', data: { reason: 'initial', header: {
+    config: { provider: 'p', model: 'm' }, tools: [{ name: 'read', description: 'Read', parameters: {} }],
+  } }, time: 103 });
+  source.splice(10, 0,
+    { type: 'developer/message', data: { turn: 2, step: 1, headerSeq: 3, message: { id: 'dev', role: 'developer',
+      content: [{ type: 'tool-addition', toolName: 'read' }] } }, surfaceOp: 'append', time: 108 },
+    { type: 'llm/retry', data: { turn: 2, step: 1, provider: 'p' }, time: 108 });
+  source.forEach((event, seq) => { event.seq = seq; });
+
+  const { events } = normalizeLegacyHistory(source, { runs: { 1: { active: 2, turns: [1, 2] } } });
+  const retry = events.find(event => event.type === 'llm/retry');
+  const dev = events.find(event => event.type === 'developer/message');
+  const header = events[dev.data.headerSeq];
+  assert.equal(header.type, 'request/header');
+  assert.equal(header.data.header.config.provider, retry.data.provider);
+  assert.ok(header.seq < dev.seq);
+});
+
+test('hidden legacy prompts trigger migration and only original prompt flags survive folded replays', () => {
+  const source = history(3);
+  const legacy = {
+    runs: { '1': { turns: [1, 3], active: 3 } }, replays: { '3': 1 }, prompts: {}, answers: {},
+    hidden: { turns: [], answers: [], prompts: [1, 3] },
+  };
+
+  assert.equal(hasLegacyContext(legacy), true);
+  const result = normalizeLegacyHistory(source, legacy);
+
+  assert.deepEqual(result.hiddenPrompts, [1]);
+  assert.deepEqual(contextTurns(result.events).map(turn => turn.turn), [1, 2]);
+});
+
+test('the only surviving answer of a dissolved legacy run remains at its original position', () => {
+  const source = history(4);
+  const replay = contextTurns(source).at(-1).user;
+  replay.data.content[0].text = 'Q1';
+  const result = normalizeLegacyHistory(source, {
+    replays: { 4: 1 },
+    hidden: { turns: [2], answers: [1], prompts: [4] },
+  });
+
+  assert.deepEqual(messages(result.events), ['Q1', 'Q3', 'A3', 'Q1', 'A4']);
+  assert.deepEqual(contextTurns(result.events).at(-1).user.data.content, replay.data.content);
+  assert.deepEqual(result.hiddenPrompts, [3]);
+  assert.equal(result.turnMap[4], 3);
+});
+
+test('only actual group members fold; replay ownership alone does not hide a standalone answer', () => {
+  const result = normalizeLegacyHistory(history(5), {
+    runs: { 1: { turns: [1, 3], active: 3 } },
+    replays: { 3: 1, 4: 1, 5: 1 },
+    hidden: { answers: [5], prompts: [3, 4, 5] },
+  });
+
+  assert.deepEqual(messages(result.events), ['Q1', 'A3', 'Q2', 'A2', 'Q4', 'A4']);
+  assert.deepEqual(result.hiddenPrompts, [3]);
+  assert.equal(result.turnMap[3], 1);
+  assert.equal(result.turnMap[4], 3);
+});
+
+test('a hidden prompt is a view preference and does not need a new native session', () => {
+  const source = history(1);
+  const legacy = { hidden: { turns: [], answers: [], prompts: [1] } };
+
+  assert.equal(hasLegacyContext(legacy), false);
+  const result = normalizeLegacyHistory(source, legacy);
+
+  assert.deepEqual(result.hiddenPrompts, [1]);
+  assert.deepEqual(result.events, source);
+});
+
+test('folding a replay in the middle keeps later native turns continuous and remaps their view state', () => {
+  const source = history(4);
+  const result = normalizeLegacyHistory(source, {
+    runs: { 1: { turns: [1, 2], active: 2 } },
+    hidden: { prompts: [3], answers: [4] },
+  });
+
+  assert.deepEqual(messages(result.events), ['Q1', 'A2', 'Q3', 'A3', 'Q4']);
+  assert.deepEqual(contextTurns(result.events).map(turn => turn.turn), [1, 2, 3]);
+  assert.deepEqual(result.turnMap, { 2: 1, 3: 2, 4: 3 });
+  assert.deepEqual(result.hiddenPrompts, [2]);
+});
+
+test('a legacy hidden question removes only its old turn and preserves later visible conversation', () => {
+  const result = normalizeLegacyHistory(history(3), { hidden: { turns: [2] } });
+
+  assert.deepEqual(messages(result.events), ['Q1', 'A1', 'Q3', 'A3']);
+  assert.deepEqual(contextTurns(result.events).map(turn => turn.turn), [1, 2]);
+});
+
+test('stale legacy flags do not erase native turns with no human prompt', () => {
+  const source = history(1).filter(event => event.type !== 'user/message');
+  source.forEach((event, seq) => { event.seq = seq; });
+
+  const result = normalizeLegacyHistory(source, { prompts: { 2: { text: 'old' } } });
+
+  assert.deepEqual(result.events, source);
+});
+
+test('a branch does not inherit delivery acknowledgements from the original log', () => {
+  const source = history(3);
+  source.push({ type: 'session-log-deepseek/delivery-accepted', seq: source.length, time: 200,
+    data: { throughSeq: source.length - 1 } });
+
+  const result = normalizeLegacyHistory(source, { hidden: { turns: [2] } });
+
+  assert.equal(result.events.some(event => event.type === 'session-log-deepseek/delivery-accepted'), false);
+});
+
+test('legacy selections drop a replacement summary when its source history changed', () => {
+  const source = history(3);
+  const summary = { type: 'developer/message', seq: source.length, time: 200,
+    surfaceOp: { op: 'replace', startSeq: 2, endSeq: 3 }, sourceEventSeqs: [2, 3],
+    data: { id: 'summary', role: 'developer', content: [{ type: 'text', text: 'stale summary' }] } };
+  source.push(summary);
+  const snapshot = structuredClone(source);
+  const result = normalizeLegacyHistory(source, { runs: { '1': { turns: [1, 3], active: 3 } },
+    prompts: { '1': { text: 'edited selected question', files: [] } }, answers: {}, hidden: {} });
+
+  assert.deepEqual(messages(result.events), ['edited selected question', 'A3', 'Q2', 'A2']);
+  assert.equal(result.events.some(event => event.data?.id === 'summary'), false);
+  assert.deepEqual(result.events.map(event => event.seq), result.events.map((_, index) => index));
+  assert.deepEqual(source, snapshot);
+});
+
+test('legacy selections retain a replacement summary when its source range is unchanged', () => {
+  const source = history(3);
+  source.push({ type: 'developer/message', seq: source.length, time: 200,
+    surfaceOp: { op: 'replace', startSeq: 2, endSeq: 3 }, sourceEventSeqs: [2, 3],
+    data: { id: 'summary', role: 'developer', content: [{ type: 'text', text: 'unchanged prefix' }] } });
+
+  const result = normalizeLegacyHistory(source, { prompts: { '3': { text: 'edited Q3', files: [] } },
+    runs: {}, replays: {}, answers: {}, hidden: {} });
+  const summary = result.events.find(event => event.data?.id === 'summary');
+
+  assert.ok(summary);
+  assert.deepEqual(summary.surfaceOp, { op: 'replace', startSeq: 2, endSeq: 3 });
+  assert.deepEqual(summary.sourceEventSeqs, [2, 3]);
+});
+
+test('legacy normalization remaps summaries located between turns using source event sequences', () => {
+  const source = history(3);
+  source.splice(6, 0, { type: 'developer/message', seq: 6, time: 160,
+    surfaceOp: { op: 'replace', startSeq: 2, endSeq: 3 }, sourceEventSeqs: [2, 3],
+    data: { id: 'summary-after-turn-1', role: 'developer', content: [{ type: 'text', text: 'Q1 A1 summary' }] } });
+  source.forEach((event, seq) => { event.seq = seq; });
+
+  const result = normalizeLegacyHistory(source, { prompts: { '3': { text: 'edited Q3', files: [] } },
+    runs: {}, replays: {}, answers: {}, hidden: {} });
+  const summary = result.events.find(event => event.data?.id === 'summary-after-turn-1');
+
+  assert.ok(summary);
+  assert.equal(summary.seq, 6);
+  assert.deepEqual(summary.surfaceOp, { op: 'replace', startSeq: 2, endSeq: 3 });
+  assert.deepEqual(summary.sourceEventSeqs, [2, 3]);
+  assert.deepEqual(result.events.map(event => event.seq), result.events.map((_, index) => index));
+});
+
+test('legacy normalization drops a dependent summary when an earlier summary is stale', () => {
+  const source = history(3);
+  const firstSeq = source.length;
+  source.push({ type: 'developer/message', seq: firstSeq, time: 200,
+    surfaceOp: { op: 'replace', startSeq: 2, endSeq: 3 }, sourceEventSeqs: [2, 3],
+    data: { id: 'summary-1', role: 'developer', content: [{ type: 'text', text: 'old Q1 A1 summary' }] } });
+  source.push({ type: 'developer/message', seq: source.length, time: 201,
+    surfaceOp: { op: 'replace', startSeq: firstSeq, endSeq: firstSeq }, sourceEventSeqs: [firstSeq],
+    data: { id: 'summary-2', role: 'developer', content: [{ type: 'text', text: 'summary of summary' }] } });
+
+  const result = normalizeLegacyHistory(source, { runs: { '1': { turns: [1, 3], active: 3 } },
+    prompts: { '1': { text: 'edited Q1', files: [] } }, answers: {}, hidden: {} });
+
+  assert.equal(result.events.some(event => event.data?.id === 'summary-1'), false);
+  assert.equal(result.events.some(event => event.data?.id === 'summary-2'), false);
+  assert.deepEqual(messages(result.events), ['edited Q1', 'A3', 'Q2', 'A2']);
 });
 
 test('different question wording never shares an answer choice group', () => {

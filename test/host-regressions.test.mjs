@@ -251,6 +251,134 @@ test('legacy answer selection materializes only the chosen answer in a native se
   assert.equal(h.sent.length, 0);
 });
 
+test('a legacy session keeps each answer menu keyed to its original question after folding earlier replays', async () => {
+  reset();
+  const h = harness(history(4));
+  store.recordRun('session-test', 1, 2);
+  store.recordRun('session-test', 3, 4);
+  const source = (await h.get()).payload;
+
+  assert.deepEqual(source.contextChoices['3'].items.map(item => item.preview).sort(), ['answer 3', 'answer 4']);
+  const result = await h.post({ action: 'context-normalize' });
+  const migrated = (await h.get(result.payload.sessionId)).payload;
+  assert.deepEqual(migrated.contextChoices['2'].items.map(item => item.preview).sort(), ['answer 3', 'answer 4']);
+});
+
+test('context normalization migrates a legacy session with a stale replacement summary into a navigable native session', async () => {
+  reset();
+  const events = history(3);
+  for (const event of events) {
+    if (event.type === 'user/message' || event.type === 'assistant/message') event.surfaceOp = 'append';
+  }
+  events.push({ seq: events.length, type: 'developer/message', time: 200,
+    surfaceOp: { op: 'replace', startSeq: 1, endSeq: 2 }, sourceEventSeqs: [1, 2],
+    data: { id: 'compressed-summary', role: 'developer',
+      content: [{ type: 'text', text: 'summary of the original first answer' }] } });
+  const before = structuredClone(events);
+  const h = harness(events);
+  store.recordRun('session-test', 1, 3);
+  store.setPromptOverride('session-test', 1, 'edited legacy question', []);
+
+  const result = await h.post({ action: 'context-normalize', sessionId: 'session-test' });
+
+  assert.equal(result.status, 200, result.payload.error);
+  assert.notEqual(result.payload.sessionId, 'session-test');
+  assert.equal(typeof result.payload.createdSessionId, 'string');
+  assert.equal(typeof result.payload.navigationToken, 'string');
+  assert.equal(result.payload.sourceSessionId, 'session-test');
+  assert.deepEqual(events, before, 'normalization must never mutate the source session');
+  assert.equal(h.sent.length, 0, 'normalization must not queue a model request');
+  assert.equal(h.requests.length, 0, 'normalization must not call the model');
+
+  const child = h.children.find(item => item.session.header.id === result.payload.sessionId);
+  assert.ok(child, 'the response must point at the created native session');
+  assert.equal(child.session.events.some(event => event.data?.id === 'compressed-summary'), false,
+    'a summary covering changed legacy events must not be copied into the new branch');
+  assert.equal(child.session.events.some(event => event.type === 'user/message'
+    && event.data.content.some(block => block.text === 'edited legacy question')), true);
+});
+
+test('context normalization reuses its durable child and preserves only original hidden prompts', async () => {
+  reset();
+  const h = harness(history(3));
+  store.recordRun('session-test', 1, 3);
+  store.setHidden('session-test', 'prompt', 1, true);
+  store.setHidden('session-test', 'prompt', 3, true);
+  store.storeTranslation('session-test', 2, 'en', { turn: 1, text: 'original translation' });
+
+  const first = await h.post({ action: 'context-normalize', sessionId: 'session-test' });
+  assert.equal(first.status, 200, first.payload.error);
+  const target = first.payload.sessionId;
+  assert.deepEqual(store.hiddenForSession(target).prompts, [1]);
+  assert.equal(store.migrationFor('session-test')?.targetSessionId, target);
+  assert.equal((await h.get(target)).payload.needsContextMigration, false);
+  assert.equal(store.translationFor('session-test', 2, 'en')?.text, 'original translation');
+
+  await h.ctx.get('workspaceRegistry').archiveSession(target);
+  store.flushState();
+  store.reloadState();
+  const retried = await h.post({ action: 'context-normalize', sessionId: 'session-test' });
+
+  assert.equal(retried.status, 200, retried.payload.error);
+  assert.equal(retried.payload.sessionId, target);
+  assert.equal(retried.payload.reusedMigration, true);
+  assert.equal(retried.payload.archived, true);
+  assert.equal(h.children.length, 1);
+  assert.deepEqual(store.hiddenForSession(target).prompts, [1]);
+  assert.equal(h.sent.length, 0);
+  assert.equal(h.requests.length, 0);
+});
+
+test('automatic migration never reuses a snapshot after the original history grows', async () => {
+  reset(); const h = harness(history(1));
+  store.setPromptOverride('session-test', 1, 'edited old question', []);
+  const first = await h.post({ action: 'context-normalize' });
+  assert.equal(first.status, 200, first.payload.error);
+  appendReplayTurn(h, 2, 'new-follow-up');
+
+  const next = await h.post({ action: 'context-normalize' });
+  assert.equal(next.status, 200, next.payload.error);
+  assert.notEqual(next.payload.sessionId, first.payload.sessionId);
+  const messages = h.children.at(-1).session.events.filter(event => event.type === 'user/message');
+  assert.deepEqual(messages.map(event => event.data.id), ['u1', 'new-follow-up']);
+});
+
+test('source growth during migration prevents a handoff to an incomplete snapshot', async () => {
+  reset(); const h = harness(history(1));
+  store.setPromptOverride('session-test', 1, 'edited old question', []);
+  const flushBranch = h.ctx.sessions.flush;
+  let pushed = false;
+  h.ctx.sessions.flush = async session => {
+    if (!pushed) { pushed = true; appendReplayTurn(h, 2, 'concurrent-follow-up'); }
+    return flushBranch(session);
+  };
+
+  const result = await h.post({ action: 'context-normalize' });
+  assert.equal(result.status, 409);
+  assert.match(result.payload.error, /原会话有了新消息/);
+  assert.equal(store.migrationFor('session-test'), undefined);
+  assert.equal(h.archived.includes('session-test'), false);
+  const next = await h.post({ action: 'context-normalize' });
+  assert.equal(next.status, 200, next.payload.error);
+  assert.equal(h.children.at(-1).session.events.some(event => event.data?.id === 'concurrent-follow-up'), true);
+});
+
+test('automatic migration never reopens a version the user deleted', async () => {
+  reset();
+  const h = harness(history());
+  store.setPromptOverride('session-test', 1, 'edited old question', []);
+  const first = await h.post({ action: 'context-normalize' });
+  assert.equal(first.status, 200, first.payload.error);
+  store.markDeleted(first.payload.sessionId, { parent: 'session-test', turn: 1 });
+
+  const next = await h.post({ action: 'context-normalize' });
+
+  assert.equal(next.status, 200, next.payload.error);
+  assert.notEqual(next.payload.sessionId, first.payload.sessionId);
+  assert.equal(store.deletedVersionIds().has(first.payload.sessionId), true);
+  assert.equal(store.migrationFor('session-test')?.targetSessionId, next.payload.sessionId);
+});
+
 test('stale display-only mutation clients are rejected before changing history or state', async () => {
   reset(); const h = harness();
   for (const action of ['answer-run', 'answer-generate', 'prompt-save', 'answer-save', 'answer-select', 'run-select', 'run-delete', 'answer-delete', 'hide']) {

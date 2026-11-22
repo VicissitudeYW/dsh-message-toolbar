@@ -53,7 +53,7 @@ A marker context is a complete snapshot, not a partial merge: deletions and rewi
 
 Versions before 1.11.0 used `runs`, `replays`, `prompts`, `answers` and `hidden` in plugin state. Those records remain readable. Normalization selects one real replay or text variant per question, applies prompt/answer overrides and hidden flags, remaps event references, and excludes discarded replay turns. Text-only legacy alternatives do not inherit the native alternative's discarded tool work.
 
-The first context mutation normalizes its source before building a seed. Selecting a legacy answer materializes that choice. The composer also provides Sync context (`context-normalize`) for all current selections. Until synchronization the old session still uses its original log; the UI says so explicitly. Histories whose compaction/replacement or cross-answer references prevent safe migration fail visibly. There is no silent fallback to display-only mutation.
+The first context mutation normalizes its source before building a seed. Selecting a legacy answer materializes that choice. The foreground composer automatically invokes `context-normalize` for old display changes and uses DSH's composer block during handoff when available. Unchanged compaction summaries survive; stale summaries are dropped in favor of their selected source messages. The source log is preserved, and a retry can reuse its previously migrated version when the source has not advanced. Invalid histories fail visibly.
 
 The retired mutation endpoints reject stale clients with a restart/update error. Read and translation APIs continue to support old data.
 

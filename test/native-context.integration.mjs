@@ -11,8 +11,9 @@ if (!asar) throw new Error('Pass the installed resources/app.asar path.');
 const root = await mkdtemp(join(tmpdir(), 'mtt-native-context-'));
 process.env.USERPROFILE = root; process.env.HOME = root;
 const ids = ['cordis', 'dsh-llm', 'dsh-session', 'dsh-session-projection', 'dsh-system-prompt',
-  'dsh-tools', 'dsh-tool-executor-native', 'dsh-agent', 'dsh-agent-loop', 'dsh-session-persistence-jsonl', 'dsh-session-query'];
-const [cordis, llm, sessions, projections, prompt, tools, executor, agents, loop, persistence, query] =
+  'dsh-tools', 'dsh-tool-executor-native', 'dsh-agent', 'dsh-agent-loop', 'dsh-session-persistence-jsonl', 'dsh-session-query',
+  'dsh-token-meter', 'dsh-compaction-basic'];
+const [cordis, llm, sessions, projections, prompt, tools, executor, agents, loop, persistence, query, meter, compaction] =
   await Promise.all(ids.map(id => import(pathToFileURL(`${asar}/dsh/node_modules/@deepseek-ai/${id}/lib/index.js`))));
 const { apply } = await import('../lib/index.js');
 const store = await import('../lib/state-store.js');
@@ -38,6 +39,11 @@ class ScriptedModel extends llm.LlmAdapter {
     yield { type: 'finish', reason: { kind: 'stop' } };
   }
 }
+class ScriptedCompaction extends compaction.BasicCompactionEngine {
+  async summarize() {
+    return { summary: [{ type: 'text', text: 'NATIVE-SUMMARY' }], provider: 'scripted', model: 'original' };
+  }
+}
 async function get(sessionId) {
   let status, data = '';
   await handler({ method: 'GET', url: `/message-toolbar?sessionId=${sessionId}` },
@@ -50,6 +56,8 @@ const message = text => llm.createUserMessage({ source: { kind: 'user' }, conten
 async function ask(agent, text) { agent.followup(message(text)); await agent.whenIdle(); }
 const texts = request => request.messages.filter(m => m.role === 'user' || m.role === 'assistant')
   .map(m => m.content.filter(b => b.type === 'text').map(b => b.text).join(''));
+const checkpointText = request => request.messages.filter(message => message.source.kind === 'compact-checkpoint')
+  .flatMap(message => message.content.filter(block => block.type === 'text').map(block => block.text));
 async function post(body) {
   let status, data = '';
   await handler({ method: 'POST', url: '/message-toolbar', on(event, fn) {
@@ -67,8 +75,9 @@ async function branch(sessionId, operation, turn, text, extra = {}) {
 }
 try {
   for (const plugin of [llm.default, sessions.default, projections.default, prompt.default, tools.default, executor,
-    agents.default, loop.default, query.default]) await ctx.plugin(plugin);
+    agents.default, loop.default, query.default, meter.default]) await ctx.plugin(plugin);
   await ctx.plugin(persistence, { root: join(root, 'sessions'), compression: 'none' });
+  await ctx.plugin(ScriptedCompaction, { auto: false });
   ctx.provide('webServer', { register(route) { handler = route.handler; return () => {}; } });
   const archivedSessionIds = [];
   ctx.provide('workspaceRegistry', { archivedSessionIds, list() { return []; },
@@ -138,6 +147,48 @@ try {
   assert.equal(texts(requests.at(-1)).filter(text => text === 'EDITED-LEGACY').length, 1);
   assert.equal(texts(requests.at(-1)).includes(discarded), false);
   assert.equal(texts(requests.at(-1)).includes(chosen), true);
+  await ctx.sessions.flush(migratedAgent.session);
+  const compactedPrompt = 'COMPACT-ORIGINAL '.repeat(512).trim();
+  const migratedCompactions = [];
+  for (const { id, turn, edited, keep } of [
+    { id: 'compact-keep', turn: 2, edited: 'EDIT-OUTSIDE-SUMMARY', keep: true },
+    { id: 'compact-drop', turn: 1, edited: 'EDIT-INSIDE-SUMMARY', keep: false },
+  ]) {
+    const { agent } = await ctx.agents.create({ sessionId: sessions.SessionId(id), meta: { cwd: root }, agentOptions: route });
+    await ask(agent, compactedPrompt);
+    assert.ok(await ctx.compaction.compactNow(agent, AbortSignal.timeout(5000)));
+    await ask(agent, 'COMPACT-SUFFIX');
+    assert.ok(checkpointText(requests.at(-1)).includes('NATIVE-SUMMARY'));
+    assert.equal(texts(requests.at(-1)).includes(compactedPrompt), false);
+    const original = agent.session.snapshotEvents();
+    store.setPromptOverride(id, turn, edited, []);
+    const beforeMigration = requests.length;
+    const result = await post({ action: 'context-normalize', sessionId: id });
+    assert.equal(requests.length, beforeMigration);
+    assert.deepEqual(agent.session.snapshotEvents(), original);
+    migratedCompactions.push({ sessionId: result.sessionId, edited, keep });
+  }
+  const { agent: middleAgent } = await ctx.agents.create({
+    sessionId: sessions.SessionId('compact-middle'), meta: { cwd: root }, agentOptions: route,
+  });
+  await ask(middleAgent, 'MIDDLE-HEAD');
+  await ask(middleAgent, 'MIDDLE-QUESTION');
+  const discardedMiddleAnswer = texts({ messages: middleAgent.session.deriveMessages() }).at(-1);
+  await ask(middleAgent, 'MIDDLE-QUESTION');
+  const chosenMiddleAnswer = texts({ messages: middleAgent.session.deriveMessages() }).at(-1);
+  await ask(middleAgent, compactedPrompt);
+  const middleEvents = middleAgent.session.snapshotEvents();
+  const start = middleEvents.findLast(event => event.type === 'user/message' && event.data.source.kind === 'user').seq;
+  const end = middleEvents.findLast(event => event.type === 'assistant/message').seq;
+  const removeMidCompaction = ctx.on('agent/pre-step', async ({ agent, signal }, next) => {
+    if (agent === middleAgent) await ctx.compaction.compactRegion(start, end, agent, signal);
+    return next();
+  });
+  try { await ask(middleAgent, 'MIDDLE-SUFFIX'); }
+  finally { removeMidCompaction(); }
+  assert.ok(checkpointText(requests.at(-1)).includes('NATIVE-SUMMARY'));
+  store.recordRun('compact-middle', 2, 3);
+  const migratedMiddle = await post({ action: 'context-normalize', sessionId: 'compact-middle' });
   // Flush and release the exact session created through the plugin route.
   await ctx.sessions.flush(editedAnswer.agent.session);
   editedAnswer.agent.cancel({ kind: 'user' }); await editedAnswer.agent.whenIdle();
@@ -157,7 +208,26 @@ try {
     await ask(resumedTools.agent, 'COLD-TOOL-CHECK');
     assert.equal(requests.at(-1).messages.some(m => m.role === 'tool' && m.toolCallId === 'proof-call'), true);
     assert.equal(texts(requests.at(-1)).includes('TOOL-EDIT'), true);
-    console.log('PASS real plugin routes, native requests, branch continuations, edits, deletion, legacy migration, tools, model restore and cold reload');
+    for (const { sessionId, edited, keep } of migratedCompactions) {
+      const restored = await cold.agents.resume({ resumeSessionId: sessions.SessionId(sessionId), agentOptions: route });
+      await ask(restored.agent, 'AFTER-COMPACT-MIGRATION');
+      assert.deepEqual(checkpointText(requests.at(-1)).filter(text => text === 'NATIVE-SUMMARY'), keep ? ['NATIVE-SUMMARY'] : []);
+      assert.ok(texts(requests.at(-1)).includes(edited));
+      assert.equal(texts(requests.at(-1)).includes(compactedPrompt), false);
+    }
+    const resumedMiddle = await cold.agents.resume({ resumeSessionId: sessions.SessionId(migratedMiddle.sessionId), agentOptions: route });
+    await ask(resumedMiddle.agent, 'AFTER-COLD-MIDDLE-REPLAY');
+    const middleHistory = texts(requests.at(-1));
+    assert.deepEqual(checkpointText(requests.at(-1)).filter(text => text === 'NATIVE-SUMMARY'), ['NATIVE-SUMMARY']);
+    assert.equal(middleHistory.filter(text => text === 'MIDDLE-QUESTION').length, 1);
+    assert.ok(middleHistory.includes(chosenMiddleAnswer));
+    assert.equal(middleHistory.includes(discardedMiddleAnswer), false);
+    assert.ok(middleHistory.includes('MIDDLE-SUFFIX'));
+    const resumedLegacy = await cold.agents.resume({ resumeSessionId: sessions.SessionId(migrated.sessionId), agentOptions: route });
+    await ask(resumedLegacy.agent, 'AFTER-COLD-LEGACY-REPLAY');
+    assert.deepEqual(texts(requests.at(-1)).slice(0, 3), ['EDITED-LEGACY', chosen, 'LATER-QUESTION']);
+    assert.equal(texts(requests.at(-1)).includes(discarded), false);
+    console.log('PASS real plugin routes, native requests, branch continuations, edits, deletion, legacy migration, compaction, tools, model restore and cold reload');
   } finally { await cold.fiber.dispose(); }
 } finally {
   await ctx.fiber.dispose();
