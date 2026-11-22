@@ -1,8 +1,11 @@
-# dsh-message-toolbar
+<h1 align="center">dsh-message-toolbar</h1>
 
-给 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 加上 Cherry Studio 风格的消息工具栏。重答、换模型、编辑、翻译，以及**选一个回答接着聊**，都可以在消息下方完成。
+<p align="center">给 <a href="https://github.com/deepseek-ai/deepseek-harness">DeepSeek Harness</a> 加上 Cherry Studio 风格的消息工具栏。重答、换模型、编辑、翻译，以及<strong>选一个回答接着聊</strong>，都可以在消息下方完成。</p>
 
-**简体中文** · [English](README.en.md) · [![许可证：MIT](https://img.shields.io/badge/license-MIT-111827.svg)](LICENSE)
+<p align="center">
+  <strong>简体中文</strong> · <a href="README.en.md">English</a> ·
+  <a href="LICENSE"><img alt="许可证：MIT" src="https://img.shields.io/badge/license-MIT-111827.svg"></a>
+</p>
 
 ## 安装
 
