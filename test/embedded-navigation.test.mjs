@@ -154,7 +154,7 @@ test('a covered destination does not organize versions and can retry after retur
   covered = false;
   const tree = h.render(h.ContextFocus, { sessionId: 'target' });
   const find = (nodes) => nodes.flatMap((node) => [node, ...find(node.children || [])]);
-  const retry = find(tree).find((node) => node.type === 'button' && node.children?.some((child) => child.text === 'Retry organizing versions'));
+  const retry = find(tree).find((node) => node.type === 'button' && node.children?.some((child) => child.text === 'Retry opening version'));
   assert.ok(retry, 'the saved navigation remains available when the card returns');
   await retry.props.onClick();
   h.render(h.ContextFocus, { sessionId: 'target' }); await flush();

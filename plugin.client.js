@@ -1431,7 +1431,7 @@ async function rerunTurnInPlace(options) {
   return { kind: 'branch', sessionId: result.sessionId };
 }
 
-async function changeContext(request, sourceMount) {
+async function changeContext(request, sourceMount, openArchived = request.action === 'context-select') {
   const sourceId = request.sourceSessionId || request.sessionId;
   const serial = startNavigation(sourceId, sourceMount);
   const result = await mutate(request);
@@ -1439,10 +1439,17 @@ async function changeContext(request, sourceMount) {
   try {
     assertNavigation(serial, sourceId);
     store.invalidate();
+    if (result.sessionId !== sourceId && result.archived === true && !openArchived) {
+      if (request.action !== 'context-normalize') throw new Error(t('destinationArchived'));
+      if (result.navigationToken) {
+        mutate({ action: 'cancel-focus', sessionId: result.sessionId, token: result.navigationToken }).catch(function () {});
+      }
+      return result;
+    }
     await switchToVersion(navigation, { sessionId: result.sessionId, navigationToken: result.navigationToken,
       archived: result.archived }, sourceId, serial);
   } catch (error) {
-    if (request.action === 'context-normalize' && result.navigationToken) {
+    if (result.navigationToken) {
       mutate({ action: 'cancel-focus', sessionId: result.sessionId, token: result.navigationToken }).catch(function () {});
     }
     throw error;
@@ -1639,8 +1646,7 @@ function useFocusPending(sessionId, state, retrySerial, frame) {
       .catch(function (error) {
         if (settled) return;
         settled = true;
-        // A failed focus must not poison this token forever. The host rolls back
-        // any archive it started; cancel the durable job so a remount can retry.
+        // Cancel a failed handoff so a remount can retry.
         focusRequests.delete(token);
         mutate({ action: 'cancel-focus', sessionId: sessionId, token: token }).catch(function () {});
         if (pendingFocus && pendingFocus.token === token) pendingFocus = null;
@@ -1652,9 +1658,7 @@ function useFocusPending(sessionId, state, retrySerial, frame) {
       settled = true;
       focusRequests.delete(token);
       if (pendingFocus && pendingFocus.token === token) pendingFocus = null;
-      // The target component can disappear while archiveSession is in flight.
-      // Tell the host to restore the source instead of leaving a half-focused
-      // version stranded in the workspace.
+      // The target can close before the host acknowledges the handoff.
       mutate({ action: 'cancel-focus', sessionId: sessionId, token: token }).catch(function () {});
     };
   }, [sessionId, token, retrySerial]);
@@ -1703,14 +1707,14 @@ function ContextFocus(props) {
     // Keep native Send and its keyboard shortcut pointed away from legacy history.
     if (holdComposer) return holdLegacyComposer(props.composerBlocks, sessionId);
   }, [props.composerBlocks, sessionId, holdComposer]);
-  async function normalize(mount) {
+  async function normalize(mount, openArchived = false) {
     if (busy || activeEmbeddedNavigation || !mount || mount !== foregroundContextMount()
       || contextMigrations.get(sessionId)?.pending) return;
     contextMigrations.set(sessionId, { pending: true });
     store.notify();
     try {
-      await changeContext({ action: 'context-normalize', sessionId: sessionId }, mount);
-      contextMigrations.set(sessionId, { complete: true });
+      const result = await changeContext({ action: 'context-normalize', sessionId: sessionId }, mount, openArchived);
+      contextMigrations.set(sessionId, result.archived === true && !openArchived ? { archived: true } : { complete: true });
     } catch (error) {
       if (error.name === 'NavigationSupersededError') {
         if (foregroundContextMount() === mount) contextMigrations.set(sessionId, { complete: true });
@@ -1774,13 +1778,19 @@ function ContextFocus(props) {
   const migration = contextMigrations.get(sessionId);
   const migrationFailure = needsMigration && migration?.error;
   const focusFailure = error || (!needsMigration && state?.contextError);
+  let migrationNotice = null;
+  if (needsMigration && !migrationFailure) {
+    if (migration?.archived || migration?.complete) {
+      migrationNotice = h('div', { className: 'mtt-context-notice' }, h('button', {
+        type: 'button', className: 'mtt-btn mtt-btn-small', disabled: busy,
+        onClick: function () { return normalize(contextMount.current, migration.archived === true); },
+      }, t(migration.archived ? 'openArchivedContext' : 'openMigratedContext')));
+    } else {
+      migrationNotice = h('div', { className: 'mtt-context-notice', role: 'status' }, t('syncingContext'));
+    }
+  }
   return h('div', { ref: frame },
-    needsMigration && !migrationFailure
-      ? migration?.complete
-        ? h('div', { className: 'mtt-context-notice' }, h('button', { type: 'button', className: 'mtt-btn mtt-btn-small', disabled: busy,
-          onClick: function () { return normalize(contextMount.current); } }, t('openMigratedContext')))
-        : h('div', { className: 'mtt-context-notice', role: 'status' }, t('syncingContext'))
-      : null,
+    migrationNotice,
     migrationFailure || focusFailure
       ? h('div', { className: 'mtt-context-error' },
         h(ErrorChip, { error: migrationFailure || focusFailure }),
@@ -5414,9 +5424,11 @@ const I18N = {
     navigationBusy: 'Switching answers. Please wait before making another change.',
     navigationSuperseded: 'The conversation changed before this branch could open. Find it in Versions.',
     navigationTimeout: 'DSH did not list this branch in time. Find it in Versions.',
-    retryNavigation: 'Retry organizing versions',
+    retryNavigation: 'Retry opening version',
     navigationRetryUnavailable: 'This navigation job is no longer available. Refresh the conversation and try again.',
     openMigratedContext: 'Open synced conversation',
+    openArchivedContext: 'Unarchive and open',
+    destinationArchived: 'That version is archived. You can open it from the version tree.',
     checkingContext: 'Checking conversation context…',
     syncingContext: 'Syncing old conversation…',
     retrySync: 'Retry sync',
@@ -5526,9 +5538,11 @@ const I18N = {
     navigationBusy: '正在切换回答，请稍后再试。',
     navigationSuperseded: '打开分支前已切换会话，可在版本树里找到这个分支。',
     navigationTimeout: 'DSH 未及时列出新分支，可在版本树里找到它。',
-    retryNavigation: '重试整理版本',
+    retryNavigation: '重试打开版本',
     navigationRetryUnavailable: '这次导航任务已不存在，请刷新会话后重试。',
     openMigratedContext: '打开同步后的会话',
+    openArchivedContext: '取消归档并打开',
+    destinationArchived: '该版本已归档，可以在版本树中打开。',
     checkingContext: '正在检查会话上下文…',
     syncingContext: '正在同步旧会话…',
     retrySync: '重试同步',

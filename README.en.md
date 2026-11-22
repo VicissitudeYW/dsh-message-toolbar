@@ -45,7 +45,9 @@ Restart DSH after installing. The toolbar appears below your messages.
 
 ## FAQ
 
-**How do I continue a conversation changed with an older toolbar?** Open it as usual. The toolbar syncs your selected answers and message changes, then opens the updated version. The original stays available, and syncing does not call a model. Choose **Retry sync** if syncing fails.
+**How do I continue a conversation changed with an older toolbar?** Open it as usual. The toolbar syncs your selected answers and message changes while keeping the original. If the synced version is archived, choose **Unarchive and open**. Choose **Retry sync** if syncing fails.
+
+**Does regenerating or switching answers archive my chat?** Starting in `1.11.3`, the toolbar leaves archiving to you. DSH may show each version in the sidebar. You can switch versions or reopen an archived version from the version tree.
 
 For bugs and suggestions, open an [issue](https://github.com/VicissitudeYW/dsh-message-toolbar/issues).
 

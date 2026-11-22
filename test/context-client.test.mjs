@@ -73,7 +73,7 @@ test('failed focus can be retried from the destination composer', async () => {
     return jsonResponse({ ok: true });
   };
   h.render(h.ContextFocus, { sessionId: 'target' }); await flush();
-  const retry = button(h.render(h.ContextFocus, { sessionId: 'target' }), 'Retry organizing versions');
+  const retry = button(h.render(h.ContextFocus, { sessionId: 'target' }), 'Retry opening version');
   assert.ok(retry);
   await retry.props.onClick();
   await flush(); h.render(h.ContextFocus, { sessionId: 'target' }); await flush();
@@ -120,6 +120,30 @@ test('opening a legacy session automatically starts migration and keeps a retry 
   assert.ok(textOf(byClass(tree, 'mtt-context-error')[0])
     .includes('legacy history needs recovery'));
   assert.ok(button(tree, 'Retry sync'));
+});
+
+test('automatic legacy sync leaves an archived copy untouched until the reader opens it', async () => {
+  const h = setup({ needsContextMigration: true });
+  h.window.fetch = async (_url, init) => {
+    if (!init?.body) return jsonResponse(state({ needsContextMigration: true }));
+    const body = JSON.parse(init.body);
+    h.sent.push(body);
+    if (body.action === 'context-normalize') {
+      return jsonResponse({ sessionId: 'target', navigationToken: 'legacy-token', archived: true });
+    }
+    return jsonResponse({ ok: true });
+  };
+
+  h.render(h.ContextFocus, { sessionId: 'source' });
+  await flush();
+  assert.deepEqual(h.opened, []);
+  assert.equal(h.sent.some(body => body.action === 'activate'), false);
+  const notice = h.render(h.ContextFocus, { sessionId: 'source' });
+  const reopen = button(notice, 'Unarchive and open');
+  assert.ok(reopen);
+  await reopen.props.onClick();
+  assert.deepEqual(h.sent.filter(body => body.action === 'activate').map(body => body.sessionId), ['target']);
+  assert.deepEqual(h.opened, ['target']);
 });
 
 function composerBlocks() {
@@ -274,4 +298,24 @@ test('deleting a version card uses the host navigation token and waits for targe
   assert.deepEqual(h.opened, ['target']);
   assert.equal(h.sent.filter(body => body.action === 'prepare-focus').length, 0);
   assert.equal(h.sent.some(body => body.action === 'focus'), false);
+});
+
+test('deleting a version does not unarchive the destination when its archive status changed', async () => {
+  const h = setup({ versions: [
+    { sessionId: 'source', parentSessionId: 'target', operation: 'retry', targetTurn: 1, turns: [{ turn: 1 }], current: true },
+    { sessionId: 'target', turns: [{ turn: 1 }] },
+  ] });
+  h.window.fetch = async (_url, init) => {
+    if (!init?.body) return jsonResponse(state());
+    const body = JSON.parse(init.body); h.sent.push(body);
+    if (body.action === 'delete-version') {
+      return jsonResponse({ sessionId: 'target', archived: true, navigationToken: 'token' });
+    }
+    return jsonResponse({ ok: true });
+  };
+  const current = byClass(h.render(h.VersionsView, { sessionId: 'source' }), 'mtt-node-current');
+  await button(current, 'Delete this answer card').props.onClick();
+  assert.equal(h.sent.some(body => body.action === 'activate'), false);
+  assert.equal(h.sent.some(body => body.action === 'cancel-focus' && body.token === 'token'), true);
+  assert.deepEqual(h.opened, []);
 });

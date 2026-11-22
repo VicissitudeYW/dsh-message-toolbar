@@ -59,15 +59,15 @@ The retired mutation endpoints reject stale clients with a restart/update error.
 
 ## Navigation and version ownership
 
-A context operation prepares a durable `{ token, root, source, target, completed, archived }` navigation job. The client activates an archived target through public `workspaceRegistry.unarchiveSession`, waits for the session list, then calls `uiWorkspace.openSession`. Missing APIs, activation failure and the 15-second navigation timeout are visible errors.
+A context operation prepares a durable `{ token, root, source, target, completed, archived }` navigation job. The client waits for the session list, then calls `uiWorkspace.openSession`. Opening an explicitly selected archived target first calls the public `workspaceRegistry.unarchiveSession` for that session. If automatic migration finds an archived copy, the composer offers an explicit reopen action.
 
-Only after the target's `conversation.composer.dock` component mounts does it send `focus` with that token. This also works when deletion left an empty transcript. Focus unarchives the target and archives other toolbar-owned family members. Archiving a still-visible source would clear DSH's main pane, so creation and navigation preparation never archive the source. A running member that refuses archival is left visible.
+The target's `conversation.composer.dock` component acknowledges the handoff with `focus` after it mounts, even when deletion left an empty transcript. Completion and cancellation only update pending navigation state. No toolbar action submits a new archive request to DSH.
 
-Navigation serials discard obsolete client completions. Per-family host locks serialize focus and preparation; a newer handoff cannot overtake an archive already in progress. Tokens reject superseded focus requests. Pending jobs are exposed by GET so reload can finish a handoff. Failed focus is shown in the composer, not swallowed.
+Navigation serials discard obsolete client completions. Per-family host locks serialize handoff preparation, completion and cancellation. Tokens reject superseded focus requests. GET exposes pending jobs so reload can complete a handoff. The client shows activation failures and navigation errors, including the 15-second timeout.
 
-Native DSH forks/subagents sharing `parentSession` are separate conversations unless they have a recognized own toolbar marker. Family consolidation never archives those unrelated sessions. Deleting the currently open version marks it deleted and prepares navigation to its parent; archival waits for target mount. Deleting another version focuses the still-open source.
+Native DSH forks and subagents sharing `parentSession` remain separate conversations unless they have a recognized toolbar marker. Deleting the open version returns to its parent when available, or to another available version. If there is no other openable version, the deletion waits for the reader to open one. Deleting another version leaves the current conversation open.
 
-Branches increase session storage. Archiving and deleting a version in plugin UI do not physically erase its log.
+Branches are native sessions and may appear separately in the DSH sidebar. Deleting or restoring a version card changes its availability in the toolbar and preserves the session log.
 
 ## HTTP contract
 
@@ -88,10 +88,11 @@ The plugin owns the same-origin `/message-toolbar` route.
 | `context-select` | `sessionId, turn, id`; resolves a live answer choice and prepares navigation, or materializes a legacy choice |
 | `context-normalize` | `sessionId`; materializes the current legacy selections without a model request |
 | `prepare-focus` | `sessionId, sourceSessionId`; validates same-family ownership and prepares a durable job |
-| `activate` | `sessionId`; publicly unarchives the target when necessary |
+| `activate` | `sessionId`. Reopens the selected archived session via the public workspace registry. |
 | `focus` | `sessionId, token`; commits the prepared handoff after target mount |
+| `cancel-focus` | `sessionId, token`. Cancels the prepared handoff. |
 | `delete-version` | `sessionId, sourceSessionId?`; flags a non-root version and prepares safe navigation |
-| `restore-version` | `sessionId`; clears its deleted flag and attempts activation |
+| `restore-version` | `sessionId`. Clears its deleted flag in the toolbar. |
 | `translate` | `sessionId, lang, eventSeq? / turn?, text?, model?, stream?, force?`; auxiliary LLM translation, cached independently of model history |
 | `translate-off` | `sessionId, turn`; cancels the task and hides the pair while retaining the translation cache |
 | `answer-source` | `sessionId, turn`; reads the current editor baseline, including legacy display state |

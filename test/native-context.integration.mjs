@@ -2,18 +2,21 @@
 // pass its resources/app.asar. All persistence and plugin state use a temp home.
 import assert from 'node:assert/strict';
 import { pathToFileURL } from 'node:url';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 const asar = process.argv[2];
 if (!asar) throw new Error('Pass the installed resources/app.asar path.');
-const root = await mkdtemp(join(tmpdir(), 'mtt-native-context-'));
+const tempParent = await realpath(tmpdir());
+const root = await realpath(await mkdtemp(join(tempParent, 'mtt-native-context-')));
+assert.equal(dirname(root), tempParent);
 process.env.USERPROFILE = root; process.env.HOME = root;
 const ids = ['cordis', 'dsh-llm', 'dsh-session', 'dsh-session-projection', 'dsh-system-prompt',
   'dsh-tools', 'dsh-tool-executor-native', 'dsh-agent', 'dsh-agent-loop', 'dsh-session-persistence-jsonl', 'dsh-session-query',
-  'dsh-token-meter', 'dsh-compaction-basic'];
-const [cordis, llm, sessions, projections, prompt, tools, executor, agents, loop, persistence, query, meter, compaction] =
+  'dsh-token-meter', 'dsh-compaction-basic', 'dsh-storage', 'dsh-storage-json', 'dsh-storage-domain', 'dsh-workspace'];
+const [cordis, llm, sessions, projections, prompt, tools, executor, agents, loop, persistence, query, meter, compaction,
+  storage, storageJson, storageDomain, workspace] =
   await Promise.all(ids.map(id => import(pathToFileURL(`${asar}/dsh/node_modules/@deepseek-ai/${id}/lib/index.js`))));
 const { apply } = await import('../lib/index.js');
 const store = await import('../lib/state-store.js');
@@ -67,32 +70,44 @@ async function post(body) {
   assert.equal(status, 200, JSON.stringify(result));
   return result;
 }
+async function focus(navigation) {
+  await post({ action: 'focus', sessionId: navigation.sessionId, token: navigation.navigationToken });
+  assert.deepEqual(ctx.workspaceRegistry.archivedSessionIds, ['manual-archive']);
+  assert.deepEqual(ctx.workspaceRegistry.pinnedSessionIds, ['source']);
+}
 async function branch(sessionId, operation, turn, text, extra = {}) {
   const result = await post({ action: 'context-branch', sessionId, operation, turn, ...(text === undefined ? {} : { text }), ...extra });
   const agent = ctx.agents.get(sessions.SessionId(result.sessionId));
   await agent.whenIdle();
+  await focus(result);
   return { ...result, agent };
 }
 try {
   for (const plugin of [llm.default, sessions.default, projections.default, prompt.default, tools.default, executor,
-    agents.default, loop.default, query.default, meter.default]) await ctx.plugin(plugin);
+    agents.default, loop.default, query.default, meter.default, storage.default]) await ctx.plugin(plugin);
   await ctx.plugin(persistence, { root: join(root, 'sessions'), compression: 'none' });
   await ctx.plugin(ScriptedCompaction, { auto: false });
+  await ctx.plugin(storageJson, { root: join(root, 'storage') });
+  await ctx.plugin(storageDomain, { backend: 'json' });
+  await ctx.plugin(workspace.default);
   ctx.provide('webServer', { register(route) { handler = route.handler; return () => {}; } });
-  const archivedSessionIds = [];
-  ctx.provide('workspaceRegistry', { archivedSessionIds, list() { return []; },
-    async archiveSession(id) { archivedSessionIds.push(id); },
-    async unarchiveSession(id) { const i = archivedSessionIds.indexOf(id); if (i >= 0) archivedSessionIds.splice(i, 1); },
-  });
+  const registry = ctx.workspaceRegistry;
+  const group = await registry.create(root, 'Toolbar integration test');
   ctx.llm.registerAdapter(['scripted'], new ScriptedModel());
   ctx.tools.register(tools.defineTool({ name: 'proof_read', description: 'read-only scripted proof', parameters: {},
     output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
     async execute() { return 'TOOL-RESULT'; } }));
   apply(ctx);
+  await ctx.agents.create({ sessionId: sessions.SessionId('manual-archive'), meta: { cwd: root }, agentOptions: route });
+  await group.attachSession(sessions.SessionId('manual-archive'));
+  await registry.archiveSession(sessions.SessionId('manual-archive'));
   const source = await ctx.agents.create({ sessionId: sessions.SessionId('source'), meta: { cwd: root }, agentOptions: route });
+  await group.attachSession(sessions.SessionId('source'));
+  await registry.pinSession(sessions.SessionId('source'));
   await ask(source.agent, 'PREFIX'); await ask(source.agent, 'TARGET'); await ask(source.agent, 'OLD-FOLLOWUP');
   const sourceEvents = source.agent.session.snapshotEvents();
   const retry = await branch('source', 'retry', 2, undefined, { model: { provider: 'scripted', model: 'temporary' } });
+  assert.ok(group.sessionIds.includes(retry.sessionId));
   assert.deepEqual(texts(requests.at(-1)), ['PREFIX', 'ANSWER-1', 'TARGET']);
   assert.equal(requests.at(-1).model, 'temporary');
   await ask(retry.agent, 'NEW-FOLLOWUP');
@@ -103,6 +118,7 @@ try {
   const originalChoice = retryState.contextChoices['2'].items.find(item => item.preview === 'ANSWER-2');
   const picked = await post({ action: 'context-select', sessionId: retry.sessionId, turn: 2, id: originalChoice.id });
   assert.equal(picked.sessionId, 'source');
+  await focus(picked);
   await ask(source.agent, 'SOURCE-FOLLOWUP');
   assert.deepEqual(texts(requests.at(-1)), ['PREFIX', 'ANSWER-1', 'TARGET', 'ANSWER-2', 'OLD-FOLLOWUP', 'ANSWER-3', 'SOURCE-FOLLOWUP']);
   const beforeSave = requests.length;
@@ -119,6 +135,10 @@ try {
   const noQuestion = await branch('source', 'delete-question', 2);
   await ask(noQuestion.agent, 'CHECK-QUESTION-DELETE');
   assert.deepEqual(texts(requests.at(-1)), ['PREFIX', 'ANSWER-1', 'CHECK-QUESTION-DELETE']);
+  const removedCard = await post({ action: 'delete-version', sessionId: noQuestion.sessionId });
+  assert.equal(removedCard.sessionId, 'source');
+  await focus(removedCard);
+  assert.ok(group.sessionIds.includes(noQuestion.sessionId));
   assert.deepEqual(source.agent.session.snapshotEvents().slice(0, sourceEvents.length), sourceEvents);
   const native = await ctx.agents.create({ sessionId: sessions.SessionId('tool-source'), meta: { cwd: root }, agentOptions: route });
   await ask(native.agent, 'TOOL-WORK');
@@ -142,6 +162,16 @@ try {
   store.recordRun('legacy', 1, 3);
   store.setPromptOverride('legacy', 1, 'EDITED-LEGACY', []);
   const migrated = await post({ action: 'context-normalize', sessionId: 'legacy' });
+  await focus(migrated);
+  await registry.archiveSession(migrated.sessionId);
+  const migratedAgain = await post({ action: 'context-normalize', sessionId: 'legacy' });
+  assert.equal(migratedAgain.reusedMigration, true);
+  assert.equal(migratedAgain.sessionId, migrated.sessionId);
+  assert.equal(migratedAgain.archived, true);
+  assert.deepEqual(registry.archivedSessionIds, ['manual-archive', migrated.sessionId]);
+  const activated = await post({ action: 'activate', sessionId: migratedAgain.sessionId });
+  assert.equal(activated.unarchived, true);
+  await focus(migratedAgain);
   const migratedAgent = ctx.agents.get(sessions.SessionId(migrated.sessionId));
   await ask(migratedAgent, 'AFTER-MIGRATION');
   assert.equal(texts(requests.at(-1)).filter(text => text === 'EDITED-LEGACY').length, 1);
@@ -227,7 +257,7 @@ try {
     await ask(resumedLegacy.agent, 'AFTER-COLD-LEGACY-REPLAY');
     assert.deepEqual(texts(requests.at(-1)).slice(0, 3), ['EDITED-LEGACY', chosen, 'LATER-QUESTION']);
     assert.equal(texts(requests.at(-1)).includes(discarded), false);
-    console.log('PASS real plugin routes, native requests, branch continuations, edits, deletion, legacy migration, compaction, tools, model restore and cold reload');
+    console.log('PASS native requests, real workspace archive and pin preservation, branch continuations, edits, deletion, migration, compaction, model restore and cold reload');
   } finally { await cold.fiber.dispose(); }
 } finally {
   await ctx.fiber.dispose();
