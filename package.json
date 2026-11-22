@@ -1,6 +1,6 @@
 {
   "name": "dsh-message-toolbar",
-  "version": "1.12.1",
+  "version": "1.12.2",
   "description": "DSH message toolbar for in-session regeneration, model and answer switching, editing, deletion and bilingual translation",
   "license": "MIT",
   "repository": {
