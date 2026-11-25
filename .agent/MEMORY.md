@@ -1,6 +1,13 @@
 # Active Tasks
 
+- [x] 修复自动化任务运行失败、会话没有用户消息时，点击重新生成报“没有可操作的提问。”的问题。（2026-11-25；用户已批准；实现、验证与只读代码复核已完成）
+  - 只读定位：`contextTurns()` 仅将 `source.kind === 'user'` 识别为提问；`inSessionView()` 保留无人工提问轮次，但 `targetIn()` 对所有操作强制要求 `turn.user`，导致重答提前返回 400。后续排队确认与 pending 匹配同样依赖人工 user 消息，不能只删除入口判断。
+  - 完成验证：新增 19 项自动化回归均通过；全量 210 项中 209 通过、1 项 Windows 文件符号链接权限跳过。已安装 DSH 的临时 home + 脚本模型集成通过，包含无人工消息、pre-step 失败未产生 user/message、同轮人工 steer、版本选择与失败路径保留；构建、四个宿主模块语法检查和 diff 检查通过。详细记录见本地忽略的 `docs/AUTOMATIC-RETRY-2026-11-25.md`；未同步 profile、未重启日常 DSH、未发布，未验收云模型或 GUI。
+
 # 经验与交接
+
+- **自动化重答输入身份**：人工提问 `turn.user` 与轮次发起输入 `turn.input` 必须区分，自动化使用 `schedule` 来源，早期失败可从持久 inbox claim 恢复；同轮后续人工 steer 及其编辑不能覆盖原输入 ID、来源或内容，pending 和模型历史须以原输入关联。
+- **本轮测试设施更新**：补齐本地 host harness 的鉴权服务与同步 fixture 的构建脚本副本，修正旧失败/中止重答断言为既有“保留原路径”语义后，全量测试已可通过（仅权限跳过），取代下方接入时的失败基线；`test/`、`docs/` 仍本地忽略，隔离宿主集成使用脚本模型不等于真实 GUI/云模型验收。
 
 - **宿主/客户端边界**：`package.json` 的宿主入口是 `lib/index.js`；`plugin.client.js` 是由宿主提供 React 的客户端源，`scripts/build-client.mjs` 将其作为 IIFE 函数体包装到 `lib/client.js`。修改源后必须构建，不能手改生成文件或直接以 ESM 语法检查源文件。
 - **同会话回答路径**：`lib/index.js` 使用原 agent 的 `followup` 重答；`lib/in-session-context.js` 管理选中的回答及后续消息，并为 UI 和模型请求提供投影。保留 DSH 原始追加式日志；旧版版本树导航仅处理既有会话，不应让普通重答新建或归档会话。
